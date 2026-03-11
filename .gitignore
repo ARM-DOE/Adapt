@@ -1,0 +1,97 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Installer logs
+debug.log
+
+# Sphinx documentation
+docs/build/
+docs/_build/
+docs/.sphinx/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# VS Code
+.vscode/
+
+# Mac
+.DS_Store
+
+# Output and database files
+cells_output.parquet
+cells_statistics.db
+*.sqlite
+*.db
+*.h5
+*.nc
+*.log
+*.tmp
+*.bak
+
+# Output directories
+/tmp/
+/output/
+outputs/
+results/
+
+# Ignore user config overrides
+scripts/user_config.py
+
+# ignore md, txt
+*.md
+*.txt
+
+# Ignore large data
+data/
+*.tar.gz
+*.zip
+*.gz
+*.bz2
+*.xz

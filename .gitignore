@@ -95,3 +95,7 @@ data/
 *.gz
 *.bz2
 *.xz
+
+# ignore hidden files but not gitignore
+.*
+!.gitignore

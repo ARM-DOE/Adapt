@@ -3,11 +3,21 @@
 The executor runs a simple topological loop: nodes whose dependencies have
 all completed are eligible to run. This single-threaded executor is the
 reference implementation. Future steps may add parallel execution.
+
+Contract enforcement
+--------------------
+If a module declares ``input_contracts`` or ``output_contracts``, the
+executor calls each validator automatically before and after ``run()``.
+Validators raise ``ContractViolation`` on failure; the exception propagates
+up to the caller (e.g. ``RadarProcessor``) which handles it.
 """
 
+import logging
 from typing import List, Set
 
 from adapt.graph.node import Node
+
+logger = logging.getLogger(__name__)
 
 
 class GraphExecutor:
@@ -73,10 +83,22 @@ class GraphExecutor:
                 if not ready:
                     continue
 
+                # Validate inputs declared by the module
+                for key, validator in (node.module.input_contracts or {}).items():
+                    if key in context:
+                        validator(context[key])
+
                 outputs = node.module.run(context)
+
+                # Validate outputs declared by the module
                 if outputs:
+                    for key, validator in (node.module.output_contracts or {}).items():
+                        if key in outputs:
+                            validator(outputs[key])
                     context.update(outputs)
+
                 completed.add(node.name)
+                logger.debug("Completed node: %s", node.name)
                 progress_made = True
 
             if not progress_made and len(completed) < len(self.nodes):

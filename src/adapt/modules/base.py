@@ -10,7 +10,7 @@ Step 6 of the refactor. BaseModule is the target interface definition.
 """
 
 from abc import ABC, abstractmethod
-from typing import ClassVar, List
+from typing import ClassVar, Dict, List, Optional
 
 
 class BaseModule(ABC):
@@ -20,26 +20,34 @@ class BaseModule(ABC):
     - ``name``: unique identifier used in the execution graph
     - ``inputs``: list of data keys this module reads from context
     - ``outputs``: list of data keys this module writes to context
+    - ``input_contracts``: optional {key: callable} validators run before run()
+    - ``output_contracts``: optional {key: callable} validators run after run()
 
     The graph engine matches ``outputs`` of upstream modules to ``inputs``
     of downstream modules to resolve execution order automatically.
+    Contract callables are invoked by GraphExecutor automatically — modules
+    do not need to call them manually.
 
     Example::
 
         class DetectModule(BaseModule):
             name = "detect"
-            inputs = ["grid_volume"]
-            outputs = ["storm_cells"]
+            inputs = ["grid_ds_2d"]
+            outputs = ["segmented_ds"]
+            input_contracts  = {"grid_ds_2d": assert_gridded}
+            output_contracts = {"segmented_ds": assert_segmented}
 
             def run(self, context):
-                grid = context["grid_volume"]
+                grid = context["grid_ds_2d"]
                 cells = self._segmenter.segment(grid)
-                return {"storm_cells": cells}
+                return {"segmented_ds": cells}
     """
 
     name: ClassVar[str] = ""
     inputs: ClassVar[List[str]] = []
     outputs: ClassVar[List[str]] = []
+    input_contracts:  ClassVar[Dict[str, object]] = {}
+    output_contracts: ClassVar[Dict[str, object]] = {}
 
     @abstractmethod
     def run(self, context: dict) -> dict:

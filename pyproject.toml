@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adapt"
+version = "0.2.0"
+description = "Adaptive Radar Data Processing Platform - Modular NEXRAD analysis for storm cell detection and motion projection"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "Bhupendra Raut", email = "raut2@llnl.gov"},
+]
+keywords = ["radar", "NEXRAD", "weather", "cell-detection", "optical-flow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "numpy",
+    "xarray",
+    "pandas",
+    "scipy",
+    "scikit-image",
+    "matplotlib",
+    "h5py",
+    "netCDF4",
+    "tqdm",
+    "pydantic>=2.0",
+    "arm_pyart",
+    "opencv-python",
+    "nexradaws",
+    "cartopy>=0.21",
+    "contextily",
+    "pyproj",
+    "pyarrow",
+]
+
+[project.urls]
+Homepage = "https://github.com/RBhupi/adapt"
+Repository = "https://github.com/RBhupi/adapt.git"
+Issues = "https://github.com/RBhupi/adapt/issues"
+
+[project.scripts]
+adapt = "adapt.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"adapt.data" = ["user_config.py"]
+"adapt.schemas" = ["*.sql"]
+"adapt.config" = ["*.yaml"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "xarray",
+    "numpy",
+    "arm_pyart",
+]
+
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme>=1.0",
+    "sphinx-autodoc-typehints",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+minversion = "7.0"
+
+markers = [
+    "unit: fast unit tests (no IO)",
+    "pipeline: pipeline tests with mocks",
+    "integration: tests requiring real or on-disk data",
+    "slow: long-running tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/adapt"]
+
+[tool.coverage.report]
+ignore_errors = true
+precision = 2

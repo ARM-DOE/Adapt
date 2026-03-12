@@ -482,24 +482,6 @@ class RadarCellProjector:
             kernel = np.ones((3, 3), dtype=np.uint8)
             return binary_dilation(label_mask, structure=kernel).astype(np.uint8)
 
-    def _apply_closing(self, labels_proj):
-        """Apply closing."""
-        from scipy.ndimage import binary_closing
-
-        labels_closed = labels_proj.copy()
-        unique_labels = np.unique(labels_proj[~np.isnan(labels_proj)])
-
-        for label in unique_labels:
-            if label <= 0:
-                continue
-
-            label_mask = (labels_proj == label) & ~np.isnan(labels_proj)
-            kernel = np.ones((3, 3), dtype=np.uint8)
-            closed = binary_closing(label_mask.astype(np.uint8), structure=kernel)
-            labels_closed[closed > 0] = label
-
-        return labels_closed
-
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +490,11 @@ class RadarCellProjector:
 
 from adapt.modules.base import BaseModule
 from adapt.controller.module_registry import registry
+from adapt.contracts import assert_segmented
+
+
+def _check_segmented_ds(ds):
+    assert_segmented(ds, "cell_labels")
 
 
 class ProjectionModule(BaseModule):
@@ -535,6 +522,10 @@ class ProjectionModule(BaseModule):
     name = "projection"
     inputs = ["segmented_ds", "nexrad_file", "config"]
     outputs = ["projected_ds"]
+    input_contracts = {"segmented_ds": _check_segmented_ds}
+    # No output_contracts: projected_ds only carries flow fields when 2+ frames
+    # have been seen. Declaring assert_projected unconditionally would raise on
+    # the very first file. Consumers should check for "heading_x" presence.
 
     def __init__(self) -> None:
         self._projector = None

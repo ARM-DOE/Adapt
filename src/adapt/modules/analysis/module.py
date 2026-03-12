@@ -243,10 +243,6 @@ class RadarCellAnalyzer:
             return pd.DataFrame(columns=["cell_label", "cell_area_sqkm", "time"])
         return df
 
-    def _find_nearest_z(self, ds, z_level, z_name="z"):
-        """Find index of nearest z-level."""
-        return int(np.argmin(np.abs(ds[z_name].values - z_level)))
-
     def _pixel_area_km2(self, ds):
         """Compute pixel area in km2."""
         dx = float(np.abs(ds.x[1] - ds.x[0]))
@@ -510,8 +506,15 @@ class RadarCellAnalyzer:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
+from datetime import timezone as _tz
 from adapt.modules.base import BaseModule
 from adapt.controller.module_registry import registry
+from adapt.contracts import assert_analysis_output
+from adapt.repository.writer import RepositoryWriter
+
+
+def _check_cell_stats(df):
+    assert_analysis_output(df)
 
 
 class AnalysisModule(BaseModule):
@@ -541,9 +544,11 @@ class AnalysisModule(BaseModule):
     name = "analysis"
     inputs = ["projected_ds", "config", "scan_time"]
     outputs = ["cell_stats"]
+    output_contracts = {"cell_stats": _check_cell_stats}
 
     def __init__(self) -> None:
         self._analyzer = None
+        self._writer: RepositoryWriter | None = None
 
     def run(self, context: dict) -> dict:
         config = context["config"]
@@ -558,13 +563,11 @@ class AnalysisModule(BaseModule):
         df_cells = self._analyzer.extract(ds_2d, z_level=z_level)
 
         if repository is not None and not df_cells.empty and scan_time is not None:
-            from adapt.repository.writer import RepositoryWriter
-            from datetime import timezone
+            if self._writer is None:
+                self._writer = RepositoryWriter(repository)
             if scan_time.tzinfo is None:
-                import datetime as _dt
-                scan_time = scan_time.replace(tzinfo=_dt.timezone.utc)
-            writer = RepositoryWriter(repository)
-            writer.write_analysis(
+                scan_time = scan_time.replace(tzinfo=_tz.utc)
+            self._writer.write_analysis(
                 df=df_cells,
                 scan_time=scan_time,
                 producer=self.name,

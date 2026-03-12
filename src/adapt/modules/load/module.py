@@ -147,8 +147,7 @@ class RadarDataLoader:
             filepath = str(filepath)
             
             # Validate file exists
-            from pathlib import Path as PathlibPath
-            if not PathlibPath(filepath).exists():
+            if not Path(filepath).exists():
                 logger.error("Radar file not found: %s", filepath)
                 return None
             
@@ -362,8 +361,16 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 import numpy as np
+import xarray as _xr
+from datetime import datetime as _dt, timezone as _tz
 from adapt.modules.base import BaseModule
 from adapt.controller.module_registry import registry
+from adapt.contracts import assert_gridded
+from adapt.schemas.directories import get_netcdf_path
+
+
+def _check_grid_ds_2d(ds):
+    assert_gridded(ds, "reflectivity")
 
 
 class LoadModule(BaseModule):
@@ -394,6 +401,7 @@ class LoadModule(BaseModule):
     name = "load"
     inputs = ["nexrad_file", "config"]
     outputs = ["grid_ds", "grid_ds_2d", "scan_time"]
+    output_contracts = {"grid_ds_2d": _check_grid_ds_2d}
 
     def __init__(self) -> None:
         self._loader = None
@@ -406,13 +414,8 @@ class LoadModule(BaseModule):
         if self._loader is None:
             self._loader = RadarDataLoader(config)
 
-        # Determine output directory for intermediate NetCDF
-        from adapt.schemas.directories import get_netcdf_path
-        from pathlib import Path as _Path
-        from datetime import datetime as _dt, timezone as _tz
-
         radar = config.downloader.radar
-        nc_filename = _Path(filepath).stem
+        nc_filename = Path(filepath).stem
         scan_time = _dt.now(_tz.utc)
         try:
             parts = nc_filename.split("_")
@@ -436,8 +439,7 @@ class LoadModule(BaseModule):
         time_name = config.global_.coord_names.time
         z_idx = int(np.argmin(np.abs(ds[z_name].values - z_level)))
 
-        import xarray as xr
-        ds_2d = xr.Dataset()
+        ds_2d = _xr.Dataset()
         for var_name in ds.data_vars:
             var = ds[var_name]
             if time_name in var.dims and z_name in var.dims:

@@ -326,6 +326,15 @@ class RadarCellSegmenter:
 
 from adapt.modules.base import BaseModule
 from adapt.controller.module_registry import registry
+from adapt.contracts import assert_gridded, assert_segmented
+
+
+def _check_grid_ds_2d(ds):
+    assert_gridded(ds, "reflectivity")
+
+
+def _check_segmented_ds(ds):
+    assert_segmented(ds, "cell_labels")
 
 
 class DetectModule(BaseModule):
@@ -352,6 +361,8 @@ class DetectModule(BaseModule):
     name = "detect"
     inputs = ["grid_ds_2d", "config"]
     outputs = ["segmented_ds", "num_cells"]
+    input_contracts  = {"grid_ds_2d": _check_grid_ds_2d}
+    output_contracts = {"segmented_ds": _check_segmented_ds}
 
     def __init__(self) -> None:
         self._segmenter = None

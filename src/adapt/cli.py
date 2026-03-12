@@ -307,6 +307,11 @@ def _build_dashboard_parser(sub: argparse.ArgumentParser) -> None:
 
 def _dashboard_cmd(args: argparse.Namespace) -> None:
     """Launch the Adapt GUI dashboard."""
+    import os
+    try:
+        os.getcwd()
+    except FileNotFoundError:
+        os.chdir(os.path.expanduser("~"))
     from adapt.gui.dashboard import AdaptDashboard
     app = AdaptDashboard(repo=args.repo)
     app.mainloop()

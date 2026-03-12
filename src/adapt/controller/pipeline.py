@@ -14,8 +14,12 @@ Usage::
     cells_df = result["cell_stats"]
 """
 
+import importlib
 import logging
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
+
+import yaml
 
 from adapt.controller.module_registry import registry
 from adapt.graph.graph_builder import GraphBuilder
@@ -27,13 +31,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DEFAULTS_YAML = Path(__file__).parent.parent / "config" / "defaults.yaml"
+
 
 def _ensure_modules_registered() -> None:
-    """Import module files so their registry.register() calls run."""
-    import adapt.modules.load.module      # noqa: F401 — registers LoadModule
-    import adapt.modules.detect.module    # noqa: F401 — registers DetectModule
-    import adapt.modules.projection.module  # noqa: F401 — registers ProjectionModule
-    import adapt.modules.analysis.module  # noqa: F401 — registers AnalysisModule
+    """Import module files listed in config/defaults.yaml.
+
+    Each entry under ``pipeline.modules`` is a Python module path.
+    Importing it triggers the ``registry.register()`` call at module level.
+    To add a new module: add one line to defaults.yaml — no Python edits needed.
+    """
+    try:
+        with open(_DEFAULTS_YAML) as f:
+            cfg = yaml.safe_load(f)
+        module_paths = cfg.get("pipeline", {}).get("modules", [])
+    except Exception as e:
+        logger.warning("Could not read defaults.yaml (%s); falling back to hardcoded list", e)
+        module_paths = [
+            "adapt.modules.load.module",
+            "adapt.modules.detect.module",
+            "adapt.modules.projection.module",
+            "adapt.modules.analysis.module",
+        ]
+
+    for path in module_paths:
+        try:
+            importlib.import_module(path)
+            logger.debug("Registered module from: %s", path)
+        except Exception as e:
+            logger.error("Failed to import module '%s': %s", path, e)
 
 
 class NexradPipeline:

@@ -24,15 +24,18 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
 # ── PROJ data path fix (must be before contextily/rasterio) ──────────────────
+# Force-set PROJ paths to the active environment's proj.db.
+# Cannot use setdefault: PROJ_DATA may already point to a different conda env.
 try:
     import pyproj as _pyproj
     _pd = _pyproj.datadir.get_data_dir()
-    os.environ.setdefault('PROJ_DATA', _pd)
-    os.environ.setdefault('PROJ_LIB',  _pd)
+    os.environ['PROJ_DATA'] = _pd
+    os.environ['PROJ_LIB']  = _pd
 except Exception:
     pass
 
@@ -63,15 +66,10 @@ except ImportError:
     ctx = None
     HAS_CTX = False
 
-try:
-    import pyart
-    if HAS_MPL:
-        matplotlib.use('TkAgg')
-    HAS_PYART = True
-    REFL_CMAP = 'ChaseSpectral'
-except ImportError:
-    HAS_PYART = False
-    REFL_CMAP = 'RdYlBu_r'
+import cmweather.cm  # registers ChaseSpectral and other radar colormaps
+if HAS_MPL:
+    matplotlib.use('TkAgg')
+REFL_CMAP = 'ChaseSpectral'
 
 try:
     import numpy as np
@@ -307,16 +305,23 @@ class AdaptDashboard(tk.Tk):
         # Auto-refresh live tracking
         self._last_rendered_nc = None   # path of last auto-rendered NC file
 
+        # Status bar state
+        self._status_base      = 'Idle'
+        self._last_scan_dt     = None   # datetime of last rendered scan
+        self._next_refresh_at  = time.time() + POLL_MS / 1000
+
         # Plot variable controls (set by _build_scan_tab)
-        self._plot_var  = None   # tk.StringVar set in _build_scan_tab
-        self._plot_vmin = None
-        self._plot_vmax = None
+        self._plot_var    = None   # tk.StringVar set in _build_scan_tab
+        self._plot_vmin   = None
+        self._plot_vmax   = None
+        self._max_proj_var = None  # tk.IntVar: 0 = all available proj steps
 
         self._build_ui()
         self.protocol('WM_DELETE_WINDOW', self._on_close)
 
-        # Start auto-refresh regardless of whether pipeline was launched here
+        # Start auto-refresh and status countdown ticker
         self.after(500, self._schedule_refresh)
+        self.after(1000, self._status_tick)
 
         if repo:
             self.after(200, self._on_repo_changed)
@@ -436,6 +441,13 @@ class AdaptDashboard(tk.Tk):
         ttk.Spinbox(ctrl2, from_=100, to=5000, increment=100,
                     textvariable=self._loop_dt_var,
                     width=5, font=('Courier', 10)).pack(side='left', padx=(2, 8))
+
+        ttk.Label(ctrl2, text='Proj steps:', font=('', 10)).pack(side='left', padx=(8, 0))
+        self._max_proj_var = tk.IntVar(value=0)
+        ttk.Spinbox(ctrl2, from_=0, to=20, textvariable=self._max_proj_var,
+                    width=3, font=('Courier', 10)).pack(side='left', padx=(2, 4))
+        ttk.Label(ctrl2, text='(0=all)', font=('', 9),
+                  foreground='gray').pack(side='left', padx=(0, 8))
 
         ttk.Button(ctrl2, text='Show Latest',
                    command=self._show_latest).pack(side='left', padx=2)
@@ -694,6 +706,17 @@ class AdaptDashboard(tk.Tk):
         self._refresh_all()
         self.after(POLL_MS, self._schedule_refresh)
 
+    def _status_tick(self):
+        """Update status bar every second: scan time + countdown to next check."""
+        if not self._refresh_active:
+            return
+        secs = max(0, int(self._next_refresh_at - time.time()))
+        scan_str = (self._last_scan_dt.strftime('%H:%M:%S UTC')
+                    if self._last_scan_dt else '—')
+        self.status_var.set(
+            f'{self._status_base}  |  Last scan: {scan_str}  |  Next check: {secs}s')
+        self.after(1000, self._status_tick)
+
     def _refresh_all(self):
         repo  = self._repo_root.get().strip()
         radar = self._radar.get().strip().upper()
@@ -714,9 +737,8 @@ class AdaptDashboard(tk.Tk):
 
         running = _pipeline_running() or (self._proc and self._proc.poll() is None)
         state = 'Running' if running else ('Idle' if not all_nc else 'Done')
-        self.status_var.set(
-            f'{state}  |  Radar: {radar}  Scans: {len(all_nc)}'
-            f'  Updated: {datetime.now():%H:%M:%S}')
+        self._status_base     = f'{state}  |  Radar: {radar}  |  Scans: {len(all_nc)}'
+        self._next_refresh_at = time.time() + POLL_MS / 1000
 
         # ── Auto-update live canvas when a new NC file appears ────────────────
         if HAS_DATA and not self._nc_loop_running and all_nc:
@@ -876,9 +898,9 @@ class AdaptDashboard(tk.Tk):
         self._load_parquet(repo, radar)
         self._nc_loop_files   = nc_files
         self._nc_loop_index   = 0
-        self._nc_loop_running = True
         self.btn_loop.config(text='Stop Loop')
         self._clear_canvas()
+        self._nc_loop_running = True   # set AFTER clear so _clear_canvas doesn't kill it
         self._render_nc(nc_files[0])
         self._nc_loop_index = 1
         dt = max(100, self._loop_dt_var.get())
@@ -976,6 +998,7 @@ class AdaptDashboard(tk.Tk):
             else tv[0]  if tv is not None
             else pd.Timestamp.now())
         tstr = ts.strftime('%Y-%m-%d %H:%M:%S UTC')
+        self._last_scan_dt = ts.to_pydatetime()
 
         x_km = ds['x'].values / 1000.0
         y_km = ds['y'].values / 1000.0
@@ -1001,7 +1024,7 @@ class AdaptDashboard(tk.Tk):
         var_lbl  = _VAR_LABELS.get(var_name, var_name)
 
         raw = ds[var_name].values.astype(float)
-        masked = np.ma.masked_where(np.isnan(raw), raw)
+        masked = np.ma.masked_where(np.isnan(raw) | (raw < vmin) | (raw > vmax), raw)
         cmap1 = copy.copy(plt.get_cmap(cmap_str))
         cmap1.set_bad(alpha=0)
 
@@ -1051,16 +1074,19 @@ class AdaptDashboard(tk.Tk):
             proj_da = ds['cell_projections']
             fo      = 'frame_offset'
             if fo in proj_da.dims:
-                n_frames = len(proj_da[fo])
-                for i in range(1, n_frames):
-                    # Fade older projections; all as dashed for clarity
+                n_frames   = len(proj_da[fo])
+                max_proj   = self._max_proj_var.get()
+                end_frame  = n_frames if max_proj == 0 else min(n_frames, max_proj + 1)
+                _ls_cycle  = ['dashed', 'dashdot', 'dotted']
+                for i in range(1, end_frame):
                     alpha = max(0.3, 1.0 - i / n_frames)
                     lw    = max(0.8, 1.8 - i * 0.2)
+                    ls    = _ls_cycle[(i - 1) % len(_ls_cycle)]
                     lp = proj_da.isel({fo: i}).values
                     for cid in np.unique(lp[~np.isnan(lp) & (lp > 0)]):
                         ax2.contour(x_grid, y_grid, (lp == cid).astype(float),
-                                    levels=[0.5], colors='#cc0000',
-                                    linewidths=lw, linestyles='dashed',
+                                    levels=[0.5], colors='#555555',
+                                    linewidths=lw, linestyles=ls,
                                     alpha=alpha, zorder=40)
 
         ax2.set_xlabel('X (km)'); ax2.set_ylabel('Y (km)')

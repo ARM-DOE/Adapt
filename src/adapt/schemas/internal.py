@@ -52,6 +52,7 @@ class InternalSegmenterConfig(AdaptBaseModel):
     max_cellsize_gridpoint: Optional[int]
     closing_kernel: tuple[int, int]
     filter_by_size: bool
+    h_maxima: float
 
 
 class InternalVarNamesConfig(AdaptBaseModel):

@@ -163,6 +163,7 @@ class RadarCellSegmenter:
         self.filter_by_size = config.segmenter.filter_by_size
         self.min_gridpoints = config.segmenter.min_cellsize_gridpoint
         self.max_gridpoints = config.segmenter.max_cellsize_gridpoint
+        self.h_maxima = config.segmenter.h_maxima
         
         # Variable names from global config
         self.refl_name = config.global_.var_names.reflectivity
@@ -302,7 +303,7 @@ class RadarCellSegmenter:
 
         closed_mask = closing(binary_mask, footprint_rectangle(kernel_size))
 
-        labels = _label_maxtree(closed_mask, field)
+        labels = _label_maxtree(closed_mask, field, h=self.h_maxima)
 
         # if there are any cells, filter and/or renumber
         if labels.max() > 0:

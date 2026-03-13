@@ -21,6 +21,7 @@ class UserSegmenterConfig(AdaptBaseModel):
     max_cellsize_gridpoint: Optional[int] = None
     closing_kernel: Optional[tuple[int, int]] = None
     filter_by_size: Optional[bool] = None
+    h_maxima: Optional[float] = None
 
     @field_validator("threshold", mode="before")
     @classmethod

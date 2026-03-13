@@ -55,6 +55,7 @@ class SegmenterConfig(AdaptBaseModel):
     max_cellsize_gridpoint: Optional[int] = Field(None, ge=1)
     closing_kernel: tuple[int, int] = (1, 1)
     filter_by_size: bool = True
+    h_maxima: float = Field(5.0, gt=0, description="h-maxima height for cell seeding (dBZ)")
     
     @field_validator("threshold", mode="before")
     @classmethod
@@ -105,7 +106,7 @@ class ProjectorConfig(AdaptBaseModel):
     """Cell projection configuration."""
     method: Literal["adapt_default"] = "adapt_default"
     max_time_interval_minutes: int = Field(30, ge=1)
-    max_projection_steps: int = Field(1, ge=1, le=10)  # OLD DEFAULT: was 1 not 5
+    max_projection_steps: int = Field(3, ge=1, le=10)  
     nan_fill_value: float = 0.0
     flow_params: FlowParamsConfig = Field(default_factory=FlowParamsConfig)
     min_motion_threshold: float = Field(0.5, ge=0)

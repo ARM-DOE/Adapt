@@ -24,6 +24,8 @@ import numpy as np
 import logging
 from typing import TYPE_CHECKING
 from scipy.ndimage import binary_closing, label
+from skimage.morphology import h_maxima
+from skimage.segmentation import watershed
 
 if TYPE_CHECKING:
     from adapt.schemas import InternalConfig
@@ -31,6 +33,36 @@ if TYPE_CHECKING:
 __all__ = ['RadarCellSegmenter']
 
 logger = logging.getLogger(__name__)
+
+
+def _label_maxtree(binary: np.ndarray, field: np.ndarray, h: float = 5.0) -> np.ndarray:
+    """Replace connected-component labeling: h-maxima seeding + watershed.
+
+    Identifies individual cells within a binary convection mask by seeding
+    each local intensity maximum (that rises at least `h` dBZ above its
+    surroundings) and growing watershed regions from those seeds.
+
+    Parameters
+    ----------
+    binary : np.ndarray (bool)
+        Closed binary convection mask (output of morphological closing).
+    field : np.ndarray (float)
+        Reflectivity values aligned with `binary`.
+    h : float
+        Minimum intensity rise above surroundings for a peak to seed a cell.
+
+    Returns
+    -------
+    np.ndarray (int32)
+        0 = background, 1..N = individual cell IDs.
+    """
+    fp = np.where(binary, field, 0.0)
+    peaks = h_maxima(fp, h=h)
+    seeds, n_seeds = label(peaks)          # label from scipy.ndimage
+    if n_seeds == 0:
+        return np.zeros(binary.shape, dtype=np.int32)
+    ws = watershed(-fp, seeds, mask=binary)
+    return np.where(binary, ws, 0).astype(np.int32)
 
 
 class RadarCellSegmenter:
@@ -228,11 +260,12 @@ class RadarCellSegmenter:
 
         binary_mask = refl > self.threshold
         labels = self._binary_to_labels(
-            binary_mask, 
-            self.kernel_size, 
-            self.filter_by_size, 
-            self.min_gridpoints, 
-            self.max_gridpoints
+            binary_mask,
+            refl,
+            self.kernel_size,
+            self.filter_by_size,
+            self.min_gridpoints,
+            self.max_gridpoints,
         )
 
         # Build attrs dict, excluding None values (NetCDF can't serialize None)
@@ -261,15 +294,15 @@ class RadarCellSegmenter:
 
         return ds_out
 
-    def _binary_to_labels(self, binary_mask: np.ndarray, kernel_size: tuple,
-                          filter_by_size: bool, min_gridpoints: int, max_gridpoints: int) -> np.ndarray:
-        """Morphology, label, filter."""
+    def _binary_to_labels(self, binary_mask: np.ndarray, field: np.ndarray,
+                          kernel_size: tuple, filter_by_size: bool,
+                          min_gridpoints: int, max_gridpoints: int) -> np.ndarray:
+        """Morphology, detect cells, filter."""
         from skimage.morphology import closing, footprint_rectangle
-        from skimage.measure import label
 
         closed_mask = closing(binary_mask, footprint_rectangle(kernel_size))
 
-        labels = label(closed_mask)
+        labels = _label_maxtree(closed_mask, field)
 
         # if there are any cells, filter and/or renumber
         if labels.max() > 0:

@@ -26,8 +26,8 @@ except ImportError:
     CONTEXTILY_AVAILABLE = False
 
 if TYPE_CHECKING:
-    from adapt.schemas import InternalConfig
-    from adapt.core import DataRepository
+    from adapt.configuration.schemas import InternalConfig
+    from adapt.persistence import DataRepository
 
 __all__ = ['RadarPlotter', 'PlotterThread', 'PlotConsumer']
 
@@ -767,7 +767,7 @@ class PlotterThread(threading.Thread):
             file_id = Path(seg_nc).stem.replace('_analysis', '').replace('_segmentation', '')
             
             # Use helper for consistent paths
-            from adapt.schemas.directories import get_plot_path
+            from adapt.configuration.schemas.directories import get_plot_path
             
             output_path = get_plot_path(
                 output_dirs=self.output_dirs,
@@ -833,7 +833,7 @@ class PlotConsumer(threading.Thread):
     Example usage::
 
         from adapt.visualization.plotter import PlotConsumer
-        from adapt.core import DataRepository
+        from adapt.persistence import DataRepository
 
         repo = DataRepository(run_id="abc123", base_dir="/data", radar="KDIX")
         stop_event = threading.Event()
@@ -899,7 +899,7 @@ class PlotConsumer(threading.Thread):
         self._processed_count = 0
 
         # Import ProductType here to avoid circular imports
-        from adapt.core import ProductType
+        from adapt.persistence import ProductType
         self._product_type = ProductType.ANALYSIS_NC
 
         logger.info(f"{name} initialized (poll_interval={poll_interval}s, output_dir={output_dir})")
@@ -1008,7 +1008,7 @@ class PlotConsumer(threading.Thread):
     def _print_table_stats(self):
         """Print latest cell statistics from repository."""
         try:
-            from adapt.core import ProductType
+            from adapt.persistence import ProductType
 
             # Get latest cells database
             cells_db = self.repository.get_latest(ProductType.CELLS_DB)

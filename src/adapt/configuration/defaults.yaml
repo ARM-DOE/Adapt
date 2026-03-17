@@ -1,0 +1,13 @@
+# Default NEXRAD pipeline module sequence.
+# Each entry is a Python module path. Importing the module triggers
+# registry.register() for the BaseModule subclass it contains.
+# Modules run in dependency order determined by the execution graph —
+# add entries here to extend the pipeline without editing Python code.
+
+pipeline:
+  modules:
+    - adapt.modules.ingest.module
+    - adapt.modules.detection.module
+    - adapt.modules.projection.module
+    - adapt.modules.analysis.module
+    - adapt.modules.tracking.module

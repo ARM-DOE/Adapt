@@ -99,3 +99,4 @@ data/
 # ignore hidden files but not gitignore
 .*
 !.gitignore
+__pycache__/

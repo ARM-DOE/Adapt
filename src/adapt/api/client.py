@@ -47,8 +47,8 @@ import duckdb
 import pandas as pd
 import xarray as xr
 
-from adapt.core.registry import RepositoryRegistry
-from adapt.core.radar_catalog import RadarCatalog
+from adapt.persistence.registry import RepositoryRegistry
+from adapt.persistence.catalog import RadarCatalog
 
 __all__ = ['DataClient']
 

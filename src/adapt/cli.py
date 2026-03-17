@@ -113,8 +113,8 @@ def _run_nexrad(args: argparse.Namespace) -> None:
     _check_single_instance()
     _write_pid()
 
-    from adapt.schemas import init_runtime_config
-    from adapt.pipeline.orchestrator import PipelineOrchestrator
+    from adapt.configuration.schemas import init_runtime_config
+    from adapt.runtime.orchestrator import PipelineOrchestrator
 
     config = init_runtime_config(args)
     orchestrator = PipelineOrchestrator(config)

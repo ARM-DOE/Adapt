@@ -29,7 +29,7 @@ from scipy.ndimage import center_of_mass
 from skimage.measure import regionprops
 
 if TYPE_CHECKING:
-    from adapt.schemas import InternalConfig
+    from adapt.configuration.schemas import InternalConfig
 
 __all__ = ['RadarCellAnalyzer']
 
@@ -130,7 +130,7 @@ class RadarCellAnalyzer:
         
         Examples
         --------
-        >>> from adapt.schemas import resolve_config, ParamConfig
+        >>> from adapt.configuration.schemas import resolve_config, ParamConfig
         >>> config = resolve_config(ParamConfig())
         >>> analyzer = RadarCellAnalyzer(config)
         """
@@ -508,9 +508,9 @@ class RadarCellAnalyzer:
 
 from datetime import timezone as _tz
 from adapt.modules.base import BaseModule
-from adapt.controller.module_registry import registry
-from adapt.contracts import assert_analysis_output
-from adapt.repository.writer import RepositoryWriter
+from adapt.execution.module_registry import registry
+from .contracts import assert_analysis_output
+from adapt.persistence.writer import RepositoryWriter
 
 
 def _check_cell_stats(df):

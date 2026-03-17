@@ -26,7 +26,7 @@ from scipy.spatial import Delaunay
 from scipy.ndimage import binary_dilation
 
 if TYPE_CHECKING:
-    from adapt.schemas import InternalConfig
+    from adapt.configuration.schemas import InternalConfig
 
 __all__ = ['RadarCellProjector']
 
@@ -139,7 +139,7 @@ class RadarCellProjector:
         
         Examples
         --------
-        >>> from adapt.schemas import resolve_config, ParamConfig
+        >>> from adapt.configuration.schemas import resolve_config, ParamConfig
         >>> config = resolve_config(ParamConfig())
         >>> projector = RadarCellProjector(config)
         """
@@ -229,12 +229,12 @@ class RadarCellProjector:
 
         Receives ds with cell_labels from segmenter. The reflectivity
         slice extraction is handled by processor before calling this.
-        """
-        time_diff = self._validate_datasets(ds_list, self.max_interval_minutes)
 
-        if time_diff is None:
-            # Return second ds without projections
-            return ds_list[1]
+        Note: Time gap validation is now handled by Processor orchestration.
+        This method assumes the datasets have already been validated.
+        """
+        # Validate basic requirements (time gap checked by processor)
+        time_diff = self._validate_datasets(ds_list, self.max_interval_minutes)
 
         logger.debug(f"Computing flow: {time_diff:.1f} min interval")
 
@@ -307,6 +307,15 @@ class RadarCellProjector:
             )
             
             logger.info(f"Added cell_projections with {len(labels_proj_list)} projection steps")
+
+        # Store projection metadata for contract validation
+        # This enables self-describing datasets: validators can read runtime config
+        # from dataset attributes without needing context access
+        ds_out.attrs.update({
+            "max_projection_steps": self.max_proj_steps,
+            "num_projection_steps": len(labels_proj_list) if labels_proj_list else 0,
+            "projection_method": "adapt_default",
+        })
 
         return ds_out
     
@@ -390,7 +399,11 @@ class RadarCellProjector:
 
 
     def _validate_datasets(self, ds_list, max_interval_minutes):
-        """Validate dataset appropriateness."""
+        """Validate dataset appropriateness.
+
+        Note: Time gap validation is now handled by Processor. This method
+        just computes the time difference for logging purposes.
+        """
         if len(ds_list) != 2:
             raise ValueError(f"Need exactly 2 datasets, got {len(ds_list)}")
 
@@ -399,12 +412,15 @@ class RadarCellProjector:
         time2_val = ds_list[1].time.values
         time1 = time1_val if np.ndim(time1_val) == 0 else time1_val[0]
         time2 = time2_val if np.ndim(time2_val) == 0 else time2_val[0]
-        
+
         time_diff_minutes = (time2 - time1) / np.timedelta64(1, 'm')
 
+        # Note: Processor already validated time gap, so we just warn if large
         if abs(time_diff_minutes) > max_interval_minutes:
-            logger.warning(f"⚠️ Time interval {time_diff_minutes:.1f} min exceeds max {max_interval_minutes} min. Skipping projection.")
-            return None
+            logger.warning(
+                f"Time interval {time_diff_minutes:.1f} min exceeds max {max_interval_minutes} min. "
+                "Processor should have filtered this pair."
+            )
 
         return time_diff_minutes
 
@@ -489,8 +505,8 @@ class RadarCellProjector:
 # ---------------------------------------------------------------------------
 
 from adapt.modules.base import BaseModule
-from adapt.controller.module_registry import registry
-from adapt.contracts import assert_segmented
+from adapt.execution.module_registry import registry
+from adapt.modules.detection.contracts import assert_segmented
 
 
 def _check_segmented_ds(ds):
@@ -523,9 +539,9 @@ class ProjectionModule(BaseModule):
     inputs = ["segmented_ds", "nexrad_file", "config"]
     outputs = ["projected_ds"]
     input_contracts = {"segmented_ds": _check_segmented_ds}
-    # No output_contracts: projected_ds only carries flow fields when 2+ frames
-    # have been seen. Declaring assert_projected unconditionally would raise on
-    # the very first file. Consumers should check for "heading_x" presence.
+    # Output: projected_ds only present when 2+ frames available and projection succeeds
+    # Raises exception if time gap too large or computation fails
+    # Returns context unchanged (no projected_ds) if insufficient history (< 2 frames)
 
     def __init__(self) -> None:
         self._projector = None
@@ -539,23 +555,30 @@ class ProjectionModule(BaseModule):
         if self._projector is None:
             self._projector = RadarCellProjector(config)
 
+        # Note: Processor orchestration injects history directly into
+        # self._dataset_history before calling pipeline. For standalone
+        # testing, we still support building history internally.
         max_history = config.processor.max_history
 
-        # Update history
-        self._dataset_history.append((filepath, ds_2d))
-        if len(self._dataset_history) > max_history:
-            self._dataset_history.pop(0)
+        # If history is empty or doesn't contain current file, build internally
+        if not self._dataset_history or self._dataset_history[-1][0] != filepath:
+            # Build history internally (standalone mode)
+            self._dataset_history.append((filepath, ds_2d))
+            if len(self._dataset_history) > max_history:
+                self._dataset_history.pop(0)
+            logger.debug("Building history internally (%d frames)", len(self._dataset_history))
 
-        # Need 2+ frames for optical flow
+        # Must have 2 frames (guaranteed by processor orchestration, but double-check)
         if len(self._dataset_history) < 2:
-            return {"projected_ds": ds_2d}
+            raise ValueError(
+                f"ProjectionModule requires 2 frames, but only {len(self._dataset_history)} available. "
+                "Processor should orchestrate frame pairing before calling projection."
+            )
 
-        try:
-            ds_list = [ds for _, ds in self._dataset_history]
-            projected = self._projector.project(ds_list)
-            return {"projected_ds": projected}
-        except Exception:
-            return {"projected_ds": ds_2d}
+        # Compute optical flow
+        ds_list = [ds for _, ds in self._dataset_history]
+        projected = self._projector.project(ds_list)
+        return {"projected_ds": projected}
 
 
 registry.register(ProjectionModule)

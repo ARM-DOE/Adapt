@@ -39,7 +39,7 @@ Example usage::
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -114,9 +114,57 @@ class DataClient:
         return self._radar_catalogs[radar]
     
     # =========================================================================
+    # Repository Validation
+    # =========================================================================
+
+    def is_initialized(self) -> bool:
+        """Check if repository is properly initialized.
+
+        Returns
+        -------
+        bool
+            True if repository has a valid registry database
+        """
+        registry_path = self.root_dir / "adapt_registry.db"
+        return registry_path.exists()
+
+    def get_repository_info(self) -> Dict[str, Any]:
+        """Get repository summary information.
+
+        Returns
+        -------
+        dict
+            Repository metadata including:
+            - path: str
+            - is_initialized: bool
+            - num_radars: int
+            - num_runs: int
+            - radars: list of str
+        """
+        if not self.is_initialized():
+            return {
+                'path': str(self.root_dir),
+                'is_initialized': False,
+                'num_radars': 0,
+                'num_runs': 0,
+                'radars': [],
+            }
+
+        radars = self.list_radars()
+        runs = self.list_runs()
+
+        return {
+            'path': str(self.root_dir),
+            'is_initialized': True,
+            'num_radars': len(radars),
+            'num_runs': len(runs),
+            'radars': radars,
+        }
+
+    # =========================================================================
     # Discovery Methods
     # =========================================================================
-    
+
     def list_runs(self, radar: Optional[str] = None) -> pd.DataFrame:
         """List all runs, optionally filtered by radar.
         
@@ -134,7 +182,7 @@ class DataClient:
     
     def list_radars(self) -> List[str]:
         """List all registered radars.
-        
+
         Returns
         -------
         list of str
@@ -142,6 +190,147 @@ class DataClient:
         """
         radars_df = self.registry.list_radars()
         return radars_df['radar'].tolist() if not radars_df.empty else []
+
+    def get_radar_info(self, radar: str) -> Dict[str, Any]:
+        """Get detailed information for a specific radar.
+
+        Parameters
+        ----------
+        radar : str
+            Radar ID
+
+        Returns
+        -------
+        dict
+            Radar metadata including:
+            - radar: str
+            - num_runs: int
+            - runs: list of dict (run_id, start_time, end_time, status, mode)
+            - date_range: dict (start, end) or None
+            - num_scans: int
+        """
+        if radar not in self.list_radars():
+            raise ValueError(f"Radar '{radar}' not found in repository")
+
+        # Get runs for this radar
+        runs_df = self.list_runs(radar=radar)
+        runs_list = []
+        for _, row in runs_df.iterrows():
+            runs_list.append({
+                'run_id': row['run_id'],
+                'start_time': row['start_time'],
+                'end_time': row.get('end_time'),
+                'status': row['status'],
+                'mode': row.get('mode'),
+            })
+
+        # Get date range and scan count from catalog
+        date_range = None
+        num_scans = 0
+
+        try:
+            catalog = self._get_radar_catalog(radar)
+            conn = catalog._get_connection()
+
+            with catalog._lock:
+                # Get date range from items table
+                row = conn.execute("""
+                    SELECT
+                        MIN(scan_time) as start_time,
+                        MAX(scan_time) as end_time,
+                        COUNT(*) as num_scans
+                    FROM items
+                    WHERE status = 'complete'
+                """).fetchone()
+
+                if row and row['start_time']:
+                    date_range = {
+                        'start': row['start_time'],
+                        'end': row['end_time'],
+                    }
+                    num_scans = row['num_scans']
+
+        except FileNotFoundError:
+            pass  # Catalog may not exist yet
+
+        return {
+            'radar': radar,
+            'num_runs': len(runs_list),
+            'runs': runs_list,
+            'date_range': date_range,
+            'num_scans': num_scans,
+        }
+
+    def get_run_info(self, run_id: str, radar: Optional[str] = None) -> Dict[str, Any]:
+        """Get detailed information for a specific run.
+
+        Parameters
+        ----------
+        run_id : str
+            Run ID to query
+        radar : str, optional
+            Radar ID (will be looked up if not provided)
+
+        Returns
+        -------
+        dict
+            Run metadata including:
+            - run_id: str
+            - radar: str
+            - start_time: str
+            - end_time: str or None
+            - status: str
+            - mode: str
+            - date_range: dict (start, end) or None
+            - num_scans: int
+        """
+        runs_df = self.list_runs(radar=radar)
+        run_row = runs_df[runs_df['run_id'] == run_id]
+
+        if run_row.empty:
+            raise ValueError(f"Run '{run_id}' not found")
+
+        run = run_row.iloc[0]
+        radar = run['radar']
+
+        # Get date range for this specific run from catalog
+        date_range = None
+        num_scans = 0
+
+        try:
+            catalog = self._get_radar_catalog(radar)
+            conn = catalog._get_connection()
+
+            with catalog._lock:
+                row = conn.execute("""
+                    SELECT
+                        MIN(scan_time) as start_time,
+                        MAX(scan_time) as end_time,
+                        COUNT(*) as num_scans
+                    FROM items
+                    WHERE run_id = ? AND status = 'complete'
+                """, (run_id,)).fetchone()
+
+                if row and row['start_time']:
+                    date_range = {
+                        'start': row['start_time'],
+                        'end': row['end_time'],
+                    }
+                    num_scans = row['num_scans']
+
+        except FileNotFoundError:
+            pass
+
+        return {
+            'run_id': run_id,
+            'radar': radar,
+            'start_time': run['start_time'],
+            'end_time': run.get('end_time'),
+            'status': run['status'],
+            'mode': run.get('mode'),
+            'date_range': date_range,
+            'num_scans': num_scans,
+        }
     
     def item_types(self) -> List[str]:
         """List registered item types.
@@ -360,9 +549,652 @@ class DataClient:
             raise
     
     # =========================================================================
+    # Scan Listing and Time-Based Access
+    # =========================================================================
+
+    def list_scans(
+        self,
+        item_type: str,
+        radar: Optional[str] = None,
+        limit: int = 50
+    ) -> pd.DataFrame:
+        """List available scans with timestamps.
+
+        Parameters
+        ----------
+        item_type : str
+            Item type to list (e.g., 'segmentation2d', 'analysis2d')
+        radar : str, optional
+            Radar ID (uses first available if not specified)
+        limit : int
+            Maximum number of scans to return (default 50)
+
+        Returns
+        -------
+        DataFrame
+            Scan metadata with columns: scan_time, item_id, file_path, status
+        """
+        if not radar:
+            radars = self.list_radars()
+            if not radars:
+                raise ValueError("No radars found in repository")
+            radar = radars[0]
+
+        catalog = self._get_radar_catalog(radar)
+        items = catalog.query_items(
+            item_type=item_type,
+            status='complete',
+            limit=limit,
+            order_by='scan_time DESC'
+        )
+
+        if items.empty:
+            return pd.DataFrame(columns=['scan_time', 'item_id', 'file_path'])
+
+        return items[['scan_time', 'item_id', 'file_path', 'status']].copy()
+
+    def get_scan_at(
+        self,
+        scan_time: Union[str, datetime],
+        item_type: str,
+        radar: Optional[str] = None
+    ) -> Union[pd.DataFrame, xr.Dataset]:
+        """Load a specific scan by timestamp.
+
+        Parameters
+        ----------
+        scan_time : str or datetime
+            Target scan time (ISO8601 string or datetime)
+        item_type : str
+            Item type to load
+        radar : str, optional
+            Radar ID (uses first available if not specified)
+
+        Returns
+        -------
+        DataFrame or Dataset
+            Loaded data (DataFrame for Parquet, Dataset for NetCDF)
+
+        Raises
+        ------
+        FileNotFoundError
+            If no scan found at or near the specified time
+        """
+        if not radar:
+            radars = self.list_radars()
+            if not radars:
+                raise ValueError("No radars found in repository")
+            radar = radars[0]
+
+        # Convert to string for comparison
+        if isinstance(scan_time, datetime):
+            scan_time_str = scan_time.isoformat()
+        else:
+            scan_time_str = scan_time
+
+        catalog = self._get_radar_catalog(radar)
+        conn = catalog._get_connection()
+
+        # Find the exact or nearest scan
+        with catalog._lock:
+            row = conn.execute("""
+                SELECT * FROM items
+                WHERE item_type = ? AND status = 'complete'
+                ORDER BY ABS(julianday(scan_time) - julianday(?))
+                LIMIT 1
+            """, (item_type, scan_time_str)).fetchone()
+
+        if not row:
+            raise FileNotFoundError(
+                f"No scan found for type '{item_type}' near time {scan_time_str}"
+            )
+
+        item = dict(row)
+        file_path = self.root_dir / radar / item['file_path']
+
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        # Load based on storage format
+        info = self.registry.get_item_type_info(item_type)
+        if info and info['storage_format'] == 'parquet':
+            return pd.read_parquet(file_path, engine='pyarrow')
+        elif info and info['storage_format'] == 'netcdf':
+            return xr.open_dataset(file_path)
+        else:
+            # Infer from extension
+            if file_path.suffix == '.parquet':
+                return pd.read_parquet(file_path, engine='pyarrow')
+            elif file_path.suffix in ['.nc', '.nc4', '.netcdf']:
+                return xr.open_dataset(file_path)
+            else:
+                raise ValueError(f"Unknown file format for {file_path}")
+
+    # =========================================================================
+    # Tracking Methods
+    # =========================================================================
+
+    def get_tracks(
+        self,
+        radar: Optional[str] = None,
+        run_id: Optional[str] = None
+    ) -> Dict[int, List[Dict]]:
+        """Get all cell tracking paths.
+
+        Queries analysis2d data and groups by track_index to reconstruct
+        cell movement paths over time.
+
+        Parameters
+        ----------
+        radar : str, optional
+            Radar ID (uses first available if not specified)
+        run_id : str, optional
+            Filter by specific run
+
+        Returns
+        -------
+        dict
+            {track_index: [{time, x_km, y_km, cell_id, area, dbz_max}, ...]}
+            Each list is ordered oldest to newest.
+        """
+        if not radar:
+            radars = self.list_radars()
+            if not radars:
+                raise ValueError("No radars found in repository")
+            radar = radars[0]
+
+        # Query analysis2d for tracking data
+        sql = """
+            SELECT
+                scan_time,
+                track_index,
+                cell_label as cell_id,
+                centroid_x,
+                centroid_y,
+                cell_centroid_mass_lat as lat,
+                cell_centroid_mass_lon as lon,
+                cell_area_sqkm as area,
+                radar_reflectivity_max as dbz_max
+            FROM analysis2d
+            WHERE track_index IS NOT NULL AND track_index > 0
+            ORDER BY track_index, scan_time ASC
+        """
+
+        try:
+            df = self.query(sql, radar=radar)
+        except Exception as e:
+            logger.warning(f"Could not query tracking data: {e}")
+            return {}
+
+        if df.empty:
+            return {}
+
+        # Group by track_index
+        tracks: Dict[int, List[Dict]] = {}
+        for track_idx, group in df.groupby('track_index'):
+            track_idx = int(track_idx)
+            tracks[track_idx] = []
+            for _, row in group.iterrows():
+                tracks[track_idx].append({
+                    'time': row['scan_time'],
+                    'x_km': row['centroid_x'] / 1000.0 if pd.notna(row['centroid_x']) else None,
+                    'y_km': row['centroid_y'] / 1000.0 if pd.notna(row['centroid_y']) else None,
+                    'lat': row['lat'] if pd.notna(row['lat']) else None,
+                    'lon': row['lon'] if pd.notna(row['lon']) else None,
+                    'cell_id': int(row['cell_id']) if pd.notna(row['cell_id']) else None,
+                    'area': row['area'] if pd.notna(row['area']) else None,
+                    'dbz_max': row['dbz_max'] if pd.notna(row['dbz_max']) else None,
+                })
+
+        return tracks
+
+    def get_track(
+        self,
+        track_index: int,
+        radar: Optional[str] = None
+    ) -> List[Dict]:
+        """Get a single track path by index.
+
+        Parameters
+        ----------
+        track_index : int
+            Track index to retrieve
+        radar : str, optional
+            Radar ID (uses first available if not specified)
+
+        Returns
+        -------
+        list of dict
+            [{time, x_km, y_km, cell_id, area, dbz_max}, ...]
+            Ordered oldest to newest.
+        """
+        tracks = self.get_tracks(radar=radar)
+        return tracks.get(track_index, [])
+
+    # =========================================================================
+    # Pipeline Status Methods
+    # =========================================================================
+
+    def is_pipeline_running(self, radar: Optional[str] = None) -> bool:
+        """Check if pipeline is actively processing.
+
+        Checks for active run status and recent progress updates.
+
+        Parameters
+        ----------
+        radar : str, optional
+            Radar to check (uses first available if not specified)
+
+        Returns
+        -------
+        bool
+            True if pipeline appears to be running
+        """
+        # Check PID file first
+        pid_file = Path.home() / '.adapt' / 'pipeline.pid'
+        if pid_file.exists():
+            try:
+                import os
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)  # Check if process exists
+                return True
+            except (ValueError, OSError, ProcessLookupError):
+                pass
+
+        # Check for recent progress updates
+        if not radar:
+            radars = self.list_radars()
+            if not radars:
+                return False
+            radar = radars[0]
+
+        try:
+            catalog = self._get_radar_catalog(radar)
+            runs = self.registry.list_runs(radar=radar)
+
+            if runs.empty:
+                return False
+
+            # Check if any run has status 'running'
+            running_runs = runs[runs['status'] == 'running']
+            if not running_runs.empty:
+                return True
+
+            # Check for recent progress (within last 60 seconds)
+            latest_run = runs.iloc[0]
+            progress = catalog.get_progress(latest_run['run_id'])
+
+            if progress and progress.get('last_updated'):
+                last_update = datetime.fromisoformat(
+                    progress['last_updated'].replace('Z', '+00:00')
+                )
+                age_seconds = (datetime.now(timezone.utc) - last_update).total_seconds()
+                return age_seconds < 60
+
+        except Exception as e:
+            logger.debug(f"Error checking pipeline status: {e}")
+
+        return False
+
+    def get_pipeline_progress(
+        self,
+        radar: Optional[str] = None,
+        run_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get detailed pipeline progress.
+
+        Parameters
+        ----------
+        radar : str, optional
+            Radar to query
+        run_id : str, optional
+            Specific run ID (uses latest if not specified)
+
+        Returns
+        -------
+        dict
+            Progress metadata including:
+            - is_running: bool
+            - num_items_complete: int
+            - num_items_failed: int
+            - latest_scan_time: str
+            - queue_depth: int
+            - last_updated: str
+        """
+        if not radar:
+            radars = self.list_radars()
+            if not radars:
+                return {'is_running': False, 'error': 'No radars found'}
+            radar = radars[0]
+
+        try:
+            catalog = self._get_radar_catalog(radar)
+
+            if not run_id:
+                runs = self.registry.list_runs(radar=radar)
+                if runs.empty:
+                    return {'is_running': False, 'error': 'No runs found'}
+                run_id = runs.iloc[0]['run_id']
+
+            progress = catalog.get_progress(run_id)
+
+            if not progress:
+                return {
+                    'is_running': False,
+                    'run_id': run_id,
+                    'num_items_complete': 0,
+                    'num_items_failed': 0,
+                }
+
+            # Determine if running
+            is_running = self.is_pipeline_running(radar=radar)
+
+            return {
+                'is_running': is_running,
+                'run_id': run_id,
+                'radar': radar,
+                'num_items_complete': progress.get('num_items_complete', 0),
+                'num_items_failed': progress.get('num_items_failed', 0),
+                'queue_depth': progress.get('queue_depth', 0),
+                'latest_downloaded_time': progress.get('latest_downloaded_time'),
+                'latest_gridded_time': progress.get('latest_gridded_time'),
+                'latest_segmented_time': progress.get('latest_segmented_time'),
+                'latest_analyzed_time': progress.get('latest_analyzed_time'),
+                'last_updated': progress.get('last_updated'),
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting pipeline progress: {e}")
+            return {'is_running': False, 'error': str(e)}
+
+    # =========================================================================
+    # Scan Bundle Methods
+    # =========================================================================
+
+    def get_scan_bundle(
+        self,
+        scan_time: Union[str, datetime],
+        radar: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get all data for a specific scan in a single call.
+
+        Returns all linked data products for a scan: segmentation, cells DataFrame,
+        tracks, and metadata. This is the primary method for GUI display.
+
+        Parameters
+        ----------
+        scan_time : str or datetime
+            Scan timestamp (ISO8601 or datetime)
+        radar : str, optional
+            Radar ID (uses first available if not specified)
+
+        Returns
+        -------
+        dict
+            Bundle containing:
+            - scan_time: str - ISO8601 timestamp
+            - segmentation2d: xr.Dataset or None - Segmentation NetCDF
+            - cells: pd.DataFrame or None - Cell analysis data
+            - tracks: list of dict - Track paths for cells in this scan
+            - metadata: dict - Scan metadata (num_cells, max_reflectivity, etc.)
+
+        Raises
+        ------
+        FileNotFoundError
+            If radar or scan not found
+        """
+        if not radar:
+            radars = self.list_radars()
+            if not radars:
+                raise FileNotFoundError("No radars found in repository")
+            radar = radars[0]
+
+        # Convert to datetime if string
+        if isinstance(scan_time, str):
+            scan_time_dt = datetime.fromisoformat(scan_time.replace('Z', '+00:00'))
+        else:
+            scan_time_dt = scan_time
+
+        catalog = self._get_radar_catalog(radar)
+
+        bundle: Dict[str, Any] = {
+            'scan_time': scan_time_dt.isoformat() if isinstance(scan_time_dt, datetime) else scan_time,
+            'radar': radar,
+            'segmentation2d': None,
+            'cells': None,
+            'tracks': [],
+            'metadata': {},
+        }
+
+        # Try to get scan from scans table, fall back to items if table doesn't exist
+        scan = None
+        try:
+            scan = catalog.get_scan(scan_time_dt)
+        except Exception:
+            # scans table doesn't exist - use fallback
+            pass
+
+        # If no scan record, fall back to item-based lookup
+        if not scan:
+            return self._get_scan_bundle_fallback(scan_time_dt, radar, bundle)
+
+        # Populate metadata from scan record
+        bundle['metadata'] = {
+            'scan_id': scan.get('scan_id'),
+            'run_id': scan.get('run_id'),
+            'processing_status': scan.get('processing_status'),
+            'num_cells': scan.get('num_cells', 0),
+            'max_reflectivity': scan.get('max_reflectivity'),
+            'has_tracks': scan.get('has_tracks', False),
+            'nexrad_file_name': scan.get('nexrad_file_name'),
+        }
+
+        # Load segmentation2d if available
+        seg_item_id = scan.get('segmentation2d_item_id')
+        if seg_item_id:
+            seg_item = self._get_item_by_id(radar, seg_item_id)
+            if seg_item:
+                seg_path = self.root_dir / radar / seg_item['file_path']
+                if seg_path.exists():
+                    bundle['segmentation2d'] = xr.open_dataset(seg_path)
+
+        # Load analysis2d cells as DataFrame
+        analysis_item_id = scan.get('analysis2d_item_id')
+        if analysis_item_id:
+            analysis_item = self._get_item_by_id(radar, analysis_item_id)
+            if analysis_item:
+                analysis_path = self.root_dir / radar / analysis_item['file_path']
+                if analysis_path.exists():
+                    bundle['cells'] = pd.read_parquet(analysis_path, engine='pyarrow')
+
+        # Get tracks active at this scan time
+        tracks_at_time = catalog.get_tracks_at_time(scan_time_dt)
+        bundle['tracks'] = []
+        for track in tracks_at_time:
+            track_path = catalog.get_track_path(track['track_id'])
+            bundle['tracks'].append({
+                'track_id': track['track_id'],
+                'track_index': track['track_index'],
+                'birth_event': track.get('birth_event'),
+                'path': track_path,
+            })
+
+        return bundle
+
+    def _get_scan_bundle_fallback(
+        self,
+        scan_time: datetime,
+        radar: str,
+        bundle: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Fallback scan bundle using item queries (for legacy data)."""
+        scan_time_str = scan_time.isoformat()
+        catalog = self._get_radar_catalog(radar)
+        conn = catalog._get_connection()
+
+        # Find segmentation2d at or near this time
+        with catalog._lock:
+            seg_row = conn.execute("""
+                SELECT * FROM items
+                WHERE item_type = 'segmentation2d' AND status = 'complete'
+                ORDER BY ABS(julianday(scan_time) - julianday(?))
+                LIMIT 1
+            """, (scan_time_str,)).fetchone()
+
+        if seg_row:
+            seg_item = dict(seg_row)
+            seg_path = self.root_dir / radar / seg_item['file_path']
+            if seg_path.exists():
+                bundle['segmentation2d'] = xr.open_dataset(seg_path)
+            bundle['scan_time'] = seg_item['scan_time']
+
+        # Find analysis2d
+        with catalog._lock:
+            analysis_row = conn.execute("""
+                SELECT * FROM items
+                WHERE item_type = 'analysis2d' AND status = 'complete'
+                ORDER BY ABS(julianday(scan_time) - julianday(?))
+                LIMIT 1
+            """, (scan_time_str,)).fetchone()
+
+        if analysis_row:
+            analysis_item = dict(analysis_row)
+            analysis_path = self.root_dir / radar / analysis_item['file_path']
+            if analysis_path.exists():
+                bundle['cells'] = pd.read_parquet(analysis_path, engine='pyarrow')
+
+                # Extract track info from cells DataFrame
+                if 'track_index' in bundle['cells'].columns:
+                    track_indices = bundle['cells'][
+                        bundle['cells']['track_index'].notna() &
+                        (bundle['cells']['track_index'] > 0)
+                    ]['track_index'].unique()
+
+                    for idx in track_indices:
+                        bundle['tracks'].append({
+                            'track_index': int(idx),
+                            'path': [],  # Would need full query for path
+                        })
+
+        return bundle
+
+    def _get_item_by_id(self, radar: str, item_id: str) -> Optional[Dict]:
+        """Get item record by ID."""
+        catalog = self._get_radar_catalog(radar)
+        conn = catalog._get_connection()
+
+        with catalog._lock:
+            row = conn.execute(
+                "SELECT * FROM items WHERE item_id = ?",
+                (item_id,)
+            ).fetchone()
+
+        return dict(row) if row else None
+
+    def list_scan_times(
+        self,
+        radar: Optional[str] = None,
+        start_time: Optional[Union[str, datetime]] = None,
+        end_time: Optional[Union[str, datetime]] = None,
+        limit: int = 100
+    ) -> pd.DataFrame:
+        """List available scan times from scans table or items fallback.
+
+        Parameters
+        ----------
+        radar : str, optional
+            Radar ID (uses first available if not specified)
+        start_time : str or datetime, optional
+            Start of time range
+        end_time : str or datetime, optional
+            End of time range
+        limit : int
+            Maximum results (default 100)
+
+        Returns
+        -------
+        DataFrame
+            Scan records with columns: scan_id, scan_time, processing_status,
+            num_cells, has_tracks (or subset if from items table fallback)
+        """
+        if not radar:
+            radars = self.list_radars()
+            if not radars:
+                return pd.DataFrame()
+            radar = radars[0]
+
+        catalog = self._get_radar_catalog(radar)
+
+        # Convert times
+        start_dt = None
+        end_dt = None
+        if start_time:
+            if isinstance(start_time, str):
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            else:
+                start_dt = start_time
+        if end_time:
+            if isinstance(end_time, str):
+                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            else:
+                end_dt = end_time
+
+        # Try scans table first
+        try:
+            return catalog.list_scans(
+                start_time=start_dt,
+                end_time=end_dt,
+                status='complete',
+                limit=limit
+            )
+        except Exception as e:
+            logger.debug(f"scans table not available: {e}")
+
+        # Fallback: query items table for segmentation2d
+        return self._list_scan_times_from_items(
+            radar, start_dt, end_dt, limit
+        )
+
+    def _list_scan_times_from_items(
+        self,
+        radar: str,
+        start_time: Optional[datetime],
+        end_time: Optional[datetime],
+        limit: int
+    ) -> pd.DataFrame:
+        """Fallback: get scan times from items table."""
+        catalog = self._get_radar_catalog(radar)
+        conn = catalog._get_connection()
+
+        query = """
+            SELECT DISTINCT scan_time, item_id, item_type, status
+            FROM items
+            WHERE item_type = 'segmentation2d' AND status = 'complete'
+        """
+        params = []
+
+        if start_time:
+            query += " AND scan_time >= ?"
+            params.append(start_time.isoformat())
+        if end_time:
+            query += " AND scan_time <= ?"
+            params.append(end_time.isoformat())
+
+        query += " ORDER BY scan_time DESC LIMIT ?"
+        params.append(limit)
+
+        with catalog._lock:
+            rows = conn.execute(query, params).fetchall()
+
+        if not rows:
+            return pd.DataFrame()
+
+        return pd.DataFrame([dict(row) for row in rows])
+
+    # =========================================================================
     # Streaming Methods
     # =========================================================================
-    
+
     def stream(
         self,
         sql: str,

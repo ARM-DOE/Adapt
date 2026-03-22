@@ -202,20 +202,42 @@ class RadarPlotter:
     def _get_radar_location(self, ds: xr.Dataset) -> Tuple[float, float]:
         """Extract radar lat/lon from dataset."""
         def extract_float(val):
+            """Convert various types to Python float scalar."""
+            if val is None:
+                return 0.0
             if isinstance(val, xr.DataArray):
-                return float(val.values)
-            return float(val)
-        
-        lat = extract_float(
-            ds.attrs.get('radar_latitude',
-                        ds.coords.get('radar_latitude',
-                                     ds.attrs.get('origin_latitude', 0)))
-        )
-        lon = extract_float(
-            ds.attrs.get('radar_longitude',
-                        ds.coords.get('radar_longitude',
-                                     ds.attrs.get('origin_longitude', 0)))
-        )
+                # Handle 0-dimensional DataArray
+                v = val.values
+                if np.ndim(v) == 0:
+                    return float(v.item())
+                elif len(v) > 0:
+                    return float(v[0])
+                return 0.0
+            if isinstance(val, np.ndarray):
+                if np.ndim(val) == 0:
+                    return float(val.item())
+                elif len(val) > 0:
+                    return float(val[0])
+                return 0.0
+            if hasattr(val, 'item'):
+                return float(val.item())
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # Try multiple attribute names for latitude
+        lat_val = (ds.attrs.get('radar_latitude') or
+                   ds.attrs.get('origin_latitude') or
+                   ds.coords.get('radar_latitude'))
+        lat = extract_float(lat_val)
+
+        # Try multiple attribute names for longitude
+        lon_val = (ds.attrs.get('radar_longitude') or
+                   ds.attrs.get('origin_longitude') or
+                   ds.coords.get('radar_longitude'))
+        lon = extract_float(lon_val)
+
         return lat, lon
     
     def _add_basemap(self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray) -> None:

@@ -85,6 +85,13 @@ try:
 except ImportError:
     HAS_PROJ = False
 
+try:
+    from pyart.io.nexrad_common import NEXRAD_LOCATIONS
+    HAS_NEXRAD_LOCS = True
+except ImportError:
+    NEXRAD_LOCATIONS = {}
+    HAS_NEXRAD_LOCS = False
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 POLL_MS   = 10_000  # auto-refresh every 10 s
 LOG_MAX   = 500
@@ -294,6 +301,7 @@ class AdaptDashboard(tk.Tk):
         # Inline render state
         self._current_nc_ds   = None   # loaded xarray Dataset
         self._current_cell_df = None   # loaded parquet DataFrame
+        self._current_scan_ts = None   # pd.Timestamp of current displayed scan
         self._cell_contours   = {}     # cell_id -> contour set (ax2)
         self._hover_canvas    = None   # ref to mpl canvas for hover
 
@@ -772,14 +780,28 @@ class AdaptDashboard(tk.Tk):
     # ── NC file helpers ───────────────────────────────────────────────────────
 
     def _get_nc_files(self, repo, radar):
-        d = Path(repo) / radar / 'analysis' / self._today
-        return sorted(d.glob('*_analysis.nc')) if d.exists() else []
+        """Get all analysis NC files across all date directories."""
+        analysis_dir = Path(repo) / radar / 'analysis'
+        if not analysis_dir.exists():
+            return []
+
+        # Collect NC files from all date subdirectories
+        all_nc = []
+        for date_dir in analysis_dir.iterdir():
+            if date_dir.is_dir() and len(date_dir.name) == 8 and date_dir.name.isdigit():
+                all_nc.extend(date_dir.glob('*_analysis.nc'))
+
+        # Sort by filename (contains timestamp)
+        return sorted(all_nc, key=lambda p: p.name)
 
     @staticmethod
     def _nc_label(p):
         parts = p.stem.split('_')
         # filename: RADAR_YYYYMMDD_HHMMSS_analysis  or similar
+        d = next((x for x in parts if len(x) == 8 and x.isdigit()), None)
         t = next((x for x in parts if len(x) == 6 and x.isdigit()), None)
+        if d and t:
+            return f'{d[4:6]}-{d[6:8]} {t[:2]}:{t[2:4]}:{t[4:6]}  ({p.stem})'
         if t:
             return f'{t[:2]}:{t[2:4]}:{t[4:6]} UTC  ({p.stem})'
         return p.stem
@@ -823,8 +845,8 @@ class AdaptDashboard(tk.Tk):
         nc_files = self._get_nc_files(repo, radar)
         if not nc_files:
             messagebox.showinfo('No data',
-                                f'No *_analysis.nc for today in:\n'
-                                f'{Path(repo) / radar / "analysis" / self._today}',
+                                f'No analysis files found in:\n'
+                                f'{Path(repo) / radar / "analysis"}',
                                 parent=self)
             return
         self._load_parquet(repo, radar)
@@ -854,8 +876,8 @@ class AdaptDashboard(tk.Tk):
         nc_files = self._get_nc_files(repo, radar)
         if not nc_files:
             messagebox.showinfo('Not found',
-                                f'No *_analysis.nc for today in:\n'
-                                f'{Path(repo) / radar / "analysis" / self._today}',
+                                f'No analysis files found in:\n'
+                                f'{Path(repo) / radar / "analysis"}',
                                 parent=self)
             return
 
@@ -893,7 +915,7 @@ class AdaptDashboard(tk.Tk):
         nc_files = self._get_nc_files(repo, radar)[-n:]
         if not nc_files:
             messagebox.showinfo('No data',
-                                'No analysis NC files found for today.', parent=self)
+                                'No analysis NC files found.', parent=self)
             return
         self._load_parquet(repo, radar)
         self._nc_loop_files   = nc_files
@@ -928,10 +950,19 @@ class AdaptDashboard(tk.Tk):
 
         # Extract lat0/lon0 for toolbar coordinate transform
         ds_tmp = xr.open_dataset(nc_path)
-        lat0 = float(ds_tmp.attrs.get('radar_latitude',
-                                      ds_tmp.attrs.get('origin_latitude', 0)) or 0)
-        lon0 = float(ds_tmp.attrs.get('radar_longitude',
-                                      ds_tmp.attrs.get('origin_longitude', 0)) or 0)
+        lat0 = ds_tmp.attrs.get('radar_latitude', ds_tmp.attrs.get('origin_latitude'))
+        lon0 = ds_tmp.attrs.get('radar_longitude', ds_tmp.attrs.get('origin_longitude'))
+
+        # Fallback to NEXRAD station lookup
+        if lat0 is None or lon0 is None:
+            radar_id = ds_tmp.attrs.get('radar', ds_tmp.attrs.get('radar_id', ''))
+            if radar_id and HAS_NEXRAD_LOCS and radar_id.upper() in NEXRAD_LOCATIONS:
+                loc = NEXRAD_LOCATIONS[radar_id.upper()]
+                lat0, lon0 = loc['lat'], loc['lon']
+            else:
+                lat0, lon0 = 0, 0
+        else:
+            lat0, lon0 = float(lat0), float(lon0)
         ds_tmp.close()
 
         self._draw_scan(xr.open_dataset(nc_path), fig)
@@ -999,6 +1030,7 @@ class AdaptDashboard(tk.Tk):
             else pd.Timestamp.now())
         tstr = ts.strftime('%Y-%m-%d %H:%M:%S UTC')
         self._last_scan_dt = ts.to_pydatetime()
+        self._current_scan_ts = ts  # Store for hover filtering
 
         x_km = ds['x'].values / 1000.0
         y_km = ds['y'].values / 1000.0
@@ -1079,13 +1111,13 @@ class AdaptDashboard(tk.Tk):
                 end_frame  = n_frames if max_proj == 0 else min(n_frames, max_proj + 1)
                 _ls_cycle  = ['dashed', 'dashdot', 'dotted']
                 for i in range(1, end_frame):
-                    alpha = max(0.3, 1.0 - i / n_frames)
-                    lw    = max(0.8, 1.8 - i * 0.2)
+                    alpha = max(0.7, 1.0 - i / n_frames)
+                    lw    = max(0.5, 1.0 - i * 0.1)
                     ls    = _ls_cycle[(i - 1) % len(_ls_cycle)]
                     lp = proj_da.isel({fo: i}).values
                     for cid in np.unique(lp[~np.isnan(lp) & (lp > 0)]):
                         ax2.contour(x_grid, y_grid, (lp == cid).astype(float),
-                                    levels=[0.5], colors='#555555',
+                                    levels=[0.5], colors='black',
                                     linewidths=lw, linestyles=ls,
                                     alpha=alpha, zorder=40)
 
@@ -1099,11 +1131,23 @@ class AdaptDashboard(tk.Tk):
     @staticmethod
     def _add_basemap(ax, ds, x_km, y_km):
         if not HAS_CTX:
+            print('contextily not available for basemap')
             return
+
+        # Try to get lat/lon from dataset attrs first
         lat = ds.attrs.get('radar_latitude', ds.attrs.get('origin_latitude'))
         lon = ds.attrs.get('radar_longitude', ds.attrs.get('origin_longitude'))
+
+        # Fallback to NEXRAD station lookup
         if lat is None or lon is None:
-            return
+            radar_id = ds.attrs.get('radar', ds.attrs.get('radar_id', ''))
+            if radar_id and HAS_NEXRAD_LOCS and radar_id.upper() in NEXRAD_LOCATIONS:
+                loc = NEXRAD_LOCATIONS[radar_id.upper()]
+                lat, lon = loc['lat'], loc['lon']
+            else:
+                print(f'No radar location for {radar_id}')
+                return
+
         lat, lon = float(lat), float(lon)
         crs_str = (f'+proj=aeqd +lat_0={lat} +lon_0={lon} '
                    f'+x_0=0 +y_0=0 +datum=WGS84 +units=km')
@@ -1112,7 +1156,7 @@ class AdaptDashboard(tk.Tk):
         try:
             ctx.add_basemap(ax, crs=crs_str,
                             source=ctx.providers.OpenStreetMap.Mapnik,
-                            alpha=0.5, attribution=False, zoom='auto')
+                            alpha=0.5, attribution=False, zoom=8, zorder=0)
         except Exception as e:
             print(f'Basemap error: {e}')
 
@@ -1174,10 +1218,22 @@ class AdaptDashboard(tk.Tk):
 
             self._hv['cell_id'].set(str(cell_id))
 
-            # ── Cell stats from parquet ───────────────────────────────────────
+            # ── Cell stats from parquet (filter by scan time AND cell_id) ────
             df = self._current_cell_df
             if df is not None and 'cell_label' in df.columns:
-                rows = df[df['cell_label'] == cell_id]
+                # Filter by scan time first (within 1 minute tolerance)
+                if self._current_scan_ts is not None and 'scan_time' in df.columns:
+                    df_time = df.copy()
+                    df_time['scan_time'] = pd.to_datetime(df_time['scan_time'], utc=True)
+                    scan_ts = self._current_scan_ts.tz_localize('UTC') if self._current_scan_ts.tzinfo is None else self._current_scan_ts
+                    # Filter out NaT and find matching scan time
+                    valid_mask = df_time['scan_time'].notna()
+                    time_diff = abs(df_time.loc[valid_mask, 'scan_time'] - scan_ts)
+                    time_mask = pd.Series(False, index=df_time.index)
+                    time_mask.loc[valid_mask] = time_diff < pd.Timedelta(minutes=1)
+                    rows = df_time[time_mask & (df_time['cell_label'] == cell_id)]
+                else:
+                    rows = df[df['cell_label'] == cell_id]
                 if not rows.empty:
                     r = rows.iloc[0]
 
@@ -1300,8 +1356,15 @@ class AdaptDashboard(tk.Tk):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def main():
-    app = AdaptDashboard()
+def main(repo: str = None):
+    """Launch the Adapt Dashboard.
+
+    Parameters
+    ----------
+    repo : str, optional
+        Repository path to preload
+    """
+    app = AdaptDashboard(repo=repo)
     app.mainloop()
 
 

@@ -312,9 +312,8 @@ def _dashboard_cmd(args: argparse.Namespace) -> None:
         os.getcwd()
     except FileNotFoundError:
         os.chdir(os.path.expanduser("~"))
-    from adapt.gui.dashboard import AdaptDashboard
-    app = AdaptDashboard(repo=args.repo)
-    app.mainloop()
+    from adapt.gui import main
+    main(repo=args.repo)
 
 
 # ---------------------------------------------------------------------------

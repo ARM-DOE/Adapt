@@ -63,8 +63,33 @@ CREATE TABLE IF NOT EXISTS item_types (
 
 -- Prepopulate with known types
 INSERT OR IGNORE INTO item_types (item_type, description, storage_format, dimensionality, created_at)
-VALUES 
+VALUES
     ('gridded3d', 'Gridded reflectivity volume', 'netcdf', '3d', datetime('now')),
     ('segmentation2d', 'Cell segmentation masks', 'netcdf', '2d', datetime('now')),
     ('projection2d', 'Cell motion projections', 'netcdf', '2d', datetime('now')),
     ('analysis2d', 'Cell-level analysis metrics', 'parquet', 'table', datetime('now'));
+
+-- ====================================================================
+-- Table: schema_registry
+--
+-- Central schema management with versioning and compatibility
+-- Stores column definitions for Parquet tables and variable definitions
+-- for NetCDF datasets
+-- ====================================================================
+CREATE TABLE IF NOT EXISTS schema_registry (
+    schema_id TEXT PRIMARY KEY,
+    item_type TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    columns_json TEXT NOT NULL,           -- JSON: [{"name": "x", "dtype": "float32", "nullable": true}, ...]
+    compatibility_mode TEXT NOT NULL DEFAULT 'BACKWARD',  -- BACKWARD | FORWARD | FULL | NONE
+    parent_schema_id TEXT,                -- Previous schema version (for evolution tracking)
+    fingerprint TEXT NOT NULL,            -- SHA256 of canonical column JSON (for dedup)
+    description TEXT,                     -- Human-readable schema description
+    created_at TEXT NOT NULL,             -- ISO8601 UTC timestamp
+
+    UNIQUE(item_type, version),
+    FOREIGN KEY (parent_schema_id) REFERENCES schema_registry(schema_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_schema_registry_type ON schema_registry(item_type, version DESC);
+CREATE INDEX IF NOT EXISTS idx_schema_registry_fingerprint ON schema_registry(fingerprint);

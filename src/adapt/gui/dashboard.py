@@ -257,9 +257,25 @@ def _pipeline_running() -> bool:
 
 
 def _list_radars(repo: Path) -> list:
-    """Return radar subdirs that look like NEXRAD sites (4 uppercase letters)."""
+    """Return radars from database registry.
+
+    Uses DataClient API to query adapt_registry.db for registered radars.
+    Falls back to filesystem scan if database not available.
+    """
     if not repo.exists():
         return []
+
+    # Try database-based discovery via DataClient
+    try:
+        from adapt.api.client import DataClient
+        client = DataClient(repo)
+        radars = client.list_radars()
+        if radars:
+            return sorted(radars)
+    except Exception:
+        pass
+
+    # Fallback: filesystem scan for NEXRAD-style directories
     return sorted(
         d.name for d in repo.iterdir()
         if d.is_dir() and len(d.name) == 4 and d.name.isupper()
@@ -267,8 +283,49 @@ def _list_radars(repo: Path) -> list:
     )
 
 
-def _list_runs(repo: Path) -> list:
-    """Return (run_id, mtime_str) pairs from runtime_config_*.json files."""
+def _list_runs(repo: Path, radar: str = None) -> list:
+    """Return runs from database registry.
+
+    Uses DataClient API to query adapt_registry.db for runs.
+    Falls back to runtime_config_*.json scan if database not available.
+
+    Parameters
+    ----------
+    repo : Path
+        Repository root path
+    radar : str, optional
+        Filter runs by radar ID
+
+    Returns
+    -------
+    list
+        List of formatted run strings: "run_id  (MM-DD HH:MM)"
+    """
+    if not repo.exists():
+        return []
+
+    # Try database-based discovery via DataClient
+    try:
+        from adapt.api.client import DataClient
+        client = DataClient(repo)
+        runs_df = client.list_runs(radar=radar)
+        if not runs_df.empty:
+            runs = []
+            for _, row in runs_df.iterrows():
+                run_id = row['run_id']
+                start_time = row.get('start_time', '')
+                # Parse ISO timestamp and format
+                try:
+                    dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    mtime = dt.strftime('%m-%d %H:%M')
+                except (ValueError, AttributeError):
+                    mtime = str(start_time)[:16] if start_time else '?'
+                runs.append(f'{run_id}  ({mtime})')
+            return runs
+    except Exception:
+        pass
+
+    # Fallback: filesystem scan for runtime_config_*.json
     configs = sorted(repo.glob('runtime_config_*.json'), reverse=True)
     runs = []
     for c in configs:
@@ -594,18 +651,36 @@ class AdaptDashboard(tk.Tk):
         repo = Path(self._repo_root.get().strip())
         radars = _list_radars(repo)
         self.radar_cb['values'] = radars
+
+        # Select radar with most recent run activity
+        latest_radar = None
         if radars:
+            try:
+                from adapt.api.client import DataClient
+                client = DataClient(repo)
+                latest_run = client.registry.get_latest_run()
+                if latest_run and latest_run.get('radar') in radars:
+                    latest_radar = latest_run['radar']
+            except Exception:
+                pass
+
+        if latest_radar:
+            self._radar.set(latest_radar)
+        elif radars:
             self._radar.set(radars[0])
         else:
             self._radar.set('')
+
         self._on_radar_changed()
 
     def _on_radar_changed(self):
         repo = Path(self._repo_root.get().strip())
-        runs = _list_runs(repo)
+        radar = self._radar.get().strip().upper()
+        # Pass radar to filter runs by the selected radar
+        runs = _list_runs(repo, radar=radar if radar else None)
         self.run_cb['values'] = runs
         if runs:
-            self._run_sel.set(runs[0])
+            self._run_sel.set(runs[0])  # Select most recent run (first in list)
         else:
             self._run_sel.set('')
         self._today = datetime.now().strftime('%Y%m%d')
@@ -891,12 +966,17 @@ class AdaptDashboard(tk.Tk):
         self._render_nc(nc_path)
 
     def _load_parquet(self, repo, radar):
-        """Load cell stats parquet (most recent) into self._current_cell_df."""
+        """Load all cell stats parquet files into self._current_cell_df.
+
+        Concatenates all analysis2d_*.parquet files to support hovering
+        over scans from any run.
+        """
         self._current_cell_df = None
         pqs = sorted((Path(repo) / radar / 'analysis').glob('analysis2d_*.parquet'))
         if pqs:
             try:
-                self._current_cell_df = pd.read_parquet(pqs[-1])
+                dfs = [pd.read_parquet(p) for p in pqs]
+                self._current_cell_df = pd.concat(dfs, ignore_index=True)
             except Exception:
                 pass
 
@@ -1281,7 +1361,8 @@ class AdaptDashboard(tk.Tk):
             return
 
         try:
-            df = pd.read_parquet(pqs[-1])
+            dfs = [pd.read_parquet(p) for p in pqs]
+            df = pd.concat(dfs, ignore_index=True)
             df['scan_time']  = pd.to_datetime(df['scan_time'])
             df['time_label'] = df['scan_time'].dt.strftime('%H:%M:%S')
         except Exception as e:

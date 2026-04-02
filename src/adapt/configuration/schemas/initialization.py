@@ -13,6 +13,7 @@ Author: Bhupendra Raut
 import importlib.util
 import shutil
 import json
+import re
 from pathlib import Path
 from typing import Dict
 from datetime import datetime, timezone
@@ -23,6 +24,11 @@ from adapt.configuration.schemas.user import UserConfig
 from adapt.configuration.schemas.cli import CLIConfig
 from adapt.configuration.schemas.internal import InternalConfig
 from adapt.persistence import DataRepository
+from adapt.persistence.registry import RepositoryRegistry
+
+_RUN_ID_PATTERN = re.compile(
+    r"^\d{4}(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}-\d{4}-[A-Z0-9]{4}$"
+)
 
 
 def _load_user_config_dict(config_path: str) -> dict:
@@ -135,6 +141,14 @@ def _find_matching_run_id(new_config_dict: dict) -> str | None:
     return None
 
 
+def _run_id_exists(base_dir: str, run_id: str) -> bool:
+    """Check if run_id exists in repository registry."""
+    runs = RepositoryRegistry.get_instance(base_dir).list_runs()
+    if runs.empty:
+        return False
+    return bool((runs["run_id"] == run_id).any())
+
+
 def init_runtime_config(args) -> InternalConfig:
     """Complete runtime initialization - single entry point for Adapt.
     
@@ -211,17 +225,22 @@ def init_runtime_config(args) -> InternalConfig:
     # 4. Generate or use provided run ID
     user_provided_run_id = getattr(args, 'run_id', None)
     if user_provided_run_id:
-        # Validate run_id format (alphanumeric, max 32 chars)
-        if not user_provided_run_id.isalnum() or len(user_provided_run_id) > 32:
-            raise ValueError(f"Invalid run_id: must be alphanumeric and <= 32 chars, got '{user_provided_run_id}'")
-        run_id = user_provided_run_id
-        print(f"Using user-provided run ID: {run_id}")
+        if _RUN_ID_PATTERN.fullmatch(user_provided_run_id) is None:
+            raise ValueError(
+                "Invalid run_id: must match YYYYMONDD-HHMM-RADAR "
+                f"(e.g. 2026MAR23-0206-KBOX), got '{user_provided_run_id}'"
+            )
+        run_id = user_provided_run_id.upper()
+        if _run_id_exists(internal_config_dict["base_dir"], run_id):
+            print(f"Continuing existing run ID: {run_id}")
+        else:
+            print(f"Using user-provided run ID (new run): {run_id}")
     else:
         run_id = _find_matching_run_id(internal_config_dict)
         if run_id:
             print(f"Reusing existing run ID (config unchanged): {run_id}")
         else:
-            run_id = DataRepository.generate_run_id()
+            run_id = DataRepository.generate_run_id(internal_config_dict["downloader"]["radar"])
     internal_config_dict["run_id"] = run_id
     
     config = InternalConfig.model_validate(internal_config_dict)

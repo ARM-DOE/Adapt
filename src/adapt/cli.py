@@ -81,7 +81,11 @@ def _build_run_nexrad_parser(sub: argparse.ArgumentParser) -> None:
     sub.add_argument('--start-time', dest='start_time', help='Start time (ISO 8601)')
     sub.add_argument('--end-time',   dest='end_time',   help='End time (ISO 8601)')
     sub.add_argument('--base-dir',   dest='base_dir',   help='Repository output directory')
-    sub.add_argument('--run-id',     dest='run_id',     help='Resume a previous run by ID')
+    sub.add_argument(
+        '--run-id',
+        dest='run_id',
+        help='Continue with a run ID (format: YYYYMONDD-HHMM-RADAR)',
+    )
     sub.add_argument(
         '--max-runtime', dest='max_runtime', type=int,
         help='Max runtime in minutes (realtime mode only)',

@@ -47,7 +47,10 @@ class CLIConfig(AdaptBaseModel):
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     log_level: Optional[Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]] = None
-    run_id: Optional[str] = Field(default=None, description="Optional run ID for continuing previous runs (alphanumeric)")
+    run_id: Optional[str] = Field(
+        default=None,
+        description="Optional run ID for continuation (format: YYYYMONDD-HHMM-RADAR)"
+    )
     
     @model_validator(mode="after")
     def infer_historical_mode_from_times(self):

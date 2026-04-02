@@ -84,7 +84,7 @@ def _build_run_nexrad_parser(sub: argparse.ArgumentParser) -> None:
     sub.add_argument(
         '--run-id',
         dest='run_id',
-        help='Continue with a run ID (format: YYYYMONDD-HHMM-RADAR)',
+        help='Continue with a run ID (format: YYYYMONDD-HHMM-RADAR, requires --base-dir)',
     )
     sub.add_argument(
         '--max-runtime', dest='max_runtime', type=int,

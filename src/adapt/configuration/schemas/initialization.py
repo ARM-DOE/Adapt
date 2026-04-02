@@ -149,6 +149,22 @@ def _run_id_exists(base_dir: str, run_id: str) -> bool:
     return bool((runs["run_id"] == run_id).any())
 
 
+def _load_saved_runtime_config(base_dir: str, run_id: str) -> InternalConfig:
+    """Load saved runtime config JSON for an existing run."""
+    cfg_path = Path(base_dir) / f"runtime_config_{run_id}.json"
+    if not cfg_path.exists():
+        raise FileNotFoundError(
+            f"Saved runtime config not found for run_id '{run_id}': {cfg_path}"
+        )
+
+    with open(cfg_path) as f:
+        cfg_dict = json.load(f)
+
+    # Non-schema metadata persisted for audit only.
+    cfg_dict.pop("created_at", None)
+    return InternalConfig.model_validate(cfg_dict)
+
+
 def init_runtime_config(args) -> InternalConfig:
     """Complete runtime initialization - single entry point for Adapt.
     
@@ -182,6 +198,26 @@ def init_runtime_config(args) -> InternalConfig:
     >>> config = init_runtime_config(args) 
     >>> orchestrator = PipelineOrchestrator(config)
     """
+    # 0. Continuation fast-path: existing run_id reuses saved runtime config.
+    user_provided_run_id = getattr(args, 'run_id', None)
+    normalized_run_id = None
+    if user_provided_run_id:
+        if _RUN_ID_PATTERN.fullmatch(user_provided_run_id) is None:
+            raise ValueError(
+                "Invalid run_id: must match YYYYMONDD-HHMM-RADAR "
+                f"(e.g. 2026MAR23-0206-KBOX), got '{user_provided_run_id}'"
+            )
+        normalized_run_id = user_provided_run_id.upper()
+
+        base_dir_arg = getattr(args, "base_dir", None)
+        if not base_dir_arg:
+            raise ValueError("--base-dir is required when --run-id is provided")
+
+        if _run_id_exists(base_dir_arg, normalized_run_id):
+            print(f"Continuing existing run ID: {normalized_run_id}")
+            print("Ignoring user config file and CLI config overrides; reusing saved runtime config for this run.")
+            return _load_saved_runtime_config(base_dir_arg, normalized_run_id)
+
     # 1. Load and resolve configuration from all sources
     config_path = getattr(args, 'config', None)
 
@@ -223,18 +259,9 @@ def init_runtime_config(args) -> InternalConfig:
     internal_config_dict["output_dirs"] = {k: str(v) for k, v in output_dirs.items()}
     
     # 4. Generate or use provided run ID
-    user_provided_run_id = getattr(args, 'run_id', None)
-    if user_provided_run_id:
-        if _RUN_ID_PATTERN.fullmatch(user_provided_run_id) is None:
-            raise ValueError(
-                "Invalid run_id: must match YYYYMONDD-HHMM-RADAR "
-                f"(e.g. 2026MAR23-0206-KBOX), got '{user_provided_run_id}'"
-            )
-        run_id = user_provided_run_id.upper()
-        if _run_id_exists(internal_config_dict["base_dir"], run_id):
-            print(f"Continuing existing run ID: {run_id}")
-        else:
-            print(f"Using user-provided run ID (new run): {run_id}")
+    if normalized_run_id:
+        run_id = normalized_run_id
+        print(f"Using user-provided run ID (new run): {run_id}")
     else:
         run_id = _find_matching_run_id(internal_config_dict)
         if run_id:

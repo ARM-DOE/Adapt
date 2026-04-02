@@ -146,8 +146,6 @@ def _run_nexrad(args: argparse.Namespace) -> None:
 
     if args.no_plot:
         print('Starting pipeline (plotting disabled)...')
-    else:
-        print('Starting pipeline with plot consumer...')
 
     orchestrator_thread = threading.Thread(
         target=_run_orchestrator,
@@ -175,7 +173,6 @@ def _run_nexrad(args: argparse.Namespace) -> None:
             name='PlotConsumer',
         )
         plot_consumer.start()
-        print(f'Plot consumer started (polling every {args.plot_interval}s)')
 
     try:
         orchestrator_thread.join()

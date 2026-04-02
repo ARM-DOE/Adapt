@@ -141,10 +141,7 @@ class DataRepository:
         # Register this run in new registry
         self._register_in_new_catalog()
 
-        logger.info(f"DataRepository initialized: run_id={run_id}, radar={radar}")
-        logger.info(f"  Registry: {self.registry.db_path}")
-        logger.info(f"  Radar catalog: {self.catalog.db_path}")
-        logger.info(f"  Legacy catalog: {self.catalog_path} (deprecated)")
+        logger.debug("DataRepository ready: run=%s radar=%s", run_id, radar)
 
     def _init_directories(self) -> None:
         """Create directory structure for this radar."""

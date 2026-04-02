@@ -67,7 +67,7 @@ class RadarCatalog:
         # Initialize database
         self._init_database()
         
-        logger.info(f"RadarCatalog initialized for {self.radar} at {self.db_path}")
+        logger.debug("RadarCatalog initialized for %s at %s", self.radar, self.db_path)
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-safe database connection."""

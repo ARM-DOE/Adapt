@@ -14,6 +14,7 @@ Responsibilities of this class (orchestration only):
 import logging
 import queue
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
@@ -86,7 +87,6 @@ class RadarProcessor(threading.Thread):
         # frame history) persist across process_file() calls.
         from adapt.execution.pipeline_builder import NexradPipeline
         self._pipeline = NexradPipeline(config, dict(output_dirs))
-        logger.info("RadarProcessor initialized with NexradPipeline")
 
         # Frame pairing orchestration state
         # We maintain a rolling list of segmented datasets and only call
@@ -94,6 +94,7 @@ class RadarProcessor(threading.Thread):
         self._segmented_history = []  # List of (filepath, ds_2d, scan_time) tuples
         self._max_history = config.processor.max_history  # Should be 2
         self._max_time_gap_minutes = config.projector.max_time_interval_minutes
+        self._last_skipped = False  # Set True when process_file skips an analyzed file
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -108,20 +109,32 @@ class RadarProcessor(threading.Thread):
     def run(self):
         """Main processor loop (runs in thread)."""
         logger.info("Processor started, waiting for files...")
+        _skip_count = 0
 
         while not self.stopped():
             try:
                 filepath = self.input_queue.get(timeout=1)
             except queue.Empty:
+                if _skip_count:
+                    logger.info("Skipped %d already-analyzed files", _skip_count)
+                    _skip_count = 0
                 continue
 
             try:
-                self.process_file(filepath)
+                skipped = self.process_file(filepath)
+                if skipped is True and self._last_skipped:
+                    _skip_count += 1
+                else:
+                    if _skip_count:
+                        logger.info("Skipped %d already-analyzed files", _skip_count)
+                        _skip_count = 0
             except Exception:
                 logger.exception("Failed to process file: %s", filepath)
             finally:
                 self.input_queue.task_done()
 
+        if _skip_count:
+            logger.info("Skipped %d already-analyzed files", _skip_count)
         logger.info("Processor stopped")
 
     # ── Per-file processing ───────────────────────────────────────────────────
@@ -148,16 +161,20 @@ class RadarProcessor(threading.Thread):
         bool
             True if the file was processed (or ready to pair), False on error.
         """
+        queued_at = None
         if isinstance(filepath, dict):
+            queued_at = filepath.get("queued_at")
             filepath = filepath["path"]
 
         file_id = Path(filepath).stem
         tracker = self.file_tracker
 
         if tracker and tracker.should_process(file_id, "analyzed") is False:
-            logger.info("Skipping already analyzed: %s", Path(filepath).name)
+            self._last_skipped = True
             return True
+        self._last_skipped = False
 
+        queue_wait_s = (time.time() - queued_at) if queued_at else None
         logger.info("Processing: %s", Path(filepath).name)
 
         try:
@@ -172,7 +189,7 @@ class RadarProcessor(threading.Thread):
             if self.repository:
                 context_initial["repository"] = self.repository
 
-            ds_2d, scan_time = self._run_ingest_detection_only(context_initial)
+            ds_2d, scan_time, ingest_s, detect_s = self._run_ingest_detection_only(context_initial)
 
             # ──────────────────────────────────────────────────────────────────
             # PHASE 2: Add to rolling history
@@ -186,9 +203,8 @@ class RadarProcessor(threading.Thread):
             # ──────────────────────────────────────────────────────────────────
             if len(self._segmented_history) < 2:
                 logger.info(
-                    "Segmented %s, waiting for pair (have %d/2 frames)",
-                    Path(filepath).name,
-                    len(self._segmented_history)
+                    "Segmented %s, waiting for pair | ingest=%.1fs detect=%.1fs",
+                    Path(filepath).name, ingest_s, detect_s,
                 )
                 return True  # Success, but waiting for second file
 
@@ -216,7 +232,9 @@ class RadarProcessor(threading.Thread):
                 time_gap_minutes
             )
 
+            t_proj = time.perf_counter()
             result = self._run_full_pipeline(context_initial)
+            project_s = time.perf_counter() - t_proj
 
             # ──────────────────────────────────────────────────────────────────
             # PHASE 6: Save outputs to repository
@@ -224,16 +242,27 @@ class RadarProcessor(threading.Thread):
             if self.repository and result:
                 self._save_results(result, scan_time)
 
-            # Log cell count
+            # Log cell count + timing
             cell_stats = result.get("cell_stats")
             n_cells = len(cell_stats) if cell_stats is not None else 0
-            logger.info("Processed pair: %d cells detected", n_cells)
+            logger.info(
+                "Processed pair: %d cells | ingest=%.1fs detect=%.1fs project=%.1fs%s",
+                n_cells, ingest_s, detect_s, project_s,
+                f" queue=%.1fs" % queue_wait_s if queue_wait_s is not None else "",
+            )
 
             # Mark both files as processed
             if tracker:
+                timings = {
+                    "ingest_seconds": ingest_s,
+                    "detect_seconds": detect_s,
+                    "project_seconds": project_s,
+                }
+                if queue_wait_s is not None:
+                    timings["queue_wait_seconds"] = queue_wait_s
                 for fp, _, _ in self._segmented_history:
                     fid = Path(fp).stem
-                    tracker.mark_stage_complete(fid, "analyzed", num_cells=n_cells)
+                    tracker.mark_stage_complete(fid, "analyzed", num_cells=n_cells, timings=timings)
 
             return True
 
@@ -304,6 +333,10 @@ class RadarProcessor(threading.Thread):
             Segmented 2D dataset with cell_labels
         scan_time : datetime
             Scan timestamp
+        ingest_seconds : float
+            Wall time for the ingest (regridding) step
+        detect_seconds : float
+            Wall time for the detection (segmentation) step
         """
         # Import modules directly (not through pipeline graph)
         from adapt.modules.ingest.module import LoadModule
@@ -315,18 +348,22 @@ class RadarProcessor(threading.Thread):
             self._detection_module = DetectModule()
 
         # Run ingest module
+        t0 = time.perf_counter()
         result = self._ingest_module.run(context)
         context.update(result)
+        ingest_s = time.perf_counter() - t0
 
         # Run detection module
+        t1 = time.perf_counter()
         result = self._detection_module.run(context)
         context.update(result)
+        detect_s = time.perf_counter() - t1
 
         # Extract outputs
         ds_2d = context.get("segmented_ds")
         scan_time = context.get("scan_time")
 
-        return ds_2d, scan_time
+        return ds_2d, scan_time, ingest_s, detect_s
 
     def _validate_time_gap(self):
         """Check if time gap between frames is acceptable for optical flow.
@@ -354,34 +391,30 @@ class RadarProcessor(threading.Thread):
     def _run_full_pipeline(self, context: dict):
         """Run projection → analysis → tracking on validated frame pair.
 
-        This is called only when we have 2 segmented datasets with an
-        acceptable time gap. The projection module will use the pre-built
-        history to compute optical flow.
+        Reuses the context already populated by _run_ingest_detection_only
+        (which contains grid_ds, segmented_ds, scan_time, etc.) to avoid
+        re-running the expensive ingest step.
 
         Returns
         -------
         dict
-            Pipeline result containing projected_ds, cell_stats, tracked_cells, etc.
+            Updated context with projected_ds, cell_stats, tracked_cells, etc.
         """
-        # Inject segmented history directly into ProjectionModule
-        # (NexradPipeline.process_file creates a fresh context, so we can't pass it via context)
+        # Inject segmented history into ProjectionModule
         projection_module = self._get_projection_module()
         if projection_module:
-            # Set the history directly on the module instance
             projection_module._dataset_history = [
                 (fp, ds) for fp, ds, _ in self._segmented_history
             ]
-            logger.debug("Injected %d-frame history into ProjectionModule",
-                        len(self._segmented_history))
 
-        # Run full pipeline graph (uses most recent file as primary)
-        filepath = self._segmented_history[-1][0]  # Most recent file
-        result = self._pipeline.process_file(
-            nexrad_file=filepath,
-            repository=self.repository,
-        )
+        # Run only the stages after ingest+detection — they are already in context
+        _skip = {"ingest", "detection"}
+        for node in self._pipeline._nodes:
+            if node.name not in _skip:
+                result = node.module.run(context)
+                context.update(result)
 
-        return result
+        return context
 
     def _get_projection_module(self):
         """Get ProjectionModule instance from pipeline graph."""
@@ -407,10 +440,7 @@ class RadarProcessor(threading.Thread):
             filepath = self._segmented_history[-1][0]  # Most recent file
             self._save_analysis_netcdf(projected_ds, filepath, scan_time)
 
-        # Log results
-        cell_stats = result.get("cell_stats")
-        n_cells = len(cell_stats) if cell_stats is not None else 0
-        logger.info("Frame pair processed: %d cells detected", n_cells)
+        pass
 
     # ── Results API (called by orchestrator on shutdown) ──────────────────────
 

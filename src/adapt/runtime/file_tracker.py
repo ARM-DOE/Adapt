@@ -90,7 +90,8 @@ class FileProcessingTracker:
 
         # Initialize database
         self._init_database()
-        logger.info(f" File tracker initialized: {self.db_path}")
+        self._migrate_database()
+        logger.debug("File tracker initialized: %s", self.db_path)
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
@@ -135,6 +136,24 @@ class FileProcessingTracker:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_radar_file_processing_status ON radar_file_processing(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_radar_file_processing_scan_time ON radar_file_processing(scan_time)")
 
+            conn.commit()
+
+    def _migrate_database(self):
+        """Add timing columns to existing schema (idempotent)."""
+        timing_cols = [
+            "queue_wait_seconds REAL",
+            "download_seconds REAL",
+            "ingest_seconds REAL",
+            "detect_seconds REAL",
+            "project_seconds REAL",
+        ]
+        conn = self._get_connection()
+        with self._lock:
+            for col_def in timing_cols:
+                try:
+                    conn.execute(f"ALTER TABLE radar_file_processing ADD COLUMN {col_def}")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
             conn.commit()
 
     def register_file(self, file_id: str, radar: str, scan_time: datetime,
@@ -201,7 +220,8 @@ class FileProcessingTracker:
     def mark_stage_complete(self, file_id: str, stage: str,
                           path: Optional[Path] = None,
                           num_cells: Optional[int] = None,
-                          error: Optional[str] = None):
+                          error: Optional[str] = None,
+                          timings: Optional[Dict[str, float]] = None):
         """Mark a pipeline stage as complete or failed for a file.
 
         Called by downloader, processor, and plotter threads to record progress.
@@ -260,46 +280,46 @@ class FileProcessingTracker:
             else:
                 new_status = 'processing'
 
-            # Update record
+            now = datetime.now(timezone.utc).isoformat()
+
+            # Build SET clause dynamically to include optional timing columns
+            set_parts = [
+                f"{timestamp_col} = ?",
+                f"{path_col} = ?",
+                "status = ?",
+                "error_message = ?",
+                "updated_at = ?",
+            ]
+            values = [
+                now,
+                str(path) if path else None,
+                new_status,
+                error,
+                now,
+            ]
+
             if num_cells is not None:
-                conn.execute(f"""
-                    UPDATE radar_file_processing
-                    SET {timestamp_col} = ?,
-                        {path_col} = ?,
-                        num_cells = ?,
-                        status = ?,
-                        error_message = ?,
-                        updated_at = ?
-                    WHERE file_id = ?
-                """, (
-                    datetime.now(timezone.utc).isoformat(),
-                    str(path) if path else None,
-                    num_cells,
-                    new_status,
-                    error,
-                    datetime.now(timezone.utc).isoformat(),
-                    file_id
-                ))
-            else:
-                conn.execute(f"""
-                    UPDATE radar_file_processing
-                    SET {timestamp_col} = ?,
-                        {path_col} = ?,
-                        status = ?,
-                        error_message = ?,
-                        updated_at = ?
-                    WHERE file_id = ?
-                """, (
-                    datetime.now(timezone.utc).isoformat(),
-                    str(path) if path else None,
-                    new_status,
-                    error,
-                    datetime.now(timezone.utc).isoformat(),
-                    file_id
-                ))
+                set_parts.append("num_cells = ?")
+                values.append(num_cells)
+
+            _valid_timing_cols = {
+                "queue_wait_seconds", "download_seconds",
+                "ingest_seconds", "detect_seconds", "project_seconds",
+            }
+            if timings:
+                for col, val in timings.items():
+                    if col in _valid_timing_cols:
+                        set_parts.append(f"{col} = ?")
+                        values.append(val)
+
+            values.append(file_id)
+            conn.execute(
+                f"UPDATE radar_file_processing SET {', '.join(set_parts)} WHERE file_id = ?",
+                values,
+            )
             conn.commit()
 
-            logger.debug(f"Marked {stage} complete: {file_id}")
+            logger.debug("Marked %s complete: %s", stage, file_id)
 
     def get_file_status(self, file_id: str) -> Optional[Dict]:
         """Get complete processing status for a file.

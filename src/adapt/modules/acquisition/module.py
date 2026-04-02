@@ -357,7 +357,7 @@ class AwsNexradDownloader(threading.Thread):
         end = self._clock()
         start = end - timedelta(minutes=self.latest_minutes)
 
-        logger.info("Realtime: last %d min (%s to %s)", self.latest_minutes, start, end)
+        logger.debug("Realtime: last %d min (%s to %s)", self.latest_minutes, start, end)
 
         self._check_radar_available(end, end)
 
@@ -367,7 +367,7 @@ class AwsNexradDownloader(threading.Thread):
 
         # Keep only latest N
         scans = scans[-self.latest_files :]
-        logger.info("Keeping latest %d scans", len(scans))
+        logger.debug("Keeping latest %d scans", len(scans))
 
         return self._process_scans(scans)
 
@@ -390,7 +390,7 @@ class AwsNexradDownloader(threading.Thread):
             # Filter out MDM files
             scans = [s for s in scans if not s.key.endswith("_MDM")]
 
-            logger.info("Found %d scans for %s", len(scans), self.radar)
+            logger.debug("Found %d scans for %s", len(scans), self.radar)
             return scans
         except Exception as e:
             logger.error("Failed to fetch scans: %s", e)
@@ -457,10 +457,13 @@ class AwsNexradDownloader(threading.Thread):
             processed += 1
             local_path = self._get_local_path(scan)
             is_new = False
+            download_seconds = None
 
             # Download if not exists
             if not self._file_exists(local_path):
+                t0 = time.perf_counter()
                 if self._download_scan(scan, local_path):
+                    download_seconds = time.perf_counter() - t0
                     is_new = True
                     new_downloads.append(local_path)
                 else:
@@ -471,19 +474,18 @@ class AwsNexradDownloader(threading.Thread):
             if self._file_exists(local_path):
                 with self._known_files_lock:
                     if local_path not in self._known_files:
-                        self._notify_queue(local_path, scan.scan_time, is_new)
+                        self._notify_queue(local_path, scan.scan_time, is_new, download_seconds)
                         self._known_files.add(local_path)
                         queued += 1
             else:
                 logger.error("File missing after download attempt: %s", local_path)
 
-        logger.info(
-            "Processed: %d queued, %d new downloads (attempted %d/%d scans)",
-            queued,
-            len(new_downloads),
-            processed,
-            len(scans),
-        )
+        if queued > 0 or new_downloads:
+            logger.info(
+                "Queued %d files (%d new downloads)",
+                queued,
+                len(new_downloads),
+            )
 
         # Mark historical complete when all scans have been attempted
         if self.config.downloader.mode == "historical":
@@ -546,7 +548,8 @@ class AwsNexradDownloader(threading.Thread):
             logger.error("Download failed: %s - %s", scan.key, e)
             return False
 
-    def _notify_queue(self, path: Path, scan_time: datetime, is_new: bool):
+    def _notify_queue(self, path: Path, scan_time: datetime, is_new: bool,
+                     download_seconds: float = None):
         """Put file notification in result queue."""
         # Keep the original behavior: if there is no result_queue, we don't
         # queue items or attempt to register/mark the file with the tracker.
@@ -559,7 +562,8 @@ class AwsNexradDownloader(threading.Thread):
             file_id = path.stem
             if tracker:
                 tracker.register_file(file_id, self.radar, scan_time, path)
-                tracker.mark_stage_complete(file_id, "downloaded", path=path)
+                timings = {"download_seconds": download_seconds} if download_seconds is not None else None
+                tracker.mark_stage_complete(file_id, "downloaded", path=path, timings=timings)
 
             self.result_queue.put(
                 {
@@ -567,6 +571,7 @@ class AwsNexradDownloader(threading.Thread):
                     "scan_time": scan_time,
                     "radar": self.radar,
                     "file_id": file_id,
+                    "queued_at": time.time(),
                 }
             )
         except Exception as e:

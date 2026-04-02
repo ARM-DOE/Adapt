@@ -65,7 +65,7 @@ class RepositoryRegistry:
         # Initialize database
         self._init_database()
         
-        logger.info(f"RepositoryRegistry initialized at {self.db_path}")
+        logger.debug("RepositoryRegistry initialized at %s", self.db_path)
     
     @classmethod
     def get_instance(cls, root_dir: Union[str, Path]) -> 'RepositoryRegistry':
@@ -225,7 +225,7 @@ class RepositoryRegistry:
             """, (radar, catalog_path, data_path, lat, lon, now, now))
             conn.commit()
         
-        logger.info(f"Radar registered: {radar} at {data_path}")
+        logger.debug("Radar registered: %s at %s", radar, data_path)
     
     def get_radar_catalog_path(self, radar: str) -> Optional[Path]:
         """Get path to radar's catalog database.
@@ -302,7 +302,7 @@ class RepositoryRegistry:
             """, (run_id, radar, now, mode, config_path, repository_version, now))
             conn.commit()
         
-        logger.info(f"Run registered: {run_id} for radar {radar}")
+        logger.debug("Run registered: %s for radar %s", run_id, radar)
     
     def update_run_status(
         self,

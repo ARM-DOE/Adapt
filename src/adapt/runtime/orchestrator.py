@@ -168,14 +168,14 @@ class PipelineOrchestrator:
         ch.setFormatter(formatter)
         root.addHandler(ch)
 
-        logger.info("Logging: level=%s, file=%s", log_level, log_path)
+        logger.debug("Logging: level=%s, file=%s", log_level, log_path)
 
         # Initialize file tracker (stored in RADAR_ID/analysis/) - renamed to processing_tracker
         tracker_dir = Path(self.output_dirs["base"]) / radar / "analysis"
         tracker_dir.mkdir(parents=True, exist_ok=True)
         tracker_path = tracker_dir / f"{radar}_processing_tracker.db"
         self.tracker = FileProcessingTracker(tracker_path)
-        logger.info("Processing tracker: %s", tracker_path)
+        logger.debug("Processing tracker: %s", tracker_path)
 
     def start(self, max_runtime: Optional[int] = None):
         """Start the pipeline and run until completion or user interrupt.
@@ -232,21 +232,15 @@ class PipelineOrchestrator:
             config=self.config
         )
 
-        logger.info("=" * 60)
-        logger.info("Starting Radar Processing Pipeline")
-        logger.info("Run ID: %s", self.run_id)
-        logger.info("=" * 60)
-
         self._start_time = time.time()
         self._max_duration = max_runtime * 60 if max_runtime else None
 
-        if self._max_duration:
-            logger.info("Max runtime: %d minutes", max_runtime)
-        else:
-            logger.info("Max runtime: Until interrupted")
+        logger.info(
+            "Pipeline started | run=%s radar=%s mode=%s",
+            self.run_id, radar, self.config.mode.upper()
+        )
 
         # Start Downloader thread
-        logger.info("Starting Downloader...")
         self.downloader = AwsNexradDownloader(
             config=self.config,
             output_dirs=self.output_dirs,
@@ -254,10 +248,8 @@ class PipelineOrchestrator:
             file_tracker=self.tracker,
         )
         self.downloader.start()
-        logger.info("Downloader started")
 
         # Start Processor thread
-        logger.info("Starting Processor...")
         self.processor = RadarProcessor(
             input_queue=self.downloader_queue,
             config=self.config,
@@ -266,10 +258,9 @@ class PipelineOrchestrator:
             repository=self.repository,
         )
         self.processor.start()
-        logger.info("Processor started")
 
         mode = self.config.mode
-        logger.info("Pipeline running in %s mode. Press Ctrl+C to stop.", mode.upper())
+        logger.debug("Pipeline running in %s mode. Press Ctrl+C to stop.", mode.upper())
 
         try:
             self._main_loop(mode)
@@ -405,13 +396,11 @@ class PipelineOrchestrator:
             return
 
         self._stop_event = True
-        logger.info("Stopping pipeline...")
 
         # Stop threads
         for name, thread in [("Downloader", self.downloader),
                               ("Processor", self.processor)]:
             if thread and thread.is_alive():
-                logger.info("Stopping %s...", name)
                 thread.stop()
                 thread.join(timeout=5)
                 if thread.is_alive():
@@ -419,41 +408,30 @@ class PipelineOrchestrator:
 
         # Save results
         if self.processor:
-            logger.info("Saving results...")
             self.processor.save_results()
-            df = self.processor.get_results()
-            logger.info("Final results: %d rows", len(df))
             self.processor.close_database()
 
         # Finalize repository
         if self.repository:
-            # Determine final status: completed normally, interrupted, or failed
-            if self._interrupted:
-                final_status = "cancelled"
-                logger.info("Pipeline was interrupted by user")
-            else:
-                final_status = "completed"
-                logger.info("Pipeline completed normally")
-            
+            final_status = "cancelled" if self._interrupted else "completed"
             self.repository.finalize_run(final_status)
             self.repository.close()
-            logger.info("DataRepository finalized: run_id=%s, status=%s", self.run_id, final_status)
 
         # Summary
         elapsed = time.time() - self._start_time if self._start_time else 0
-        logger.info("=" * 60)
-        logger.info("Pipeline stopped. Runtime: %.1f seconds", elapsed)
-
         if self.tracker:
             stats = self.tracker.get_statistics()
-            total_cells = stats.get('total_cells', 0)
-            if total_cells is None:
-                total_cells = 0
-            logger.info("Statistics: total=%d, completed=%d, cells=%d",
-                       stats.get('total', 0), stats.get('completed', 0), total_cells)
+            total_cells = stats.get('total_cells', 0) or 0
+            logger.info(
+                "Pipeline stopped. Runtime: %.1fs | files=%d completed=%d cells=%d",
+                elapsed,
+                stats.get('total', 0),
+                stats.get('completed', 0),
+                total_cells,
+            )
             self.tracker.close()
-
-        logger.info("=" * 60)
+        else:
+            logger.info("Pipeline stopped. Runtime: %.1fs", elapsed)
 
     def _log_status(self):
         """Log current pipeline status."""

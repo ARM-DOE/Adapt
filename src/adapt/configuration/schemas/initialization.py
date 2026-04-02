@@ -100,8 +100,6 @@ def _persist_runtime_config(config: InternalConfig, run_id: str, output_dirs: Di
     
     with open(config_file, 'w') as f:
         json.dump(config_dict, f, indent=2, default=str)
-    
-    print(f"Runtime config saved: {config_file}")
 
 
 _CONFIG_SKIP_KEYS = frozenset({'run_id', 'created_at', 'output_dirs'})
@@ -224,16 +222,13 @@ def init_runtime_config(args) -> InternalConfig:
             print(f"Reusing existing run ID (config unchanged): {run_id}")
         else:
             run_id = DataRepository.generate_run_id()
-            print(f"Generated run ID: {run_id}")
     internal_config_dict["run_id"] = run_id
     
     config = InternalConfig.model_validate(internal_config_dict)
     
     # 5. Persist configuration for reproducibility
     _persist_runtime_config(config, run_id, output_dirs)
-    
-    print(f"Runtime initialization complete. Run ID: {run_id}")
-    
+
     return config
 
 

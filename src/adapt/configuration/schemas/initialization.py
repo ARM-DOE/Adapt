@@ -76,16 +76,41 @@ def _setup_output_directories(base_dir: str) -> Dict[str, Path]:
     return setup_output_directories(base_dir)
 
 
-def _handle_rerun_cleanup(base_dir: str, rerun: bool) -> None:
-    """Handle --rerun directory cleanup if requested."""
+def _handle_rerun_cleanup(base_dir: str, radar: str, rerun: bool) -> None:
+    """Handle --rerun cleanup if requested.
+
+    Deletes only Adapt-created artifacts for the requested radar under base_dir.
+    Never deletes user-owned files like config.yaml.
+    """
     if not rerun:
         return
         
     base_dir_path = Path(base_dir)
-    if base_dir_path.exists():
-        print(f"Cleaning output directory: {base_dir_path}")
-        shutil.rmtree(base_dir_path)
-        print("Output directory cleaned")
+    if not base_dir_path.exists():
+        return
+
+    radar = str(radar).upper()
+    radar_dir = base_dir_path / radar
+
+    print(f"Cleaning radar output directory: {radar_dir}")
+    if radar_dir.exists():
+        shutil.rmtree(radar_dir)
+
+    # Remove run-specific legacy pipeline catalogs and runtime configs for this radar.
+    catalog_dir = base_dir_path / "catalog"
+    if catalog_dir.exists():
+        for p in catalog_dir.glob(f"*-{radar}_pipeline_catalog.db*"):
+            try:
+                p.unlink()
+            except IsADirectoryError:
+                shutil.rmtree(p)
+    for p in base_dir_path.glob(f"runtime_config_*-{radar}.json"):
+        try:
+            p.unlink()
+        except IsADirectoryError:
+            shutil.rmtree(p)
+
+    print("Radar output cleaned")
 
 
 def _persist_runtime_config(config: InternalConfig, run_id: str, output_dirs: Dict[str, Path]) -> None:
@@ -250,7 +275,7 @@ def init_runtime_config(args) -> InternalConfig:
     
     # 2. Handle --rerun cleanup BEFORE directory setup
     rerun = getattr(args, 'rerun', False)
-    _handle_rerun_cleanup(internal_config_dict["base_dir"], rerun)
+    _handle_rerun_cleanup(internal_config_dict["base_dir"], internal_config_dict["downloader"]["radar"], rerun)
     
     # 3. Setup output directories  
     output_dirs = _setup_output_directories(internal_config_dict["base_dir"])

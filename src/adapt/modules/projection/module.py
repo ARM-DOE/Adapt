@@ -157,6 +157,8 @@ class RadarCellProjector:
             "poly_sigma": config.projector.flow_params.poly_sigma,
             "flags": config.projector.flow_params.flags,
         }
+        self.min_motion_threshold = config.projector.min_motion_threshold
+        self.max_flow_magnitude = config.projector.max_flow_magnitude
         self.refl_var = config.global_.var_names.reflectivity
 
     def project(self, ds_list):
@@ -230,11 +232,18 @@ class RadarCellProjector:
         Receives ds with cell_labels from segmenter. The reflectivity
         slice extraction is handled by processor before calling this.
 
-        Note: Time gap validation is now handled by Processor orchestration.
-        This method assumes the datasets have already been validated.
+        Note: Processor orchestration may validate time gaps earlier, but this
+        method also enforces max_time_interval_minutes for standalone safety.
         """
-        # Validate basic requirements (time gap checked by processor)
+        # Validate basic requirements (including time gap).
         time_diff = self._validate_datasets(ds_list, self.max_interval_minutes)
+        if abs(time_diff) > self.max_interval_minutes:
+            logger.warning(
+                "Skipping projection: time interval %.1f min exceeds max %.1f min",
+                float(time_diff),
+                float(self.max_interval_minutes),
+            )
+            return ds_list[1].copy()
 
         logger.debug(f"Computing flow: {time_diff:.1f} min interval")
 
@@ -245,6 +254,7 @@ class RadarCellProjector:
 
         refl1_norm, refl2_norm = self._normalize(refl1, refl2)
         flow = cv2.calcOpticalFlowFarneback(refl1_norm, refl2_norm, None, **self.flow_params)
+        flow = self._sanitize_flow(flow)
 
         # Get cell_labels from segmenter output
         # For registration (offset=0): project labels from t-1 (ds_list[0]) to t0 (ds_list[1])
@@ -423,6 +433,50 @@ class RadarCellProjector:
             )
 
         return time_diff_minutes
+
+    def _sanitize_flow(self, flow: np.ndarray) -> np.ndarray:
+        """Apply sanity checks to Farneback flow field.
+
+        Clips vectors exceeding max_flow_magnitude (spurious large displacements
+        at data edges or in no-echo regions). Logs a warning when median motion
+        falls below min_motion_threshold (field likely static or noisy).
+
+        Parameters
+        ----------
+        flow : np.ndarray, shape (H, W, 2)
+            Raw optical flow from cv2.calcOpticalFlowFarneback.
+
+        Returns
+        -------
+        np.ndarray
+            Flow with outlier vectors clipped; same shape and dtype.
+        """
+        magnitude = np.linalg.norm(flow, axis=2)
+
+        median_mag = float(np.median(magnitude))
+        if median_mag < self.min_motion_threshold:
+            logger.warning(
+                "Median flow magnitude %.2f px/frame is below min_motion_threshold %.2f; "
+                "field may be static or dominated by noise",
+                median_mag,
+                self.min_motion_threshold,
+            )
+
+        too_large = magnitude > self.max_flow_magnitude
+        if too_large.any():
+            n_clipped = int(too_large.sum())
+            logger.warning(
+                "Clipping %d flow vectors exceeding max_flow_magnitude %.1f px/frame "
+                "(max observed: %.1f)",
+                n_clipped,
+                self.max_flow_magnitude,
+                float(magnitude.max()),
+            )
+            # Scale down vectors that exceed the cap, preserving direction.
+            scale = np.where(too_large, self.max_flow_magnitude / np.maximum(magnitude, 1e-6), 1.0)
+            flow = flow * scale[:, :, np.newaxis]
+
+        return flow
 
     def _normalize(self, refl1, refl2):
         """Normalize to uint8."""

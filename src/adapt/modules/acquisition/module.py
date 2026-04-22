@@ -144,6 +144,7 @@ class AwsNexradDownloader(threading.Thread):
         self._known_files = set()
         self._known_files_lock = threading.Lock()
         self._min_file_size = config.downloader.min_file_size
+        self._last_availability_warning: tuple[object, object] | None = None
 
         # Historical mode tracking
         self._historical_complete = threading.Event()
@@ -359,7 +360,10 @@ class AwsNexradDownloader(threading.Thread):
 
         logger.debug("Realtime: last %d min (%s to %s)", self.latest_minutes, start, end)
 
-        self._check_radar_available(end, end)
+        # Use the full realtime window for availability checks. This avoids
+        # false "not found" warnings around UTC midnight when the window spans
+        # two dates (yesterday has inventory, today may not yet).
+        self._check_radar_available(start, end)
 
         scans = self._fetch_scans(start, end)
         if not scans:
@@ -436,6 +440,10 @@ class AwsNexradDownloader(threading.Thread):
         # Warn ONLY if we successfully checked and radar was explicitly not found
         # Don't warn if all checks failed (inventory temporarily unavailable)
         if not found_on_any_day and not all_checks_failed:
+            warned_key = (start.date(), end.date())
+            if self._last_availability_warning == warned_key:
+                return
+            self._last_availability_warning = warned_key
             logger.warning(
                 "⚠️ Radar %s not found in AWS for %s - %s."
                 " Downloader will continue polling for scans.",

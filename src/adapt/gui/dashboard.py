@@ -53,6 +53,7 @@ except ImportError:
 try:
     import matplotlib
     matplotlib.use('TkAgg')
+    import cmweather.cm  # registers ChaseSpectral and other radar colormaps — must follow use()
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
     HAS_MPL = True
@@ -65,10 +66,6 @@ try:
 except ImportError:
     ctx = None
     HAS_CTX = False
-
-import cmweather.cm  # registers ChaseSpectral and other radar colormaps
-if HAS_MPL:
-    matplotlib.use('TkAgg')
 REFL_CMAP = 'ChaseSpectral'
 
 try:
@@ -84,13 +81,6 @@ try:
     HAS_PROJ = True
 except ImportError:
     HAS_PROJ = False
-
-try:
-    from pyart.io.nexrad_common import NEXRAD_LOCATIONS
-    HAS_NEXRAD_LOCS = True
-except ImportError:
-    NEXRAD_LOCATIONS = {}
-    HAS_NEXRAD_LOCS = False
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 POLL_MS   = 10_000  # auto-refresh every 10 s
@@ -1033,14 +1023,8 @@ class AdaptDashboard(tk.Tk):
         lat0 = ds_tmp.attrs.get('radar_latitude', ds_tmp.attrs.get('origin_latitude'))
         lon0 = ds_tmp.attrs.get('radar_longitude', ds_tmp.attrs.get('origin_longitude'))
 
-        # Fallback to NEXRAD station lookup
         if lat0 is None or lon0 is None:
-            radar_id = ds_tmp.attrs.get('radar', ds_tmp.attrs.get('radar_id', ''))
-            if radar_id and HAS_NEXRAD_LOCS and radar_id.upper() in NEXRAD_LOCATIONS:
-                loc = NEXRAD_LOCATIONS[radar_id.upper()]
-                lat0, lon0 = loc['lat'], loc['lon']
-            else:
-                lat0, lon0 = 0, 0
+            lat0, lon0 = 0, 0
         else:
             lat0, lon0 = float(lat0), float(lon0)
         ds_tmp.close()
@@ -1218,15 +1202,10 @@ class AdaptDashboard(tk.Tk):
         lat = ds.attrs.get('radar_latitude', ds.attrs.get('origin_latitude'))
         lon = ds.attrs.get('radar_longitude', ds.attrs.get('origin_longitude'))
 
-        # Fallback to NEXRAD station lookup
         if lat is None or lon is None:
             radar_id = ds.attrs.get('radar', ds.attrs.get('radar_id', ''))
-            if radar_id and HAS_NEXRAD_LOCS and radar_id.upper() in NEXRAD_LOCATIONS:
-                loc = NEXRAD_LOCATIONS[radar_id.upper()]
-                lat, lon = loc['lat'], loc['lon']
-            else:
-                print(f'No radar location for {radar_id}')
-                return
+            print(f'No radar location for {radar_id}')
+            return
 
         lat, lon = float(lat), float(lon)
         crs_str = (f'+proj=aeqd +lat_0={lat} +lon_0={lon} '

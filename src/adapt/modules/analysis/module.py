@@ -139,6 +139,7 @@ class RadarCellAnalyzer:
         self.radar_variables = config.analyzer.radar_variables
         self.exclude_fields = config.analyzer.exclude_fields
         self.max_projection_steps = config.projector.max_projection_steps
+        self._adjacency_min_touching = config.analyzer.adjacency_min_touching_boundary_pixels
 
     def extract(self, ds: xr.Dataset, z_level: int = None) -> pd.DataFrame:
         """Extract geometric and statistical properties from all labeled cells.
@@ -240,7 +241,105 @@ class RadarCellAnalyzer:
         df = pd.DataFrame(results)
         if df.empty:
             # Ensure required columns exist even if empty to satisfy contracts
-            return pd.DataFrame(columns=["cell_label", "cell_area_sqkm", "time"])
+            return pd.DataFrame(
+                columns=[
+                    "cell_label",
+                    "cell_area_sqkm",
+                    "time",
+                    "time_volume_start",
+                    "cell_centroid_mass_lat",
+                    "cell_centroid_mass_lon",
+                    "radar_reflectivity_max",
+                    "radar_differential_reflectivity_max",
+                    "area_40dbz_km2",
+                ]
+            )
+        return df
+
+    def extract_adjacency(self, ds: xr.Dataset) -> pd.DataFrame:
+        """Extract direct same-scan cell adjacency pairs from the label grid.
+
+        Adjacency definition: two positive labels are adjacent if they touch
+        along a shared boundary with at least N touching boundary pixel-edges,
+        where N is config-driven (`analyzer.adjacency_min_touching_boundary_pixels`).
+        """
+        labels_name = self.config.global_.var_names.cell_labels
+        if labels_name not in ds.data_vars:
+            raise ValueError(f"Missing required labels variable '{labels_name}' for adjacency extraction")
+        if "time" not in ds.coords:
+            raise ValueError("Missing required coordinate 'time' for adjacency extraction")
+
+        labels = ds[labels_name].values
+        if labels.ndim != 2:
+            raise ValueError(f"Expected 2D labels array for adjacency extraction, got shape={labels.shape}")
+
+        scan_time = str(ds.time.values)
+        adjacency = self._compute_boundary_adjacency(
+            labels=labels, min_touching_pixels=int(self._adjacency_min_touching),
+        )
+
+        if adjacency.empty:
+            return pd.DataFrame(
+                columns=["time", "cell_label_a", "cell_label_b", "touching_boundary_pixels"]
+            )
+
+        adjacency.insert(0, "time", scan_time)
+        return adjacency
+
+    @staticmethod
+    def _compute_boundary_adjacency(labels: np.ndarray, min_touching_pixels: int) -> pd.DataFrame:
+        """Compute direct boundary adjacency between positive labels.
+
+        Counts touching boundary pixel-edges using 4-neighborhood comparisons
+        (right and down). Stores each unordered pair once with canonical ordering
+        (a < b).
+        """
+        if min_touching_pixels < 1:
+            raise ValueError(f"min_touching_pixels must be >= 1, got {min_touching_pixels}")
+
+        labels = labels.astype(np.int64, copy=False)
+        counts: dict[tuple[int, int], int] = {}
+
+        # Horizontal boundaries (x -> x+1)
+        left = labels[:, :-1]
+        right = labels[:, 1:]
+        mask_h = (left > 0) & (right > 0) & (left != right)
+        if np.any(mask_h):
+            a = left[mask_h]
+            b = right[mask_h]
+            lo = np.minimum(a, b)
+            hi = np.maximum(a, b)
+            for aa, bb in zip(lo.tolist(), hi.tolist(), strict=True):
+                key = (int(aa), int(bb))
+                counts[key] = counts.get(key, 0) + 1
+
+        # Vertical boundaries (y -> y+1)
+        up = labels[:-1, :]
+        down = labels[1:, :]
+        mask_v = (up > 0) & (down > 0) & (up != down)
+        if np.any(mask_v):
+            a = up[mask_v]
+            b = down[mask_v]
+            lo = np.minimum(a, b)
+            hi = np.maximum(a, b)
+            for aa, bb in zip(lo.tolist(), hi.tolist(), strict=True):
+                key = (int(aa), int(bb))
+                counts[key] = counts.get(key, 0) + 1
+
+        rows = [
+            {
+                "cell_label_a": k[0],
+                "cell_label_b": k[1],
+                "touching_boundary_pixels": v,
+            }
+            for k, v in counts.items()
+            if v >= min_touching_pixels
+        ]
+        if not rows:
+            return pd.DataFrame(columns=["cell_label_a", "cell_label_b", "touching_boundary_pixels"])
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values(["cell_label_a", "cell_label_b"]).reset_index(drop=True)
         return df
 
     def _pixel_area_km2(self, ds):
@@ -248,6 +347,32 @@ class RadarCellAnalyzer:
         dx = float(np.abs(ds.x[1] - ds.x[0]))
         dy = float(np.abs(ds.y[1] - ds.y[0]))
         return (dx * dy) / 1e6
+
+    @staticmethod
+    def _normalize_time_scalar(time_val):
+        tv = time_val
+        while isinstance(tv, np.ndarray) and tv.size == 1:
+            tv = tv.reshape(-1)[0]
+        if isinstance(tv, np.ndarray):
+            tv = tv.reshape(-1)[0]
+        if hasattr(tv, "item"):
+            try:
+                tv = tv.item()
+            except Exception:
+                pass
+        if getattr(type(tv), "__module__", "").startswith("cftime"):
+            from datetime import datetime, timezone
+            tv = datetime(
+                int(tv.year),
+                int(tv.month),
+                int(tv.day),
+                int(tv.hour),
+                int(tv.minute),
+                int(tv.second),
+                int(getattr(tv, "microsecond", 0) or 0),
+                tzinfo=timezone.utc,
+            )
+        return tv
 
     def _get_lat_lon_grids(self, ds):
         """Get lat/lon grids from dataset.
@@ -344,7 +469,10 @@ class RadarCellAnalyzer:
         max_coord = region_coords[max_idx]
 
         # Get scan start time
-        scan_time = str(ds.time.values) if "time" in ds.coords else ""
+        scan_time = ""
+        if "time" in ds.coords:
+            tv = self._normalize_time_scalar(ds.time.values)
+            scan_time = pd.Timestamp(tv).isoformat()
 
         # === GEOMETRIC CENTROID (center of mass of binary mask) ===
         geom_props = self._compute_geometric_centroid(mask, lat_grid, lon_grid)
@@ -377,6 +505,7 @@ class RadarCellAnalyzer:
             "time_volume_end": None,  # Will be populated when available
             "cell_label": int(region.label),
             "cell_area_sqkm": float(region.area * pixel_area_km2),
+            "area_40dbz_km2": float(np.sum(refl[mask] > 40.0) * pixel_area_km2),
             # Geometric centroid - both XY and lat/lon
             "cell_centroid_geom_x": geom_props["centroid_x"],
             "cell_centroid_geom_y": geom_props["centroid_y"],
@@ -506,23 +635,24 @@ class RadarCellAnalyzer:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
-from datetime import timezone as _tz
 from adapt.modules.base import BaseModule
 from adapt.execution.module_registry import registry
-from .contracts import assert_analysis_output
-from adapt.persistence.writer import RepositoryWriter
+from .contracts import assert_analysis_output, assert_cell_adjacency
 
 
 def _check_cell_stats(df):
     assert_analysis_output(df)
+
+def _check_cell_adjacency(df):
+    assert_cell_adjacency(df)
 
 
 class AnalysisModule(BaseModule):
     """BaseModule wrapper for RadarCellAnalyzer.
 
     Extracts per-cell statistics (area, reflectivity, motion, centroids)
-    from a segmented/projected 2D dataset and optionally persists them
-    to the DataRepository.
+    from a segmented/projected 2D dataset. Pure compute — no I/O.
+    Persistence is the processor's responsibility.
 
     Context inputs
     --------------
@@ -532,48 +662,35 @@ class AnalysisModule(BaseModule):
         Runtime configuration.
     scan_time : datetime
         Radar scan timestamp (from LoadModule).
-    repository : DataRepository, optional
-        If present, cell statistics are written to the repository.
 
     Context outputs
     ---------------
     cell_stats : pd.DataFrame
         Per-cell statistics DataFrame.
+    cell_adjacency : pd.DataFrame
+        Touching-cell pairs DataFrame.
     """
 
     name = "analysis"
     inputs = ["projected_ds", "config", "scan_time"]
-    outputs = ["cell_stats"]
-    output_contracts = {"cell_stats": _check_cell_stats}
+    outputs = ["cell_stats", "cell_adjacency"]
+    output_contracts = {"cell_stats": _check_cell_stats, "cell_adjacency": _check_cell_adjacency}
 
     def __init__(self) -> None:
         self._analyzer = None
-        self._writer: RepositoryWriter | None = None
 
     def run(self, context: dict) -> dict:
         config = context["config"]
         ds_2d = context["projected_ds"]
-        scan_time = context.get("scan_time")
-        repository = context.get("repository")
 
         if self._analyzer is None:
             self._analyzer = RadarCellAnalyzer(config)
 
         z_level = config.global_.z_level
         df_cells = self._analyzer.extract(ds_2d, z_level=z_level)
+        df_adjacency = self._analyzer.extract_adjacency(ds_2d)
 
-        if repository is not None and not df_cells.empty and scan_time is not None:
-            if self._writer is None:
-                self._writer = RepositoryWriter(repository)
-            if scan_time.tzinfo is None:
-                scan_time = scan_time.replace(tzinfo=_tz.utc)
-            self._writer.write_analysis(
-                df=df_cells,
-                scan_time=scan_time,
-                producer=self.name,
-            )
-
-        return {"cell_stats": df_cells}
+        return {"cell_stats": df_cells, "cell_adjacency": df_adjacency}
 
 
 registry.register(AnalysisModule)

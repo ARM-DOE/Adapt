@@ -226,6 +226,56 @@ class RepositoryRegistry:
             conn.commit()
         
         logger.debug("Radar registered: %s at %s", radar, data_path)
+
+    def get_radar_location(self, radar: str) -> tuple[Optional[float], Optional[float]]:
+        """Get stored radar location (lat, lon) from the registry."""
+        conn = self._get_connection()
+        with self._lock:
+            row = conn.execute(
+                "SELECT location_lat, location_lon FROM radars WHERE radar = ?",
+                (radar,),
+            ).fetchone()
+        if not row:
+            return None, None
+        return row["location_lat"], row["location_lon"]
+
+    def ensure_radar_location(self, radar: str, lat: float, lon: float) -> None:
+        """Ensure radar location is stored in the registry.
+
+        This is intentionally deterministic and does not use external lookup
+        tables. It is meant to be called once the location is available from
+        pipeline inputs (e.g., the first NEXRAD file/gridded dataset).
+        """
+        if lat is None or lon is None:
+            raise ValueError("lat/lon must be provided")
+
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except Exception as e:
+            raise ValueError(f"Invalid lat/lon types: {type(lat)} {type(lon)}") from e
+
+        conn = self._get_connection()
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._lock:
+            row = conn.execute(
+                "SELECT location_lat, location_lon FROM radars WHERE radar = ?",
+                (radar,),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Radar '{radar}' is not registered in the repository registry")
+
+            existing_lat = row["location_lat"]
+            existing_lon = row["location_lon"]
+            if existing_lat is not None and existing_lon is not None:
+                return
+
+            conn.execute(
+                "UPDATE radars SET location_lat = ?, location_lon = ?, last_updated = ? WHERE radar = ?",
+                (lat_f, lon_f, now, radar),
+            )
+            conn.commit()
     
     def get_radar_catalog_path(self, radar: str) -> Optional[Path]:
         """Get path to radar's catalog database.

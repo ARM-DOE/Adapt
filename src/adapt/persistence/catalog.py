@@ -67,7 +67,7 @@ class RadarCatalog:
         # Initialize database
         self._init_database()
         
-        logger.debug("RadarCatalog initialized for %s at %s", self.radar, self.db_path)
+        logger.info(f"RadarCatalog initialized for {self.radar} at {self.db_path}")
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-safe database connection."""
@@ -85,7 +85,7 @@ class RadarCatalog:
     
     def _init_database(self) -> None:
         """Initialize database schema from SQL file."""
-        schema_path = Path(__file__).parent / "schemas" / "radar_catalog_schema.sql"
+        schema_path = Path(__file__).resolve().parents[1] / "configuration" / "schemas" / "radar_catalog_schema.sql"
         
         if not schema_path.exists():
             # Fallback to embedded schema
@@ -99,8 +99,17 @@ class RadarCatalog:
         with self._lock:
             conn.executescript(schema_sql)
             conn.commit()
-        
+
+        self._ensure_track_signature_column()
         logger.debug(f"Radar catalog schema initialized from {schema_path}")
+
+    def _ensure_track_signature_column(self) -> None:
+        conn = self._get_connection()
+        with self._lock:
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(tracks)").fetchall()]
+            if "track_signature" not in cols:
+                conn.execute("ALTER TABLE tracks ADD COLUMN track_signature TEXT")
+                conn.commit()
     
     def _create_schema_inline(self) -> None:
         """Create schema inline (fallback)."""
@@ -339,7 +348,16 @@ class RadarCatalog:
                 """, (item_type,)).fetchone()
         
         return dict(row) if row else None
-    
+
+    def get_item(self, item_id: str) -> Optional[Dict]:
+        """Get a single item record by ID. Returns None if not found."""
+        conn = self._get_connection()
+        with self._lock:
+            row = conn.execute(
+                "SELECT * FROM items WHERE item_id = ?", (item_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
     # =========================================================================
     # Progress Tracking
     # =========================================================================
@@ -753,6 +771,8 @@ class RadarCatalog:
 
     def register_track(
         self,
+        track_id: str,
+        track_signature: str,
         track_index: int,
         run_id: str,
         start_time: datetime,
@@ -763,6 +783,10 @@ class RadarCatalog:
 
         Parameters
         ----------
+        track_id : str
+            Deterministic track identifier
+        track_signature : str
+            Canonical birth signature used to generate track_id
         track_index : int
             Human-readable track index (starts at 1)
         run_id : str
@@ -779,9 +803,6 @@ class RadarCatalog:
         str
             Track ID
         """
-        import uuid
-
-        track_id = str(uuid.uuid4())[:16]
         start_time_str = start_time.isoformat()
         now = datetime.now(timezone.utc).isoformat()
 
@@ -789,10 +810,10 @@ class RadarCatalog:
         with self._lock:
             conn.execute("""
                 INSERT INTO tracks
-                (track_id, track_index, run_id, start_time, birth_event,
+                (track_id, track_signature, track_index, run_id, start_time, birth_event,
                  birth_track_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (track_id, track_index, run_id, start_time_str, birth_event,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (track_id, track_signature, track_index, run_id, start_time_str, birth_event,
                   birth_track_id, now, now))
             conn.commit()
 

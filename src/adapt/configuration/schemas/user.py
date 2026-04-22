@@ -63,6 +63,7 @@ class UserProjectorConfig(AdaptBaseModel):
     nan_fill_value: Optional[float] = None
     flow_params: Optional[dict[str, Any]] = None
     min_motion_threshold: Optional[float] = None
+    max_flow_magnitude: Optional[float] = None
 
     @field_validator("method", mode="before")
     @classmethod

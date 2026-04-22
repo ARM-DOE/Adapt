@@ -118,6 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(processing_status);
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS tracks (
     track_id TEXT PRIMARY KEY,
+    track_signature TEXT NOT NULL,
     track_index INTEGER NOT NULL,      -- Human-readable index (starts at 1)
     run_id TEXT NOT NULL,
 

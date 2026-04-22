@@ -108,7 +108,7 @@ class RadarDataLoader:
         self.weighting_function = config.regridder.weighting_function
         self.save_netcdf = config.regridder.save_netcdf
 
-    def read(self, filepath: Path | str) -> Optional[object]:
+    def read(self, filepath: Path | str) -> object:
         """Read a NEXRAD archive file into a Py-ART Radar object.
         
         Loads the raw NEXRAD Level-II file (.gz format) and parses it into
@@ -143,26 +143,19 @@ class RadarDataLoader:
         >>> if radar is not None:
         ...     print(f"Loaded {radar.nrays} rays x {radar.ngates} gates")
         """
-        try:
-            filepath = str(filepath)
-            
-            # Validate file exists
-            if not Path(filepath).exists():
-                logger.error("Radar file not found: %s", filepath)
-                return None
-            
-            if self.file_format == "nexrad_archive":
-                radar = pyart.io.read_nexrad_archive(filepath)
-            else:
-                logger.error("Unsupported file format: %s", self.file_format)
-                return None
+        filepath = str(filepath)
 
-            logger.debug("Successfully read radar file: %s", filepath)
-            return radar
+        if not Path(filepath).exists():
+            raise FileNotFoundError(f"Radar file not found: {filepath}")
 
-        except Exception as e:
-            logger.exception("Failed to read radar file %s", filepath)
-            return None
+        if self.file_format != "nexrad_archive":
+            raise ValueError(f"Unsupported file format: {self.file_format!r}")
+
+        # Let pyart exceptions (HDF5, IOError, etc.) propagate so the processor
+        # can log the real error and skip the file cleanly.
+        radar = pyart.io.read_nexrad_archive(filepath)
+        logger.debug("Successfully read radar file: %s", filepath)
+        return radar
 
     def regrid(self, radar: object, grid_kwargs: dict = None,
                output_dir: str = None, source_filepath: str = None) -> Optional[xr.Dataset]:
@@ -234,36 +227,29 @@ class RadarDataLoader:
         >>> print(ds.reflectivity.shape)  # (50, 250, 250)
         """
 
-        try:
-            # Merge default regridder config with overrides
-            final_grid_kwargs = {
-                "grid_shape": self.grid_shape,
-                "grid_limits": self.grid_limits,
-                "roi_func": self.roi_func,
-                "min_radius": self.min_radius,
-                "weighting_function": self.weighting_function,
-            }
+        # Merge default regridder config with overrides
+        final_grid_kwargs = {
+            "grid_shape": self.grid_shape,
+            "grid_limits": self.grid_limits,
+            "roi_func": self.roi_func,
+            "min_radius": self.min_radius,
+            "weighting_function": self.weighting_function,
+        }
+        if grid_kwargs:
+            final_grid_kwargs.update(grid_kwargs)
 
-            # Override with explicit kwargs if provided
-            if grid_kwargs:
-                final_grid_kwargs.update(grid_kwargs)
+        # Let regridding failures propagate — the processor handles them.
+        grid = pyart.map.grid_from_radars(radar, **final_grid_kwargs)
+        ds = grid.to_xarray()
+        logger.debug("Success: regrid to xarray.Dataset")
 
-            # Perform regridding
-            grid = pyart.map.grid_from_radars(radar, **final_grid_kwargs)
-            ds = grid.to_xarray()
-            logger.debug("Success: regrid to xarray.Dataset")
+        ds.attrs['radar_latitude'] = float(radar.latitude['data'][0])
+        ds.attrs['radar_longitude'] = float(radar.longitude['data'][0])
+        ds.attrs['radar_altitude'] = float(radar.altitude['data'][0])
 
-            # Add radar location attributes to dataset.
-            ds.attrs['radar_latitude'] = float(radar.latitude['data'][0])
-            ds.attrs['radar_longitude'] = float(radar.longitude['data'][0])
-            ds.attrs['radar_altitude'] = float(radar.altitude['data'][0])
-
-            self._write_netcdf(ds, output_dir, source_filepath)
-            return ds
-
-        except Exception as e:
-            logger.exception("Regridding failed")
-            return None
+        # NetCDF save is best-effort: failure is logged but does not abort.
+        self._write_netcdf(ds, output_dir, source_filepath)
+        return ds
 
 
     def _write_netcdf(self, ds, output_dir, source_filepath):
@@ -342,12 +328,12 @@ class RadarDataLoader:
         ...     cells = segment_cells(ds)  # Downstream processing
         """
         radar = self.read(filepath)
-        if radar is None:
-            return None
-
-        ds = self.regrid(radar, grid_kwargs=grid_kwargs,
-                        output_dir=output_dir if save_netcdf else None,
-                        source_filepath=filepath)
+        ds = self.regrid(
+            radar,
+            grid_kwargs=grid_kwargs,
+            output_dir=output_dir if save_netcdf else None,
+            source_filepath=filepath,
+        )
         return ds
 
 
@@ -433,6 +419,9 @@ class LoadModule(BaseModule):
             output_dir=output_dir,
         )
 
+        if ds is None:
+            raise RuntimeError(f"Ingest failed: load_and_regrid returned None for {filepath}")
+
         # Extract 2D slice at configured z-level
         z_level = config.global_.z_level
         z_name = config.global_.coord_names.z
@@ -449,6 +438,7 @@ class LoadModule(BaseModule):
         for coord in ds.coords:
             if coord not in ds_2d.coords:
                 ds_2d = ds_2d.assign_coords({coord: ds[coord]})
+        ds_2d.attrs.update(ds.attrs)
 
         return {"grid_ds": ds, "grid_ds_2d": ds_2d, "scan_time": scan_time}
 

@@ -23,6 +23,7 @@ import pandas as pd
 
 from adapt.modules.base import ContractViolation
 from adapt.persistence import DataRepository, ProductType
+from adapt.persistence.writer import RepositoryWriter
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
@@ -308,11 +309,9 @@ class RadarProcessor(threading.Thread):
                 metadata={"components": list(ds.data_vars.keys())},
                 filename_stem=filename_stem,
             )
-            artifact   = self.repository.get_artifact(artifact_id)
-            nc_path    = Path(artifact["file_path"])
             components = list(ds.data_vars.keys())
-            logger.info("Analysis saved: %s [%s]", nc_path.name, ", ".join(components))
-            return str(nc_path)
+            logger.info("Analysis saved: %s [%s]", artifact_id, ", ".join(components))
+            return artifact_id
 
         except Exception as e:
             logger.warning("Could not save analysis NetCDF: %s", e)
@@ -352,6 +351,17 @@ class RadarProcessor(threading.Thread):
         result = self._ingest_module.run(context)
         context.update(result)
         ingest_s = time.perf_counter() - t0
+
+        # Persist radar location from actual data on first file (idempotent after that).
+        if self.repository:
+            grid_ds = context.get("grid_ds") or context.get("grid_ds_2d")
+            if grid_ds is not None:
+                lat = grid_ds.attrs.get("radar_latitude")
+                lon = grid_ds.attrs.get("radar_longitude")
+                if lat is not None and lon is not None:
+                    self.repository.registry.ensure_radar_location(
+                        self.config.downloader.radar, lat=float(lat), lon=float(lon)
+                    )
 
         # Run detection module
         t1 = time.perf_counter()
@@ -427,34 +437,50 @@ class RadarProcessor(threading.Thread):
         return None
 
     def _save_results(self, result: dict, scan_time):
-        """Save pipeline outputs to repository.
+        """Save all pipeline outputs to the repository.
 
         Saves:
         - projected_ds as NetCDF artifact
-        - cell_stats already saved by AnalysisModule
-        - tracked_cells/tracked_storms will be saved by TrackingModule
+        - cell_stats, cell_adjacency, tracked_cells, track_events,
+          tracked_cell_adjacency as Parquet artifacts
         """
-        # Save projected_ds to NetCDF (contains segmentation + projections + flow)
+        if scan_time is not None and scan_time.tzinfo is None:
+            scan_time = scan_time.replace(tzinfo=timezone.utc)
+
+        # NetCDF: segmentation + projections + flow vectors
         projected_ds = result.get("projected_ds")
         if projected_ds is not None:
             filepath = self._segmented_history[-1][0]  # Most recent file
             self._save_analysis_netcdf(projected_ds, filepath, scan_time)
 
-        pass
+        # Parquet: analysis and tracking outputs
+        writer = RepositoryWriter(self.repository)
+
+        cell_stats      = result.get("cell_stats")
+        cell_adjacency  = result.get("cell_adjacency")
+        tracked_cells   = result.get("tracked_cells")
+        track_events    = result.get("track_events")
+        tracked_adj     = result.get("tracked_cell_adjacency")
+
+        if cell_stats is not None and not cell_stats.empty:
+            writer.write_analysis(df=cell_stats, scan_time=scan_time, producer="analysis")
+        if cell_adjacency is not None and not cell_adjacency.empty:
+            writer.write_analysis(df=cell_adjacency, scan_time=scan_time, producer="cell_adjacency")
+        if tracked_cells is not None and not tracked_cells.empty:
+            writer.write_analysis(df=tracked_cells, scan_time=scan_time, producer="tracking_cells")
+        if track_events is not None and not track_events.empty:
+            writer.write_analysis(df=track_events, scan_time=scan_time, producer="tracking_events")
+        if tracked_adj is not None and not tracked_adj.empty:
+            writer.write_analysis(df=tracked_adj, scan_time=scan_time, producer="tracking_adjacency")
 
     # ── Results API (called by orchestrator on shutdown) ──────────────────────
 
     def get_results(self) -> pd.DataFrame:
-        """Return processed cell statistics.
-
-        Cell stats are written to the repository by AnalysisModule on each
-        file.  This method returns an empty DataFrame since the canonical
-        data source is the repository itself (use DataClient to query it).
-        """
+        """Cell stats are in the repository; use DataClient to query them."""
         return pd.DataFrame()
 
     def save_results(self, filepath: str = None):
-        """No-op: AnalysisModule writes results to the repository directly."""
+        """No-op: processor writes results to repository in _save_results."""
         pass
 
     def close_database(self):

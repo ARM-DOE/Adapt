@@ -111,86 +111,106 @@ CREATE INDEX IF NOT EXISTS idx_scans_run ON scans(run_id, scan_time DESC);
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(processing_status);
 
 -- ====================================================================
+-- Table: cells_by_scan
+--
+-- Wide canonical live table: one row per active tracked cell per scan.
+-- Contains all per-cell/per-scan outputs (analysis + track identity).
+-- Additional cell_stats columns are added dynamically via ALTER TABLE.
+-- ====================================================================
+CREATE TABLE IF NOT EXISTS cells_by_scan (
+    run_id                  TEXT NOT NULL,
+    scan_time               TEXT NOT NULL,       -- ISO8601 UTC
+    cell_label              INTEGER NOT NULL,
+    cell_uid                TEXT NOT NULL,
+    track_index             INTEGER NOT NULL,
+
+    -- Core cell stats (extended dynamically for all cell_stats columns)
+    cell_area_sqkm          REAL,
+    cell_centroid_mass_lat  REAL,
+    cell_centroid_mass_lon  REAL,
+    cell_centroid_geom_x    REAL,
+    cell_centroid_geom_y    REAL,
+    radar_reflectivity_max  REAL,
+    radar_reflectivity_mean REAL,
+    radar_differential_reflectivity_max REAL,
+    area_40dbz_km2          REAL,
+
+    -- Track adjacency summary
+    n_adjacent_tracks        INTEGER NOT NULL DEFAULT 0,
+    adjacent_cell_uids_json  TEXT,
+
+    -- Forward-set convenience flags (known at write time)
+    is_initiated_here       INTEGER NOT NULL DEFAULT 0,
+    is_split_target_here    INTEGER NOT NULL DEFAULT 0,
+    is_merge_target_here    INTEGER NOT NULL DEFAULT 0,
+
+    -- Age since track birth
+    age_seconds             REAL NOT NULL DEFAULT 0,
+
+    -- Retroactively updated flags (canonical truth in track_events)
+    is_split_source_here    INTEGER NOT NULL DEFAULT 0,
+    is_merge_source_here    INTEGER NOT NULL DEFAULT 0,
+    is_terminated_after_here INTEGER NOT NULL DEFAULT 0,
+
+    PRIMARY KEY (run_id, scan_time, cell_uid),
+    UNIQUE (run_id, scan_time, cell_label)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cbs_track ON cells_by_scan(run_id, cell_uid, scan_time);
+CREATE INDEX IF NOT EXISTS idx_cbs_scan  ON cells_by_scan(run_id, scan_time);
+CREATE INDEX IF NOT EXISTS idx_cbs_label ON cells_by_scan(run_id, cell_label, scan_time);
+
+-- ====================================================================
+-- Table: track_events
+--
+-- Authoritative lineage table: one row per lineage edge or lifecycle event.
+-- ====================================================================
+CREATE TABLE IF NOT EXISTS track_events (
+    event_id           INTEGER PRIMARY KEY,      -- autoincrement surrogate
+    run_id             TEXT NOT NULL,
+    source_scan_time   TEXT,                     -- ISO8601 UTC; NULL for INITIATION
+    target_scan_time   TEXT,                     -- ISO8601 UTC; NULL for TERMINATION
+    event_type         TEXT NOT NULL,            -- CONTINUE|SPLIT|MERGE|INITIATION|TERMINATION
+    source_cell_uid    TEXT,
+    target_cell_uid    TEXT,
+    source_track_index INTEGER,
+    target_track_index INTEGER,
+    source_cell_label  INTEGER,
+    target_cell_label  INTEGER,
+    cost               REAL,
+    is_dominant        INTEGER NOT NULL DEFAULT 0,
+    event_group_id     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_te_source ON track_events(run_id, source_cell_uid);
+CREATE INDEX IF NOT EXISTS idx_te_target ON track_events(run_id, target_cell_uid);
+CREATE INDEX IF NOT EXISTS idx_te_group  ON track_events(run_id, event_group_id);
+
+-- ====================================================================
 -- Table: tracks
 --
--- First-class track entities with lifecycle metadata
--- One row per unique track (cell tracked across time)
+-- Convenience summary index: one row per track lifecycle.
+-- Not authoritative for lineage — use track_events for that.
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS tracks (
-    track_id TEXT PRIMARY KEY,
-    track_signature TEXT NOT NULL,
-    track_index INTEGER NOT NULL,      -- Human-readable index (starts at 1)
-    run_id TEXT NOT NULL,
+    run_id                          TEXT NOT NULL,
+    cell_uid                        TEXT NOT NULL,
+    track_index                     INTEGER NOT NULL,
+    first_seen_time                 TEXT NOT NULL,
+    last_seen_time                  TEXT NOT NULL,
+    n_scans                         INTEGER NOT NULL DEFAULT 0,
+    origin_type                     TEXT NOT NULL,  -- INITIATION|SPLIT|MERGE|UNKNOWN
+    origin_event_group_id           TEXT,
+    origin_n_parents                INTEGER NOT NULL DEFAULT 0,
+    origin_primary_parent_cell_uid  TEXT,
+    termination_type                TEXT NOT NULL DEFAULT 'ACTIVE_AT_END',
+                                                    -- TERMINATION|MERGED|ACTIVE_AT_END|UNKNOWN
+    termination_event_group_id      TEXT,
+    terminated_into_cell_uid        TEXT,
+    max_area_sqkm                   REAL,
+    max_reflectivity                REAL,
 
-    -- Lifecycle
-    start_time TEXT NOT NULL,          -- ISO8601 UTC when track first appeared
-    end_time TEXT,                     -- ISO8601 UTC when track ended (NULL if active)
-    lifetime_minutes REAL,
-    birth_event TEXT NOT NULL DEFAULT 'NEW',  -- NEW | SPLIT
-    death_event TEXT,                  -- DISSIPATED | MERGED | NULL (active)
-    birth_track_id TEXT,               -- Parent track if SPLIT
-    death_track_id TEXT,               -- Absorbing track if MERGED
-
-    -- Peak statistics (updated as track progresses)
-    max_area_sqkm REAL,
-    max_reflectivity REAL,
-    max_num_cells INTEGER DEFAULT 1,
-
-    -- Spatial extent (bounding box in km)
-    bbox_min_x REAL,
-    bbox_min_y REAL,
-    bbox_max_x REAL,
-    bbox_max_y REAL,
-
-    created_at TEXT NOT NULL,          -- ISO8601 UTC timestamp
-    updated_at TEXT NOT NULL,          -- ISO8601 UTC timestamp
-
-    UNIQUE(run_id, track_index),
-    FOREIGN KEY (birth_track_id) REFERENCES tracks(track_id),
-    FOREIGN KEY (death_track_id) REFERENCES tracks(track_id)
+    PRIMARY KEY (run_id, cell_uid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tracks_run ON tracks(run_id);
-CREATE INDEX IF NOT EXISTS idx_tracks_active ON tracks(end_time) WHERE end_time IS NULL;
-CREATE INDEX IF NOT EXISTS idx_tracks_time_range ON tracks(start_time, end_time);
-
--- ====================================================================
--- Table: track_observations
---
--- Track observations: one row per (track, scan_time) pair
--- Contains position and properties at each time step
--- ====================================================================
-CREATE TABLE IF NOT EXISTS track_observations (
-    observation_id TEXT PRIMARY KEY,
-    track_id TEXT NOT NULL,
-    scan_time TEXT NOT NULL,           -- ISO8601 UTC timestamp
-    cell_id INTEGER NOT NULL,          -- Segmentation label
-
-    -- Position (in km from radar)
-    centroid_x REAL NOT NULL,
-    centroid_y REAL NOT NULL,
-    centroid_lat REAL,                 -- Geographic latitude
-    centroid_lon REAL,                 -- Geographic longitude
-
-    -- Properties at this time
-    area_sqkm REAL,
-    mean_reflectivity REAL,
-    max_reflectivity REAL,
-    core_area_sqkm REAL,
-
-    -- Motion (derived, km/min)
-    vx REAL,
-    vy REAL,
-    speed REAL,
-
-    -- Lifecycle phase
-    lifecycle_phase TEXT,              -- GROWTH | MATURE | DECAY
-
-    created_at TEXT NOT NULL,          -- ISO8601 UTC timestamp
-
-    FOREIGN KEY (track_id) REFERENCES tracks(track_id),
-    UNIQUE(track_id, scan_time)
-);
-
-CREATE INDEX IF NOT EXISTS idx_track_obs_track ON track_observations(track_id, scan_time);
-CREATE INDEX IF NOT EXISTS idx_track_obs_time ON track_observations(scan_time);

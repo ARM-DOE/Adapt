@@ -151,7 +151,7 @@ class AnalyzerConfig(AdaptBaseModel):
 
 class TrackerConfig(AdaptBaseModel):
     """Cell tracking configuration."""
-    class TrackIdConfig(AdaptBaseModel):
+    class CellUidConfig(AdaptBaseModel):
         """Track ID generation configuration."""
         time_step_s: int = Field(10, ge=1)
         latlon_step_deg: float = Field(0.1, gt=0.0)
@@ -164,7 +164,7 @@ class TrackerConfig(AdaptBaseModel):
     unmatch_cost_threshold: float = Field(2.0, ge=0.0, description="Cost above this is forced to dummy_cost before Hungarian (unlikely match)")
     split_overlap_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Min fraction of projected hull area overlapping born/surviving cell to confirm SPLIT or MERGE")
     core_reflectivity_threshold: float = Field(40.0, ge=0.0, description="Reflectivity threshold for core area (dBZ)")
-    track_id: TrackIdConfig = Field(default_factory=TrackIdConfig)
+    cell_uid: CellUidConfig = Field(default_factory=CellUidConfig)
 
 
 class VisualizationConfig(AdaptBaseModel):

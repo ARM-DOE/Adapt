@@ -107,8 +107,8 @@ class InternalAnalyzerConfig(AdaptBaseModel):
 
 class InternalTrackerConfig(AdaptBaseModel):
     """Runtime tracking configuration."""
-    class InternalTrackIdConfig(AdaptBaseModel):
-        """Runtime track ID configuration."""
+    class InternalCellUidConfig(AdaptBaseModel):
+        """Runtime cell UID configuration."""
         time_step_s: int = Field(ge=1)
         latlon_step_deg: float = Field(gt=0.0)
         area_step_km2: float = Field(gt=0.0)
@@ -120,7 +120,7 @@ class InternalTrackerConfig(AdaptBaseModel):
     unmatch_cost_threshold: float = Field(default=2.0, ge=0.0)
     split_overlap_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     core_reflectivity_threshold: float = Field(default=40.0, ge=0.0)
-    track_id: InternalTrackIdConfig
+    cell_uid: InternalCellUidConfig
 
 
 class InternalVisualizationConfig(AdaptBaseModel):

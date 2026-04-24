@@ -24,6 +24,7 @@ import pandas as pd
 from adapt.modules.base import ContractViolation
 from adapt.persistence import DataRepository, ProductType
 from adapt.persistence.writer import RepositoryWriter
+from adapt.persistence.track_store import TrackStore
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
@@ -408,7 +409,7 @@ class RadarProcessor(threading.Thread):
         Returns
         -------
         dict
-            Updated context with projected_ds, cell_stats, tracked_cells, etc.
+            Updated context with projected_ds, cell_stats, pathed_cells, etc.
         """
         # Inject segmented history into ProjectionModule
         projection_module = self._get_projection_module()
@@ -441,8 +442,8 @@ class RadarProcessor(threading.Thread):
 
         Saves:
         - projected_ds as NetCDF artifact
-        - cell_stats, cell_adjacency, tracked_cells, track_events,
-          tracked_cell_adjacency as Parquet artifacts
+        - cell_stats, cell_adjacency as Parquet artifacts
+        - tracked_cells, track_events, track_adjacency as SQLite via TrackStore
         """
         if scan_time is not None and scan_time.tzinfo is None:
             scan_time = scan_time.replace(tzinfo=timezone.utc)
@@ -453,25 +454,30 @@ class RadarProcessor(threading.Thread):
             filepath = self._segmented_history[-1][0]  # Most recent file
             self._save_analysis_netcdf(projected_ds, filepath, scan_time)
 
-        # Parquet: analysis and tracking outputs
+        # Parquet: analysis outputs
         writer = RepositoryWriter(self.repository)
 
-        cell_stats      = result.get("cell_stats")
-        cell_adjacency  = result.get("cell_adjacency")
-        tracked_cells   = result.get("tracked_cells")
-        track_events    = result.get("track_events")
-        tracked_adj     = result.get("tracked_cell_adjacency")
+        cell_stats     = result.get("cell_stats")
+        cell_adjacency = result.get("cell_adjacency")
+        tracked_cells  = result.get("tracked_cells")
+        track_events   = result.get("track_events")
+        track_adj      = result.get("track_adjacency")
 
         if cell_stats is not None and not cell_stats.empty:
             writer.write_analysis(df=cell_stats, scan_time=scan_time, producer="analysis")
         if cell_adjacency is not None and not cell_adjacency.empty:
             writer.write_analysis(df=cell_adjacency, scan_time=scan_time, producer="cell_adjacency")
+
+        # SQLite: track identity outputs
         if tracked_cells is not None and not tracked_cells.empty:
-            writer.write_analysis(df=tracked_cells, scan_time=scan_time, producer="tracking_cells")
-        if track_events is not None and not track_events.empty:
-            writer.write_analysis(df=track_events, scan_time=scan_time, producer="tracking_events")
-        if tracked_adj is not None and not tracked_adj.empty:
-            writer.write_analysis(df=tracked_adj, scan_time=scan_time, producer="tracking_adjacency")
+            TrackStore(self.repository.catalog.db_path).write_scan(
+                run_id=self.repository.run_id,
+                scan_time=scan_time,
+                cell_stats_df=cell_stats if cell_stats is not None else pd.DataFrame(),
+                tracked_cells_df=tracked_cells,
+                track_events_df=track_events if track_events is not None else pd.DataFrame(),
+                track_adj_df=track_adj if track_adj is not None else pd.DataFrame(),
+            )
 
     # ── Results API (called by orchestrator on shutdown) ──────────────────────
 

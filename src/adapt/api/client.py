@@ -49,6 +49,7 @@ import xarray as xr
 
 from adapt.persistence.registry import RepositoryRegistry
 from adapt.persistence.catalog import RadarCatalog
+from adapt.persistence.track_store import TrackStore
 
 __all__ = ['DataClient']
 
@@ -671,105 +672,52 @@ class DataClient:
                 raise ValueError(f"Unknown file format for {file_path}")
 
     # =========================================================================
-    # Tracking Methods
+    # Track Methods
     # =========================================================================
 
-    def get_tracks(
-        self,
-        radar: Optional[str] = None,
-        run_id: Optional[str] = None
-    ) -> Dict[int, List[Dict]]:
-        """Get all cell tracking paths.
-
-        Queries analysis2d data and groups by track_index to reconstruct
-        cell movement paths over time.
-
-        Parameters
-        ----------
-        radar : str, optional
-            Radar ID (uses first available if not specified)
-        run_id : str, optional
-            Filter by specific run
-
-        Returns
-        -------
-        dict
-            {track_index: [{time, x_km, y_km, cell_id, area, dbz_max}, ...]}
-            Each list is ordered oldest to newest.
-        """
+    def _track_store(self, radar: Optional[str] = None) -> TrackStore:
         if not radar:
             radars = self.list_radars()
             if not radars:
                 raise ValueError("No radars found in repository")
             radar = radars[0]
+        catalog = RadarCatalog(self.root_dir / radar)
+        return TrackStore(catalog.db_path)
 
-        # Query analysis2d for tracking data
-        sql = """
-            SELECT
-                scan_time,
-                track_index,
-                cell_label as cell_id,
-                centroid_x,
-                centroid_y,
-                cell_centroid_mass_lat as lat,
-                cell_centroid_mass_lon as lon,
-                cell_area_sqkm as area,
-                radar_reflectivity_max as dbz_max
-            FROM analysis2d
-            WHERE track_index IS NOT NULL AND track_index > 0
-            ORDER BY track_index, scan_time ASC
-        """
-
-        try:
-            df = self.query(sql, radar=radar)
-        except Exception as e:
-            logger.warning(f"Could not query tracking data: {e}")
-            return {}
-
-        if df.empty:
-            return {}
-
-        # Group by track_index
-        tracks: Dict[int, List[Dict]] = {}
-        for track_idx, group in df.groupby('track_index'):
-            track_idx = int(track_idx)
-            tracks[track_idx] = []
-            for _, row in group.iterrows():
-                tracks[track_idx].append({
-                    'time': row['scan_time'],
-                    'x_km': row['centroid_x'] / 1000.0 if pd.notna(row['centroid_x']) else None,
-                    'y_km': row['centroid_y'] / 1000.0 if pd.notna(row['centroid_y']) else None,
-                    'lat': row['lat'] if pd.notna(row['lat']) else None,
-                    'lon': row['lon'] if pd.notna(row['lon']) else None,
-                    'cell_id': int(row['cell_id']) if pd.notna(row['cell_id']) else None,
-                    'area': row['area'] if pd.notna(row['area']) else None,
-                    'dbz_max': row['dbz_max'] if pd.notna(row['dbz_max']) else None,
-                })
-
-        return tracks
-
-    def get_track(
+    def cells_by_scan(
         self,
-        track_index: int,
-        radar: Optional[str] = None
-    ) -> List[Dict]:
-        """Get a single track path by index.
+        run_id: str,
+        scan_time: datetime,
+        radar: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """All tracked cells for a single scan."""
+        return self._track_store(radar).get_cells_by_scan(run_id, scan_time)
 
-        Parameters
-        ----------
-        track_index : int
-            Track index to retrieve
-        radar : str, optional
-            Radar ID (uses first available if not specified)
+    def track_history(
+        self,
+        run_id: str,
+        cell_uid: str,
+        radar: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """All scan rows for one track, ordered by scan_time."""
+        return self._track_store(radar).get_track_history(run_id, cell_uid)
 
-        Returns
-        -------
-        list of dict
-            [{time, x_km, y_km, cell_id, area, dbz_max}, ...]
-            Ordered oldest to newest.
-        """
-        tracks = self.get_tracks(radar=radar)
-        return tracks.get(track_index, [])
+    def track_events(
+        self,
+        run_id: str,
+        cell_uid: Optional[str] = None,
+        radar: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Lineage events for a run, optionally filtered to one cell_uid."""
+        return self._track_store(radar).get_track_events(run_id, cell_uid)
+
+    def tracks(
+        self,
+        run_id: str,
+        radar: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Lifecycle summary for all tracks in a run."""
+        return self._track_store(radar).get_tracks(run_id)
 
     # =========================================================================
     # Pipeline Status Methods
@@ -1008,16 +956,10 @@ class DataClient:
                     bundle['cells'] = pd.read_parquet(analysis_path, engine='pyarrow')
 
         # Get tracks active at this scan time
-        tracks_at_time = catalog.get_tracks_at_time(scan_time_dt)
-        bundle['tracks'] = []
-        for track in tracks_at_time:
-            track_path = catalog.get_track_path(track['track_id'])
-            bundle['tracks'].append({
-                'track_id': track['track_id'],
-                'track_index': track['track_index'],
-                'birth_event': track.get('birth_event'),
-                'path': track_path,
-            })
+        run_id = scan.get('run_id')
+        if run_id:
+            scan_cells = TrackStore(catalog.db_path).get_cells_by_scan(run_id, scan_time_dt)
+            bundle['tracks'] = scan_cells.to_dict('records') if not scan_cells.empty else []
 
         return bundle
 
@@ -1073,7 +1015,6 @@ class DataClient:
                     for idx in track_indices:
                         bundle['tracks'].append({
                             'track_index': int(idx),
-                            'path': [],  # Would need full query for path
                         })
 
         return bundle

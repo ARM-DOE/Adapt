@@ -121,7 +121,10 @@ def _run_nexrad(args: argparse.Namespace) -> None:
     from adapt.runtime.orchestrator import PipelineOrchestrator
 
     config = init_runtime_config(args)
-    orchestrator = PipelineOrchestrator(config)
+    orchestrator = PipelineOrchestrator(
+        config,
+        close_repository_on_stop=bool(args.no_plot),
+    )
 
     stop_event = threading.Event()
 
@@ -195,6 +198,7 @@ def _run_nexrad(args: argparse.Namespace) -> None:
             plot_consumer.join(timeout=10)
             if plot_consumer.is_alive():
                 print('Warning: Plot consumer did not stop cleanly')
+        orchestrator.close_repository()
         _remove_pid()
         print('Pipeline shutdown complete.')
 

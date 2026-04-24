@@ -18,6 +18,7 @@ not need a running pipeline.  The Start/Stop buttons are provided for
 convenience.
 """
 
+import contextlib
 import copy
 import os
 import shutil
@@ -27,6 +28,25 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+
+
+@contextlib.contextmanager
+def _suppress_osx_stderr():
+    """Redirect fd 2 to /dev/null for the duration of the block.
+
+    macOS ObjC runtime prints NSOpenPanel/NSWindow warnings directly to
+    file-descriptor 2, bypassing Python's sys.stderr.  Only an OS-level
+    dup2 can suppress them.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    saved   = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
 
 # ── PROJ data path fix (must be before contextily/rasterio) ──────────────────
 # Force-set PROJ paths to the active environment's proj.db.
@@ -55,6 +75,7 @@ try:
     matplotlib.use('TkAgg')
     import cmweather.cm  # registers ChaseSpectral and other radar colormaps — must follow use()
     import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
     HAS_MPL = True
 except ImportError:
@@ -95,20 +116,20 @@ _FONT_LBL = ('Courier', 12)
 # Each row: (top_label, hv_key_top, top_fg, bot_label, hv_key_bot, bot_fg)
 # Lat(M)/Lon(M) removed — mouse coords are shown in toolbar coordinate bar
 _BOX_DEFS = [
-    ('Cell',   'cell_id',  '#ffffff', 'Area km²', 'area',     '#ffff44'),
-    ('Lat(C)', 'lat_mass', '#44ff88', 'Lon(C)',   'lon_mass', '#44ff88'),
+    ('Track',    'cell_uid', '#ffffff', 'Area km²', 'area',     '#ffff44'),
+    ('Lat(C)',   'lat_mass', '#44ff88', 'Lon(C)',   'lon_mass', '#44ff88'),
     ('dBZ mean', 'dbz_mean', '#ff8800', 'dBZ max',  'dbz_max',  '#ffcc44'),
     ('ZDR mean', 'zdr_mean', '#ff44ff', 'ZDR max',  'zdr_max',  '#ff88ff'),
-    ('Vel mean', 'vel_mean', '#44ffff', 'SpW mean',  'sw_mean',  '#ff5555'),
+    ('Age',      'age',      '#aaffaa', 'Vel mean', 'vel_mean', '#44ffff'),
 ]
-_HV_KEYS = ('cell_id', 'area',
+_HV_KEYS = ('cell_uid', 'area',
             'lat_mass', 'lon_mass',
             'dbz_mean', 'dbz_max', 'zdr_mean', 'zdr_max',
-            'vel_mean', 'sw_mean')
+            'age', 'vel_mean')
 
 # ── Variable selector defaults: (vmin, vmax, unit, cmap) ─────────────────────
 _VAR_DEFAULTS = {
-    'reflectivity':              (10,  65,  'dBZ', 'ChaseSpectral'),
+    'reflectivity':              (10,  60,  'dBZ', 'ChaseSpectral'),
     'differential_reflectivity': (-2,  8,   'dB',  'RdYlBu_r'),
     'velocity':                  (-30, 30,  'm/s', 'RdBu_r'),
     'spectrum_width':            (0,   15,  'm/s', 'plasma'),
@@ -347,15 +368,29 @@ class AdaptDashboard(tk.Tk):
 
         # Inline render state
         self._current_nc_ds   = None   # loaded xarray Dataset
-        self._current_cell_df = None   # loaded parquet DataFrame
+        self._current_cell_df = None   # cells_by_scan DataFrame (SQLite) or parquet fallback
+        self._current_run_id  = None   # run_id for the loaded cell data
         self._current_scan_ts = None   # pd.Timestamp of current displayed scan
-        self._cell_contours   = {}     # cell_id -> contour set (ax2)
+        self._cell_contours   = {}     # cell_id -> contour set on radar ax
         self._hover_canvas    = None   # ref to mpl canvas for hover
+
+        # Track click overlay state
+        self._selected_cell_uid: str | None = None
+        self._selected_track_index: int | None = None
+        self._track_overlay: list | None = None    # matplotlib artists for path overlay
+        self._ts_axes: tuple | None = None         # (ax_area, ax_dbz, ax_reserved)
+        self._show_flow_var: tk.BooleanVar | None = None  # set in _build_scan_tab
+        self._colorbar: object | None = None               # active colorbar reference
+        self._cbar_ax: object | None = None               # pre-allocated colorbar axes
+        self._bg_alpha_var: tk.DoubleVar | None = None    # grayscale background alpha
 
         # NC loop animation state (replaces PNG loop)
         self._nc_loop_running = False
         self._nc_loop_index   = 0
         self._nc_loop_files   = []
+
+        # Pending after() IDs — cancelled on close to prevent post-destroy callbacks
+        self._after_ids: list[str] = []
 
         # Auto-refresh live tracking
         self._last_rendered_nc = None   # path of last auto-rendered NC file
@@ -373,10 +408,11 @@ class AdaptDashboard(tk.Tk):
 
         self._build_ui()
         self.protocol('WM_DELETE_WINDOW', self._on_close)
+        self.bind('<Escape>', self._on_escape)
 
         # Start auto-refresh and status countdown ticker
-        self.after(500, self._schedule_refresh)
-        self.after(1000, self._status_tick)
+        self._after_ids.append(self.after(500, self._schedule_refresh))
+        self._after_ids.append(self.after(1000, self._status_tick))
 
         if repo:
             self.after(200, self._on_repo_changed)
@@ -465,7 +501,7 @@ class AdaptDashboard(tk.Tk):
         ttk.Entry(ctrl1, textvariable=self._plot_vmin, width=6,
                   font=('Courier', 10)).pack(side='left', padx=2)
         ttk.Label(ctrl1, text='Max:', font=('', 10)).pack(side='left', padx=(4, 0))
-        self._plot_vmax = tk.StringVar(value='65')
+        self._plot_vmax = tk.StringVar(value='60')
         ttk.Entry(ctrl1, textvariable=self._plot_vmax, width=6,
                   font=('Courier', 10)).pack(side='left', padx=2)
         ttk.Label(ctrl1,
@@ -512,6 +548,21 @@ class AdaptDashboard(tk.Tk):
         ttk.Button(ctrl2, text='Clear',
                    command=self._clear_canvas).pack(side='left', padx=2)
 
+        ttk.Separator(ctrl2, orient='vertical').pack(side='left', fill='y', padx=8)
+        self._show_flow_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(ctrl2, text='Show flow',
+                        variable=self._show_flow_var).pack(side='left', padx=2)
+
+        ttk.Label(ctrl2, text='BG α:').pack(side='left', padx=(6, 0))
+        self._bg_alpha_var = tk.DoubleVar(value=0.85)
+        ttk.Spinbox(ctrl2, from_=0.0, to=1.0, increment=0.05,
+                    format='%.2f', textvariable=self._bg_alpha_var,
+                    width=5).pack(side='left', padx=2)
+
+        ttk.Separator(ctrl2, orient='vertical').pack(side='left', fill='y', padx=6)
+        ttk.Button(ctrl2, text='Update',
+                   command=self._redraw).pack(side='left', padx=2)
+
         # Canvas area — toolbar + cell info embedded by _render_nc
         self.scan_container = ttk.Frame(tab)
         self.scan_container.pack(fill='both', expand=True)
@@ -533,7 +584,15 @@ class AdaptDashboard(tk.Tk):
 
         ttk.Label(left, text='Filter cells', font=('', 10, 'bold')).pack(anchor='w', pady=(0, 6))
 
-        self._flt      = {}
+        # Cell UID prefix search
+        pid_row = ttk.Frame(left)
+        pid_row.pack(fill='x', pady=(0, 8))
+        ttk.Label(pid_row, text='Cell UID prefix:', width=14, anchor='w').pack(side='left')
+        self._cell_uid_filter = tk.StringVar()
+        ttk.Entry(pid_row, textvariable=self._cell_uid_filter, width=12).pack(side='left', padx=2)
+        self._cell_uid_filter.trace_add('write', lambda *_: self._refresh_table())
+
+        self._flt         = {}
         self._flt_sliders = {}
 
         filter_defs = [
@@ -632,7 +691,8 @@ class AdaptDashboard(tk.Tk):
     # ── Browse / selection ────────────────────────────────────────────────────
 
     def _browse_repo(self):
-        path = filedialog.askdirectory(title='Select Adapt output repository', parent=self)
+        with _suppress_osx_stderr():
+            path = filedialog.askdirectory(title='Select Adapt output repository', parent=self)
         if path:
             self._repo_root.set(path)
             self._on_repo_changed()
@@ -759,6 +819,19 @@ class AdaptDashboard(tk.Tk):
         self.status_var.set(f'Stopped  |  {self._radar.get()}')
 
     def _on_close(self):
+        # Stop all pending after() callbacks before destroying to avoid
+        # "invalid command name" errors from orphaned scheduled calls.
+        self._nc_loop_running = False
+        for after_id in self._after_ids:
+            try:
+                self.after_cancel(after_id)
+            except Exception:
+                pass
+        self._after_ids.clear()
+
+        # Close matplotlib figures
+        plt.close('all')
+
         if self._proc and self._proc.poll() is None:
             try:
                 os.killpg(os.getpgid(self._proc.pid), 15)
@@ -777,7 +850,7 @@ class AdaptDashboard(tk.Tk):
 
     def _schedule_refresh(self):
         self._refresh_all()
-        self.after(POLL_MS, self._schedule_refresh)
+        self._after_ids.append(self.after(POLL_MS, self._schedule_refresh))
 
     def _status_tick(self):
         """Update status bar every second: scan time + countdown to next check."""
@@ -788,7 +861,7 @@ class AdaptDashboard(tk.Tk):
                     if self._last_scan_dt else '—')
         self.status_var.set(
             f'{self._status_base}  |  Last scan: {scan_str}  |  Next check: {secs}s')
-        self.after(1000, self._status_tick)
+        self._after_ids.append(self.after(1000, self._status_tick))
 
     def _refresh_all(self):
         repo  = self._repo_root.get().strip()
@@ -819,19 +892,31 @@ class AdaptDashboard(tk.Tk):
             if self._last_rendered_nc is not None and self._last_rendered_nc != latest:
                 # New file appeared — update existing canvas in place or re-open
                 if self._canvas_refs is not None:
-                    canvas, fig, _tb, _bot = self._canvas_refs
                     try:
-                        self._load_parquet(repo, radar)
-                        self._draw_scan(xr.open_dataset(latest), fig)
-                        canvas.draw_idle()
+                        self._load_cells_data(repo, radar)
+                        self._redraw(xr.open_dataset(latest))
                         self._last_rendered_nc = latest
                         self.scan_var.set(labels[-1] if labels else '')
+                        db_path_r = Path(repo) / radar / 'catalog.db'
+                        if self._selected_cell_uid and self._current_run_id and db_path_r.exists():
+                            try:
+                                from adapt.persistence.track_store import TrackStore
+                                hist = TrackStore(db_path_r).get_track_history(
+                                    self._current_run_id, self._selected_cell_uid)
+                                if not hist.empty:
+                                    self._update_time_series(self._selected_track_index or 0, hist)
+                                else:
+                                    self._clear_time_series()
+                            except Exception:
+                                self._clear_time_series()
+                        else:
+                            self._clear_time_series()
                     except Exception:
                         pass
                 else:
                     # Canvas was cleared externally; re-render
                     try:
-                        self._load_parquet(repo, radar)
+                        self._load_cells_data(repo, radar)
                         self._render_nc(latest)
                         self._last_rendered_nc = latest
                         self.scan_var.set(labels[-1] if labels else '')
@@ -914,7 +999,7 @@ class AdaptDashboard(tk.Tk):
                                 f'{Path(repo) / radar / "analysis"}',
                                 parent=self)
             return
-        self._load_parquet(repo, radar)
+        self._load_cells_data(repo, radar)
         self._clear_canvas()
         self._render_nc(nc_files[-1])
         self._last_rendered_nc = nc_files[-1]
@@ -951,17 +1036,46 @@ class AdaptDashboard(tk.Tk):
         stem = sel.split('(')[-1].rstrip(')') if '(' in sel else ''
         nc_path = next((p for p in nc_files if p.stem == stem), nc_files[-1])
 
-        self._load_parquet(repo, radar)
+        self._load_cells_data(repo, radar)
         self._clear_canvas()
         self._render_nc(nc_path)
 
-    def _load_parquet(self, repo, radar):
-        """Load all cell stats parquet files into self._current_cell_df.
+    def _load_cells_data(self, repo, radar):
+        """Load per-cell data for the current run into self._current_cell_df.
 
-        Concatenates all analysis2d_*.parquet files to support hovering
-        over scans from any run.
+        Tries cells_by_scan (SQLite) first — contains track_index, cell_uid,
+        and all cell_stats columns. Falls back to parquet for legacy data.
         """
         self._current_cell_df = None
+        self._current_run_id = None
+
+        db_path = Path(repo) / radar / "catalog.db"
+        if db_path.exists():
+            try:
+                from adapt.persistence.track_store import TrackStore
+                import sqlite3
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                run_row = conn.execute(
+                    "SELECT run_id FROM cells_by_scan ORDER BY scan_time DESC LIMIT 1"
+                ).fetchone()
+                if run_row:
+                    run_id = run_row["run_id"]
+                    conn.close()
+                    ts_obj = TrackStore(db_path)
+                    rows = ts_obj._connect().execute(
+                        "SELECT * FROM cells_by_scan WHERE run_id=? ORDER BY scan_time",
+                        (run_id,),
+                    ).fetchall()
+                    if rows:
+                        self._current_cell_df = pd.DataFrame([dict(r) for r in rows])
+                        self._current_run_id = run_id
+                        return
+                conn.close()
+            except Exception:
+                pass
+
+        # Fallback: parquet (no track_index — time series won't work)
         pqs = sorted((Path(repo) / radar / 'analysis').glob('analysis2d_*.parquet'))
         if pqs:
             try:
@@ -987,7 +1101,7 @@ class AdaptDashboard(tk.Tk):
             messagebox.showinfo('No data',
                                 'No analysis NC files found.', parent=self)
             return
-        self._load_parquet(repo, radar)
+        self._load_cells_data(repo, radar)
         self._nc_loop_files   = nc_files
         self._nc_loop_index   = 0
         self.btn_loop.config(text='Stop Loop')
@@ -996,7 +1110,7 @@ class AdaptDashboard(tk.Tk):
         self._render_nc(nc_files[0])
         self._nc_loop_index = 1
         dt = max(100, self._loop_dt_var.get())
-        self.after(dt, self._nc_loop_step)
+        self._after_ids.append(self.after(dt, self._nc_loop_step))
 
     def _nc_loop_step(self):
         if not self._nc_loop_running or not self._nc_loop_files:
@@ -1004,36 +1118,47 @@ class AdaptDashboard(tk.Tk):
         path = self._nc_loop_files[self._nc_loop_index % len(self._nc_loop_files)]
         self._nc_loop_index += 1
         if self._canvas_refs is not None:
-            canvas, fig, toolbar, bottom = self._canvas_refs
-            self._draw_scan(xr.open_dataset(path), fig)
-            canvas.draw_idle()
+            self._clear_time_series()
+            self._redraw(xr.open_dataset(path))
         else:
             self._render_nc(path)
         dt = max(100, self._loop_dt_var.get())
-        self.after(dt, self._nc_loop_step)
+        self._after_ids.append(self.after(dt, self._nc_loop_step))
 
     # ── Core matplotlib rendering ─────────────────────────────────────────────
 
     def _render_nc(self, nc_path):
         """Create canvas + bottom strip, then render nc_path into a new figure."""
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6.5), dpi=90)
-
-        # Extract lat0/lon0 for toolbar coordinate transform
         ds_tmp = xr.open_dataset(nc_path)
         lat0 = ds_tmp.attrs.get('radar_latitude', ds_tmp.attrs.get('origin_latitude'))
         lon0 = ds_tmp.attrs.get('radar_longitude', ds_tmp.attrs.get('origin_longitude'))
-
         if lat0 is None or lon0 is None:
             lat0, lon0 = 0, 0
         else:
             lat0, lon0 = float(lat0), float(lon0)
         ds_tmp.close()
 
-        self._draw_scan(xr.open_dataset(nc_path), fig)
+        # GridSpec: radar | cbar | time-series (3 columns, 3 rows)
+        # cbar column is pre-allocated so colorbar never steals space from radar.
+        fig = plt.figure(figsize=(18, 6.5), dpi=90)
+        gs  = fig.add_gridspec(
+            3, 3,
+            width_ratios=[1.4, 0.05, 1.0],
+            hspace=0.5, wspace=0.25,
+            left=0.04, right=0.97, top=0.93, bottom=0.09,
+        )
+        ax_radar    = fig.add_subplot(gs[:, 0])
+        self._cbar_ax = fig.add_subplot(gs[:, 1])
+        ax_area     = fig.add_subplot(gs[0, 2])
+        ax_dbz      = fig.add_subplot(gs[1, 2], sharex=ax_area)
+        ax_reserved = fig.add_subplot(gs[2, 2], sharex=ax_area)
+        self._ts_axes = (ax_area, ax_dbz, ax_reserved)
+        self._clear_time_series()
+
+        self._draw_scan(xr.open_dataset(nc_path), fig, ax_radar)
 
         self.img_label.pack_forget()
 
-        # Bottom strip: toolbar (left) + stat boxes (right)
         bottom = tk.Frame(self.scan_container, bg=_STRIP_BG)
         bottom.pack(side='bottom', fill='x')
 
@@ -1046,9 +1171,8 @@ class AdaptDashboard(tk.Tk):
         toolbar.update()
         toolbar.pack(side='left')
 
-        # Dark stat boxes
         for var in self._hv.values():
-            var.set('\u2014')
+            var.set('—')
         stat_frame = tk.Frame(bottom, bg=_STRIP_BG)
         stat_frame.pack(side='right', fill='y', padx=4, pady=2)
         for lbl1, key1, fg1, lbl2, key2, fg2 in _BOX_DEFS:
@@ -1067,13 +1191,20 @@ class AdaptDashboard(tk.Tk):
         self._canvas_refs = (canvas, fig, toolbar, bottom)
         self._hover_canvas = canvas
         canvas.mpl_connect('motion_notify_event', self._on_plot_hover)
+        canvas.mpl_connect('button_press_event', self._on_cell_click)
 
-    def _draw_scan(self, ds, fig):
-        """Render dataset into fig (clears figure first). Keeps ds open."""
-        fig.clear()
-        ax1, ax2 = fig.subplots(1, 2)
-        ax1.set_facecolor('#cccccc')
-        ax2.set_facecolor('#cccccc')
+    def _draw_scan(self, ds, fig, ax=None):
+        """Render dataset into the radar axes. Keeps ds open."""
+        # Resolve ax — always the leftmost (index 0) in the GridSpec figure
+        if ax is None:
+            ax = fig.axes[0]
+
+        ax.clear()
+        ax.set_facecolor('white')
+        # Track overlay artists were removed by ax.clear(); reset references
+        self._track_overlay = None
+        self._selected_cell_uid = None
+        self._selected_track_index = None
 
         # Close previous dataset
         if self._current_nc_ds is not None and self._current_nc_ds is not ds:
@@ -1101,12 +1232,23 @@ class AdaptDashboard(tk.Tk):
         y_grid, x_grid = np.meshgrid(y_km, x_km, indexing='ij')
         labels_data = ds['cell_labels'].values
 
-        # ── Left panel: user-selected variable ───────────────────────────────
+        # ── Grayscale reflectivity background ────────────────────────────────
+        refl = ds['reflectivity'].values.astype(float)
+        refl_bg = np.ma.masked_where(np.isnan(refl) | (refl < 10), refl)
+        cmap_gray = copy.copy(plt.get_cmap('gray_r'))
+        cmap_gray.set_bad(alpha=0)
+        # vmin=10 → light gray (~0.35 on gray_r), vmax=50 → black
+        bg_alpha = self._bg_alpha_var.get() if self._bg_alpha_var else 0.35
+        ax.pcolormesh(x_km, y_km, refl_bg,
+                      cmap=cmap_gray, vmin=10, vmax=40,
+                      shading='auto', alpha=bg_alpha, zorder=2)
+
+        # ── User-selected variable overlay (cells only) ───────────────────────
         var_name = (self._plot_var.get()
                     if self._plot_var is not None else 'reflectivity')
         if var_name not in ds.data_vars:
             var_name = 'reflectivity'
-        vdef     = _VAR_DEFAULTS.get(var_name, (10, 65, 'dBZ', 'viridis'))
+        vdef     = _VAR_DEFAULTS.get(var_name, (10, 60, 'dBZ', 'viridis'))
         try:
             vmin = float(self._plot_vmin.get() if self._plot_vmin else vdef[0])
         except (ValueError, AttributeError):
@@ -1119,78 +1261,71 @@ class AdaptDashboard(tk.Tk):
         cmap_str = vdef[3]
         var_lbl  = _VAR_LABELS.get(var_name, var_name)
 
-        raw = ds[var_name].values.astype(float)
-        masked = np.ma.masked_where(np.isnan(raw) | (raw < vmin) | (raw > vmax), raw)
-        cmap1 = copy.copy(plt.get_cmap(cmap_str))
-        cmap1.set_bad(alpha=0)
+        raw    = ds[var_name].values.astype(float)
+        masked = np.ma.masked_where(np.isnan(raw) | (labels_data <= 0), raw)
+        cmap_ov = copy.copy(plt.get_cmap(cmap_str))
+        cmap_ov.set_bad(alpha=0)
+        im_ov = ax.pcolormesh(x_km, y_km, masked,
+                              cmap=cmap_ov, vmin=vmin, vmax=vmax,
+                              shading='auto', alpha=0.90, zorder=3)
 
-        im1 = ax1.pcolormesh(x_km, y_km, masked,
-                             cmap=cmap1, vmin=vmin, vmax=vmax,
-                             shading='auto', zorder=2)
-        plt.colorbar(im1, ax=ax1, label=unit, fraction=0.046, pad=0.04)
-        self._add_basemap(ax1, ds, x_km, y_km)
+        if self._cbar_ax is not None:
+            self._cbar_ax.cla()
+            self._colorbar = fig.colorbar(im_ov, cax=self._cbar_ax, label=unit)
+        else:
+            self._colorbar = fig.colorbar(im_ov, ax=ax, label=unit,
+                                          fraction=0.046, pad=0.04)
 
-        # Motion vectors (if available)
-        if 'heading_x' in ds.data_vars and 'heading_y' in ds.data_vars:
-            hx, hy = ds['heading_x'].values, ds['heading_y'].values
-            if not np.all(np.isnan(hx)):
-                s  = 10
-                yi_idx = np.arange(0, len(y_km), s)
-                xi_idx = np.arange(0, len(x_km), s)
-                Xs, Ys = np.meshgrid(x_km[xi_idx], y_km[yi_idx])
-                ax1.quiver(Xs, Ys,
-                           hx[np.ix_(yi_idx, xi_idx)],
-                           hy[np.ix_(yi_idx, xi_idx)],
-                           color='#222', alpha=0.7, scale=1.0, scale_units='xy',
-                           width=0.002, headwidth=3, zorder=45)
-
-        ax1.set_xlabel('X (km)'); ax1.set_ylabel('Y (km)')
-        ax1.grid(True, alpha=0.3, zorder=3)
-        ax1.set_title(f'{radar_id}  {var_lbl} + Motion\n{tstr}',
-                      fontsize=11, fontweight='bold')
-
-        # ── Right panel: cells + ALL projections ──────────────────────────────
-        refl = ds['reflectivity'].values.astype(float)
-        cmap2 = copy.copy(plt.get_cmap(REFL_CMAP))
-        cmap2.set_bad(alpha=0)
-        refl_seg = np.ma.masked_where(~(labels_data > 0) | (refl < 0), refl)
-        im2 = ax2.pcolormesh(x_km, y_km, refl_seg,
-                             cmap=cmap2, vmin=10, vmax=65,
-                             shading='auto', zorder=2)
-        plt.colorbar(im2, ax=ax2, label='dBZ', fraction=0.046, pad=0.04)
-        self._add_basemap(ax2, ds, x_km, y_km)
-
+        # ── Cell contours ─────────────────────────────────────────────────────
         for cell_id in np.unique(labels_data[labels_data > 0]):
-            cs = ax2.contour(x_grid, y_grid,
-                             (labels_data == cell_id).astype(float),
-                             levels=[0.5], colors='black', linewidths=1.5, zorder=50)
+            cs = ax.contour(x_grid, y_grid,
+                            (labels_data == cell_id).astype(float),
+                            levels=[0.5], colors='black', linewidths=1.5, zorder=50)
             self._cell_contours[int(cell_id)] = cs
 
+        # ── Projection contours ───────────────────────────────────────────────
         if 'cell_projections' in ds.data_vars:
             proj_da = ds['cell_projections']
             fo      = 'frame_offset'
             if fo in proj_da.dims:
-                n_frames   = len(proj_da[fo])
-                max_proj   = self._max_proj_var.get()
-                end_frame  = n_frames if max_proj == 0 else min(n_frames, max_proj + 1)
-                _ls_cycle  = ['dashed', 'dashdot', 'dotted']
+                n_frames  = len(proj_da[fo])
+                max_proj  = self._max_proj_var.get() if self._max_proj_var else 0
+                end_frame = n_frames if max_proj == 0 else min(n_frames, max_proj + 1)
+                _ls_cycle = ['dashed', 'dashdot', 'dotted']
                 for i in range(1, end_frame):
-                    alpha = max(0.7, 1.0 - i / n_frames)
+                    alpha = max(0.5, 1.0 - i / n_frames)
                     lw    = max(0.5, 1.0 - i * 0.1)
                     ls    = _ls_cycle[(i - 1) % len(_ls_cycle)]
                     lp = proj_da.isel({fo: i}).values
                     for cid in np.unique(lp[~np.isnan(lp) & (lp > 0)]):
-                        ax2.contour(x_grid, y_grid, (lp == cid).astype(float),
-                                    levels=[0.5], colors='black',
-                                    linewidths=lw, linestyles=ls,
-                                    alpha=alpha, zorder=40)
+                        ax.contour(x_grid, y_grid, (lp == cid).astype(float),
+                                   levels=[0.5], colors='black',
+                                   linewidths=lw, linestyles=ls,
+                                   alpha=alpha, zorder=40)
 
-        ax2.set_xlabel('X (km)'); ax2.set_ylabel('Y (km)')
-        ax2.grid(True, alpha=0.3, zorder=3)
-        ax2.set_title(f'{radar_id}  Cells + All Projections\n{tstr}',
-                      fontsize=11, fontweight='bold')
+        # ── Optical flow vectors (toggle) ─────────────────────────────────────
+        if (self._show_flow_var is not None and self._show_flow_var.get()
+                and 'heading_x' in ds.data_vars and 'heading_y' in ds.data_vars):
+            hx, hy = ds['heading_x'].values, ds['heading_y'].values
+            if not np.all(np.isnan(hx)):
+                s      = 10
+                yi_idx = np.arange(0, len(y_km), s)
+                xi_idx = np.arange(0, len(x_km), s)
+                Xs, Ys = np.meshgrid(x_km[xi_idx], y_km[yi_idx])
+                q = ax.quiver(Xs, Ys,
+                              hx[np.ix_(yi_idx, xi_idx)],
+                              hy[np.ix_(yi_idx, xi_idx)],
+                              color='#222222', alpha=0.7, scale=0.5, scale_units='xy',
+                              width=0.002, headwidth=4, zorder=45)
+                q._adapt_flow = True
 
-        fig.tight_layout()
+        self._add_basemap(ax, ds, x_km, y_km)
+        ax.set_xlabel('X (km)')
+        ax.set_ylabel('Y (km)')
+        ax.tick_params(reset=True)
+        ax.grid(True, alpha=0.3, zorder=3)
+        ax.set_title(f'{radar_id}  {var_lbl}\n{tstr}',
+                     fontsize=11, fontweight='bold')
 
     @staticmethod
     def _add_basemap(ax, ds, x_km, y_km):
@@ -1215,15 +1350,286 @@ class AdaptDashboard(tk.Tk):
         try:
             ctx.add_basemap(ax, crs=crs_str,
                             source=ctx.providers.OpenStreetMap.Mapnik,
-                            alpha=0.5, attribution=False, zoom=8, zorder=0)
+                            alpha=0.6, attribution=False, zoom=8, zorder=0)
         except Exception as e:
             print(f'Basemap error: {e}')
+
+
+    # ── Single update entry point ─────────────────────────────────────────────
+
+    def _redraw(self, ds=None) -> None:
+        """Re-render the current (or given) dataset with current control state.
+        Called by Update button, loop step, and auto-refresh."""
+        ds = ds or self._current_nc_ds
+        if ds is None or self._canvas_refs is None:
+            return
+        _, fig, _, _ = self._canvas_refs
+        self._draw_scan(ds, fig)
+        fig.canvas.draw_idle()
+
+    # ── Cell click → track path + time series ────────────────────────────────
+
+    def _on_cell_click(self, event) -> None:
+        if not HAS_MPL or not HAS_DATA or self._canvas_refs is None:
+            return
+        if self._current_nc_ds is None:
+            return
+        _, fig, _, _ = self._canvas_refs
+        if not fig.axes:
+            return
+        ax_radar = fig.axes[0]
+        if event.inaxes is not ax_radar or event.button != 1:
+            return
+        ds  = self._current_nc_ds
+        x_m = event.xdata * 1000.0
+        y_m = event.ydata * 1000.0
+        xi  = int(np.argmin(np.abs(ds['x'].values - x_m)))
+        yi  = int(np.argmin(np.abs(ds['y'].values - y_m)))
+        cell_id = int(ds['cell_labels'].values[yi, xi])
+        if cell_id <= 0:
+            self._clear_track_path()
+            self._clear_time_series()
+            fig.canvas.draw_idle()
+            return
+        repo  = self._repo_root.get().strip()
+        radar = self._radar.get().strip().upper()
+        db_path = Path(repo) / radar / "catalog.db"
+
+        # Resolve cell_uid for clicked cell via SQLite (avoids scan_time format issues)
+        cell_uid = None
+        cell_uidx = 0
+        if self._current_run_id and db_path.exists() and self._current_scan_ts is not None:
+            try:
+                from adapt.persistence.track_store import TrackStore
+                scan_time_dt = pd.Timestamp(self._current_scan_ts).to_pydatetime()
+                ts_obj = TrackStore(db_path)
+                scan_cells = ts_obj.get_cells_by_scan(self._current_run_id, scan_time_dt)
+                if not scan_cells.empty and 'cell_label' in scan_cells.columns:
+                    matched = scan_cells[scan_cells['cell_label'] == cell_id]
+                    if not matched.empty:
+                        r = matched.iloc[0]
+                        cell_uid = r.get('cell_uid')
+                        cell_uidx = int(r.get('track_index', 0) or 0)
+            except Exception:
+                pass
+
+        # Fallback: search loaded cell df with 60-s time window
+        if cell_uid is None:
+            df = self._current_cell_df
+            if df is None or ('cell_uid' not in df.columns and 'track_index' not in df.columns):
+                return
+            if self._current_scan_ts is not None and 'scan_time' in df.columns:
+                df_t = df.copy()
+                df_t['_st'] = pd.to_datetime(df_t['scan_time'], utc=True)
+                scan_ts = pd.Timestamp(self._current_scan_ts)
+                if scan_ts.tzinfo is None:
+                    scan_ts = scan_ts.tz_localize('UTC')
+                time_mask = (df_t['_st'] - scan_ts).abs() < pd.Timedelta(seconds=60)
+                scan_rows = df_t[time_mask & (df_t['cell_label'] == cell_id)]
+            else:
+                scan_rows = df[df['cell_label'] == cell_id]
+            if scan_rows.empty:
+                return
+            r = scan_rows.iloc[0]
+            if 'cell_uid' in df.columns:
+                cell_uid = r.get('cell_uid')
+                cell_uidx = int(r.get('track_index', 0) or 0)
+            else:
+                ti = r.get('track_index')
+                if ti is None or (isinstance(ti, float) and pd.isna(ti)):
+                    return
+                cell_uidx = int(ti)
+
+        if cell_uid is not None and (isinstance(cell_uid, float) and pd.isna(cell_uid)):
+            cell_uid = None
+
+        # Load full path history from birth to current scan
+        history_df = None
+        if self._current_run_id and db_path.exists():
+            try:
+                from adapt.persistence.track_store import TrackStore
+                ts_obj = TrackStore(db_path)
+                history_df = ts_obj.get_track_history(self._current_run_id, str(cell_uid))
+            except Exception:
+                pass
+
+        if history_df is None or history_df.empty:
+            df = self._current_cell_df
+            if df is not None:
+                if cell_uid is not None and 'cell_uid' in df.columns:
+                    history_df = df[df['cell_uid'] == cell_uid].copy()
+                elif cell_uidx > 0 and 'track_index' in df.columns:
+                    history_df = df[df['track_index'] == float(cell_uidx)].copy()
+
+        self._clear_track_path()
+        self._selected_cell_uid = str(cell_uid) if cell_uid is not None else None
+        self._selected_track_index = cell_uidx
+        self._draw_track_path(ax_radar, cell_uidx, history_df)
+        self._update_time_series(cell_uidx, history_df)
+        fig.canvas.draw_idle()
+
+    def _draw_track_path(self, ax, track_index: int, path_df: pd.DataFrame | None = None) -> None:
+        df = path_df if path_df is not None else self._current_cell_df
+        if df is None:
+            return
+        lat_col, lon_col = 'cell_centroid_mass_lat', 'cell_centroid_mass_lon'
+        if lat_col not in df.columns:
+            return
+        track_df = (
+            df.dropna(subset=[lat_col, lon_col])
+            .sort_values('scan_time')
+        )
+        if track_df.empty:
+            return
+        ds   = self._current_nc_ds
+        lat0 = float(ds.attrs.get('radar_latitude', 0.0))
+        lon0 = float(ds.attrs.get('radar_longitude', 0.0))
+        R    = 6371.0
+        lats = track_df[lat_col].values
+        lons = track_df[lon_col].values
+        y_km = (lats - lat0) * (np.pi / 180.0) * R
+        x_km = (lons - lon0) * (np.pi / 180.0) * R * np.cos(np.radians(lat0))
+        line, = ax.plot(x_km, y_km, '-', color='cyan',
+                        linewidth=1.5, alpha=0.85, zorder=10)
+        dots  = ax.scatter(x_km, y_km, s=18, color='cyan', zorder=11, alpha=0.9)
+        cur   = track_df.iloc[-1]
+        cy    = float((cur[lat_col] - lat0) * np.pi / 180.0 * R)
+        cx    = float((cur[lon_col] - lon0) * np.pi / 180.0 * R
+                       * np.cos(np.radians(lat0)))
+        star  = ax.scatter([cx], [cy], s=60, color='yellow', marker='*', zorder=12)
+        self._track_overlay = [line, dots, star]
+
+    def _clear_track_path(self) -> None:
+        if self._track_overlay:
+            for artist in self._track_overlay:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            self._track_overlay = None
+        self._selected_cell_uid = None
+        self._selected_track_index = None
+
+    # ── Time series panels ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _style_ts_ax(ax, ylabel: str, title: str) -> None:
+        """Apply light-panel styling to a time-series axis (no x-axis work — handled centrally)."""
+        ax.set_facecolor('#f5f5f5')
+        ax.set_title(title, fontsize=8, color='#222222', pad=3)
+        ax.set_ylabel(ylabel, fontsize=7, color='#444444')
+        ax.yaxis.label.set_color('#444444')
+        ax.tick_params(axis='y', colors='#333333', labelsize=7, which='both')
+        for sp in ax.spines.values():
+            sp.set_color('#aaaaaa')
+
+    @staticmethod
+    def _apply_time_axis(ax_bottom, axes) -> None:
+        """Apply shared time-axis formatting. Call after plotting, using bottom axis."""
+        ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax_bottom.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=10))
+        ax_bottom.tick_params(axis='x', colors='#333333', labelsize=8, rotation=30)
+        ax_bottom.set_xlabel('UTC', fontsize=8, color='#444444')
+        ax_bottom.xaxis.label.set_color('#444444')
+        for ax in axes[:-1]:
+            plt.setp(ax.get_xticklabels(), visible=False)
+            ax.tick_params(axis='x', colors='#aaaaaa', which='both')
+
+    def _update_time_series(self, track_index: int, path_df: pd.DataFrame | None = None) -> None:
+        if self._ts_axes is None:
+            return
+        ax_area, ax_dbz, ax_extra = self._ts_axes
+        if path_df is not None and not path_df.empty:
+            track_df = path_df.sort_values('scan_time')
+        elif self._current_cell_df is not None:
+            track_df = self._current_cell_df[
+                self._current_cell_df['track_index'] == track_index
+            ].sort_values('scan_time')
+        else:
+            return
+
+        for ax in (ax_area, ax_dbz, ax_extra):
+            ax.cla()
+
+        times = pd.to_datetime(track_df['scan_time'], utc=True)
+
+        # ── Area panel ────────────────────────────────────────────────────────
+        if 'cell_area_sqkm' in track_df.columns:
+            vals = track_df['cell_area_sqkm'].values
+            ax_area.plot(times, vals, color='#7ec8e3', linewidth=1.5, label='total area')
+            ax_area.fill_between(times, vals, alpha=0.15, color='#7ec8e3')
+        if 'area_40dbz_km2' in track_df.columns:
+            ax_area.plot(times, track_df['area_40dbz_km2'].values,
+                         color='#ff9944', linewidth=1.0, linestyle='--', label='≥40 dBZ core')
+        self._style_ts_ax(ax_area, 'km²', f'Track {track_index} — Area')
+        if ax_area.get_lines():
+            ax_area.legend(fontsize=6, labelcolor='#444', framealpha=0.5,
+                           loc='upper left', handlelength=1.2)
+
+        # ── Reflectivity panel ────────────────────────────────────────────────
+        if 'radar_reflectivity_mean' in track_df.columns:
+            ax_dbz.plot(times, track_df['radar_reflectivity_mean'].values,
+                        color='#88cc44', linewidth=1.2, label='mean Z')
+        if 'radar_reflectivity_max' in track_df.columns:
+            ax_dbz.plot(times, track_df['radar_reflectivity_max'].values,
+                        color='#ff6644', linewidth=1.2, label='max Z')
+        self._style_ts_ax(ax_dbz, 'dBZ', 'Reflectivity')
+        if ax_dbz.get_lines():
+            ax_dbz.legend(fontsize=6, labelcolor='#444', framealpha=0.5,
+                          loc='upper left', handlelength=1.2)
+
+        # ── ZDR / extra panel ─────────────────────────────────────────────────
+        has_extra = False
+        if 'radar_differential_reflectivity_max' in track_df.columns:
+            zdr = track_df['radar_differential_reflectivity_max']
+            if zdr.notna().any():
+                ax_extra.plot(times, zdr.values, color='#cc88ff', linewidth=1.2, label='max ZDR')
+                has_extra = True
+        self._style_ts_ax(ax_extra, 'dB', 'ZDR')
+        if has_extra:
+            ax_extra.legend(fontsize=6, labelcolor='#444', framealpha=0.5,
+                            loc='upper left', handlelength=1.2)
+        else:
+            ax_extra.text(0.5, 0.5, 'no ZDR data', transform=ax_extra.transAxes,
+                          ha='center', va='center', color='#888', fontsize=7)
+
+        self._apply_time_axis(ax_extra, self._ts_axes)
+
+    def _clear_time_series(self) -> None:
+        if self._ts_axes is None:
+            return
+        for ax, (ylabel, title) in zip(self._ts_axes,
+                                        [('km²', 'Area'), ('dBZ', 'Reflectivity'), ('dB', 'ZDR')]):
+            ax.cla()
+            self._style_ts_ax(ax, ylabel, title)
+            ax.text(0.5, 0.5, 'click a cell', transform=ax.transAxes,
+                    ha='center', va='center', color='#888', fontsize=8)
+        ax_extra = self._ts_axes[-1]
+        ax_extra.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax_extra.set_xlabel('UTC', fontsize=7, color='#444444')
+        ax_extra.tick_params(axis='x', colors='#333333', labelsize=7, rotation=30)
+        for ax in self._ts_axes[:-1]:
+            plt.setp(ax.get_xticklabels(), visible=False)
+
+    # ── Escape: clear overlay ─────────────────────────────────────────────────
+
+    def _on_escape(self, _event=None) -> None:
+        self._clear_track_path()
+        self._clear_time_series()
+        if self._canvas_refs:
+            _, fig, _, _ = self._canvas_refs
+            fig.canvas.draw_idle()
 
     def _clear_canvas(self):
         self._nc_loop_running = False
         self._last_rendered_nc = None
         if hasattr(self, 'btn_loop'):
             self.btn_loop.config(text='Show Loop')
+
+        self._clear_track_path()
+        self._ts_axes = None
+        self._colorbar = None
+        self._cbar_ax = None
 
         if self._canvas_refs:
             canvas, fig, toolbar, bottom = self._canvas_refs
@@ -1259,6 +1665,12 @@ class AdaptDashboard(tk.Tk):
                 var.set(_em)
             return
 
+        # Only process hover on the radar panel (axes[0])
+        if self._canvas_refs is not None:
+            _, fig, _, _ = self._canvas_refs
+            if len(fig.axes) > 0 and event.inaxes is not fig.axes[0]:
+                return
+
         x_m = event.xdata * 1000.0
         y_m = event.ydata * 1000.0
 
@@ -1275,17 +1687,15 @@ class AdaptDashboard(tk.Tk):
                     self._hv[k].set(_em)
                 return
 
-            self._hv['cell_id'].set(str(cell_id))
-
-            # ── Cell stats from parquet (filter by scan time AND cell_id) ────
+            # ── Cell stats from cells_by_scan (filter by scan time AND cell_id) ─
             df = self._current_cell_df
             if df is not None and 'cell_label' in df.columns:
-                # Filter by scan time first (within 1 minute tolerance)
                 if self._current_scan_ts is not None and 'scan_time' in df.columns:
                     df_time = df.copy()
                     df_time['scan_time'] = pd.to_datetime(df_time['scan_time'], utc=True)
-                    scan_ts = self._current_scan_ts.tz_localize('UTC') if self._current_scan_ts.tzinfo is None else self._current_scan_ts
-                    # Filter out NaT and find matching scan time
+                    scan_ts = (self._current_scan_ts.tz_localize('UTC')
+                               if self._current_scan_ts.tzinfo is None
+                               else self._current_scan_ts)
                     valid_mask = df_time['scan_time'].notna()
                     time_diff = abs(df_time.loc[valid_mask, 'scan_time'] - scan_ts)
                     time_mask = pd.Series(False, index=df_time.index)
@@ -1301,7 +1711,43 @@ class AdaptDashboard(tk.Tk):
                             return f'{r[key]:{fmt}}{suffix}'
                         return _em
 
+                    pid = r.get('cell_uid')
+                    if pid and pid == pid:
+                        self._hv['cell_uid'].set(str(pid)[:4])
+                    elif 'track_index' in r and r.get('track_index') == r.get('track_index'):
+                        self._hv['cell_uid'].set(f'#{int(r["track_index"])}')
+                    else:
+                        self._hv['cell_uid'].set(_em)
                     self._hv['area'].set(_f('cell_area_sqkm'))
+
+                    # Age: prefer age_seconds; fallback = count unique scans for path
+                    age_raw = r.get('age_seconds')
+                    if age_raw is not None and age_raw == age_raw:
+                        age_s = float(age_raw)
+                        if age_s < 60:
+                            age_str = f'{int(age_s)}s'
+                        elif age_s < 3600:
+                            age_str = f'{int(age_s / 60)}m{int(age_s % 60):02d}s'
+                        else:
+                            age_str = (f'{int(age_s / 3600)}h'
+                                       f'{int((age_s % 3600) / 60):02d}m')
+                        self._hv['age'].set(age_str)
+                    elif self._current_cell_df is not None:
+                        cdf = self._current_cell_df
+                        if pid and 'cell_uid' in cdf.columns:
+                            mask = cdf['cell_uid'] == str(pid)
+                        elif 'track_index' in r and r.get('track_index') == r.get('track_index') and 'track_index' in cdf.columns:
+                            mask = cdf['track_index'] == r['track_index']
+                        else:
+                            mask = None
+                        if mask is not None:
+                            n_scans = int(
+                                mask.groupby(cdf['scan_time']).any().sum()
+                            ) if 'scan_time' in cdf.columns else int(mask.sum())
+                            self._hv['age'].set(f'{n_scans} scans')
+                    else:
+                        self._hv['age'].set(_em)
+
                     self._hv['lat_mass'].set(
                         _f('cell_centroid_mass_lat', '.4f', '\u00b0'))
                     self._hv['lon_mass'].set(
@@ -1316,9 +1762,7 @@ class AdaptDashboard(tk.Tk):
                     self._hv['sw_mean'].set(_f('radar_spectrum_width_mean'))
                     return
 
-            for k in ('area', 'lat_mass', 'lon_mass',
-                      'dbz_mean', 'dbz_max', 'zdr_mean', 'zdr_max',
-                      'vel_mean', 'sw_mean'):
+            for k in _HV_KEYS:
                 self._hv[k].set(_em)
 
         except Exception:
@@ -1334,27 +1778,56 @@ class AdaptDashboard(tk.Tk):
         if not repo or not radar:
             return
 
-        pqs = sorted((Path(repo) / radar / 'analysis').glob('analysis2d_*.parquet'))
-        if not pqs:
-            self.stats_lbl.config(text='No parquet data yet.')
+        df = None
+        # Try SQLite cells_by_scan first
+        db_path = Path(repo) / radar / "catalog.db"
+        if db_path.exists() and self._current_run_id:
+            try:
+                from adapt.persistence.track_store import TrackStore
+                ts_obj = TrackStore(db_path)
+                conn = ts_obj._connect()
+                rows = conn.execute(
+                    "SELECT * FROM cells_by_scan WHERE run_id=? ORDER BY scan_time, track_index",
+                    (self._current_run_id,),
+                ).fetchall()
+                if rows:
+                    df = pd.DataFrame([dict(r) for r in rows])
+            except Exception:
+                df = None
+
+        # Fallback: parquet
+        if df is None or df.empty:
+            pqs = sorted((Path(repo) / radar / 'analysis').glob('analysis2d_*.parquet'))
+            if not pqs:
+                self.stats_lbl.config(text='No data yet.')
+                return
+            try:
+                dfs = [pd.read_parquet(p) for p in pqs]
+                df = pd.concat(dfs, ignore_index=True)
+            except Exception as e:
+                self.stats_lbl.config(text=f'Error: {e}')
+                return
+
+        if df is None or df.empty:
+            self.stats_lbl.config(text='No data yet.')
             return
 
         try:
-            dfs = [pd.read_parquet(p) for p in pqs]
-            df = pd.concat(dfs, ignore_index=True)
-            df['scan_time']  = pd.to_datetime(df['scan_time'])
+            df['scan_time']  = pd.to_datetime(df['scan_time'], utc=True)
             df['time_label'] = df['scan_time'].dt.strftime('%H:%M:%S')
-        except Exception as e:
-            self.stats_lbl.config(text=f'Error reading parquet: {e}')
-            return
+        except Exception:
+            pass
 
+        # Update slider range bounds from data
         for col, (lo_v, hi_v) in self._flt.items():
             if col not in df.columns:
                 continue
-            if lo_v.get() < float(df[col].min()):
-                lo_v.set(float(df[col].min()))
-            if hi_v.get() > float(df[col].max()):
-                hi_v.set(float(df[col].max()))
+            col_min = float(df[col].min(skipna=True))
+            col_max = float(df[col].max(skipna=True))
+            if lo_v.get() < col_min:
+                lo_v.set(col_min)
+            if hi_v.get() > col_max:
+                hi_v.set(col_max)
 
         mask = pd.Series(True, index=df.index)
         for col, (lo_v, hi_v) in self._flt.items():
@@ -1363,6 +1836,11 @@ class AdaptDashboard(tk.Tk):
                     mask &= df[col].between(float(lo_v.get()), float(hi_v.get()))
                 except Exception:
                     pass
+
+        # Cell UID prefix filter
+        pid_prefix = self._cell_uid_filter.get().strip().upper() if self._cell_uid_filter else ''
+        if pid_prefix and 'cell_uid' in df.columns:
+            mask &= df['cell_uid'].astype(str).str.upper().str.startswith(pid_prefix)
 
         filt = df[mask]
 
@@ -1376,13 +1854,44 @@ class AdaptDashboard(tk.Tk):
                   f'  |  Avg area: {_avg("cell_area_sqkm")} km\u00b2'
                   f'  |  Avg ZDR: {_avg("radar_differential_reflectivity_mean", ".2f")}'))
 
+        # Build column list dynamically from available data
+        preferred = [
+            'time_label', 'cell_uid', 'track_index', 'cell_label',
+            'cell_area_sqkm', 'area_40dbz_km2',
+            'radar_reflectivity_max', 'radar_reflectivity_mean',
+            'radar_differential_reflectivity_max', 'radar_differential_reflectivity_mean',
+            'cell_centroid_mass_lat', 'cell_centroid_mass_lon',
+            'n_adjacent_tracks',
+        ]
+        show_cols = [c for c in preferred if c in filt.columns]
+        # Rebuild treeview columns if they changed
+        if list(self._tv_cols) != show_cols:
+            self._tv_cols = show_cols
+            self.tv['columns'] = show_cols
+            col_widths = {
+                'time_label': 65, 'cell_uid': 90, 'track_index': 55, 'cell_label': 55,
+                'cell_area_sqkm': 70, 'area_40dbz_km2': 70,
+                'radar_reflectivity_max': 75, 'radar_reflectivity_mean': 75,
+                'radar_differential_reflectivity_max': 75, 'radar_differential_reflectivity_mean': 75,
+                'cell_centroid_mass_lat': 80, 'cell_centroid_mass_lon': 80,
+                'n_adjacent_tracks': 65,
+            }
+            for c in show_cols:
+                hdr = (c.replace('radar_differential_reflectivity_', 'ZDR ')
+                         .replace('radar_reflectivity_', 'Z ')
+                         .replace('cell_', '').replace('_', ' '))
+                self.tv.heading(c, text=hdr)
+                self.tv.column(c, width=col_widths.get(c, 70), anchor='center')
+
         self.tv.delete(*self.tv.get_children())
-        show = [c for c in self._tv_cols if c in filt.columns]
-        for _, row in filt[show].iterrows():
+        for _, row in filt[show_cols].iterrows():
             vals = []
-            for c in self._tv_cols:
+            for c in show_cols:
                 v = row.get(c, '')
-                vals.append(f'{v:.2f}' if isinstance(v, float) else str(v))
+                if isinstance(v, float):
+                    vals.append(f'{v:.2f}' if not pd.isna(v) else '\u2014')
+                else:
+                    vals.append(str(v) if not pd.isna(v) else '\u2014')
             self.tv.insert('', 'end', values=vals)
 
     # ── Log ───────────────────────────────────────────────────────────────────

@@ -127,6 +127,17 @@ _HV_KEYS = ('cell_uid', 'area',
             'dbz_mean', 'dbz_max', 'zdr_mean', 'zdr_max',
             'age', 'vel_mean')
 
+def _cell_uid_disp(uid) -> str:
+    try:
+        import pandas as _pd
+        if _pd.isna(uid):
+            return '\u2014'
+    except Exception:
+        pass
+    if uid is None:
+        return '\u2014'
+    return str(uid)[:4]
+
 # ── Variable selector defaults: (vmin, vmax, unit, cmap) ─────────────────────
 _VAR_DEFAULTS = {
     'reflectivity':              (10,  60,  'dBZ', 'ChaseSpectral'),
@@ -1554,8 +1565,7 @@ class AdaptDashboard(tk.Tk):
         if 'area_40dbz_km2' in track_df.columns:
             ax_area.plot(times, track_df['area_40dbz_km2'].values,
                          color='#ff9944', linewidth=1.0, linestyle='--', label='≥40 dBZ core')
-        cell_uid_disp = str(cell_uid) if cell_uid is not None else '\u2014'
-        self._style_ts_ax(ax_area, 'km²', f'Cell {cell_uid_disp} — Area')
+        self._style_ts_ax(ax_area, 'km²', f'Cell {_cell_uid_disp(cell_uid)} — Area')
         if ax_area.get_lines():
             ax_area.legend(fontsize=6, labelcolor='#444', framealpha=0.5,
                            loc='upper left', handlelength=1.2)
@@ -1707,7 +1717,7 @@ class AdaptDashboard(tk.Tk):
 
                     pid = r.get('cell_uid')
                     if pid and pid == pid:
-                        self._hv['cell_uid'].set(str(pid))
+                        self._hv['cell_uid'].set(_cell_uid_disp(pid))
                     else:
                         self._hv['cell_uid'].set(_em)
                     self._hv['area'].set(_f('cell_area_sqkm'))
@@ -1881,7 +1891,10 @@ class AdaptDashboard(tk.Tk):
                 if isinstance(v, float):
                     vals.append(f'{v:.2f}' if not pd.isna(v) else '\u2014')
                 else:
-                    vals.append(str(v) if not pd.isna(v) else '\u2014')
+                    if c == 'cell_uid':
+                        vals.append(_cell_uid_disp(v))
+                    else:
+                        vals.append(str(v) if not pd.isna(v) else '\u2014')
             self.tv.insert('', 'end', values=vals)
 
     # ── Log ───────────────────────────────────────────────────────────────────

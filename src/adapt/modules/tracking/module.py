@@ -7,20 +7,19 @@ This module implements a cell tracking algorithm inspired from TINT (Raut et al.
 - Merge candidate: multiple cells → one cell (N to 1) in the projected area of a continuing child
 - Explicit events (CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION)
 
-The tracker produces scan-local **paths** — connected chains of cell observations identified by a
-stable path_id. A future post-processing stage may group connected path_ids into higher-level
-tracks; that is outside this module's scope.
+The tracker assigns a stable `cell_uid` to each tracked cell lifecycle (a connected chain of
+cell observations across scans). This module does cell tracking only; any higher-level grouping
+or aggregation is outside this module's scope.
 
 Scan outputs:
-1. **pathed_cells**: Per-observation rows for the current scan
-2. **path_events**: Explicit lineage/event rows for the current scan
-3. **path_adjacency**: Same-scan adjacency pairs in path identity space
+1. **tracked_cells**: Per-observation rows for the current scan
+2. **cell_events**: Explicit lineage/event rows for the current scan
 
 Tracking state is stored in a directed graph structure with nodes representing cell observations and edges representing temporal relationships.
 
 What is different from TINT:
 - No centroid-only matching (uses full mask overlap + motion prediction)
-- Path IDs are hashes; lineage is in graph edges
+- `cell_uid` values are hashes; lineage is represented by graph edges
 
 Author: Bhupendra Raut, ANL.
 
@@ -114,7 +113,7 @@ class TrackingGraph:
         - node_id: unique identifier (int)
         - time: observation timestamp
         - cell_id: cell label from segmentation
-        - path_index: path this cell belongs to (starts at 1; 0 = background sentinel)
+        - track_index: tracking index this cell belongs to (starts at 1; 0 = background sentinel)
         - area: cell area in km²
         - centroid_x, centroid_y: cell center coordinates
         - mean_reflectivity: average dBZ
@@ -182,7 +181,7 @@ class TrackingGraph:
         self.graph.add_edge(from_node, to_node, edge_type=edge_type, cost=cost)
 
     def get_new_track_index(self) -> int:
-        """Allocate a new unique path index (starts at 1; 0 is background sentinel)."""
+        """Allocate a new unique track index (starts at 1; 0 is background sentinel)."""
         self._track_counter += 1
         return self._track_counter
 
@@ -380,20 +379,13 @@ class RadarCellTracker:
         self,
         ds_projected: xr.Dataset,
         cell_stats_df: pd.DataFrame,
-        cell_adjacency_df: pd.DataFrame,
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Process one scan.
 
         Returns scan-local outputs:
         - tracked_cells_df: one row per cell observation in this scan
-        - path_events_df: explicit lineage/events (continue/split/merge/initiation/termination)
-        - path_adjacency_df: adjacency pairs translated to path_index space
+        - cell_events_df: explicit lineage/events (continue/split/merge/initiation/termination)
         """
-        if cell_adjacency_df is None:
-            raise ValueError("cell_adjacency_df is required (no fallback)")
-        if not isinstance(cell_adjacency_df, pd.DataFrame):
-            raise TypeError(f"cell_adjacency_df must be a DataFrame, got {type(cell_adjacency_df)}")
-
         current_time  = self._get_time(ds_projected)
         cells_current = self._extract_cells_from_analyzer(ds_projected, cell_stats_df)
 
@@ -414,12 +406,8 @@ class RadarCellTracker:
 
         current_node_ids = self.graph.get_nodes_at_time(current_time)
         tracked_cells_df = self._build_tracked_cells_current(current_time, current_node_ids)
-        path_adj_df = self._translate_adjacency_to_tracks(
-            cell_adjacency_df=cell_adjacency_df,
-            tracked_cells_df=tracked_cells_df,
-        )
-        path_events_df = self._build_track_events_dataframe(events)
-        return tracked_cells_df, path_events_df, path_adj_df
+        cell_events_df = self._build_cell_events_dataframe(events)
+        return tracked_cells_df, cell_events_df
 
     def get_cell_identity(self, track_index: int) -> tuple[str, str]:
         if track_index not in self._cell_identity:
@@ -697,7 +685,7 @@ class RadarCellTracker:
                     best_parent  = curr_node   # current-frame node of the continuing parent
                     best_overlap = overlap_frac
             if best_parent is not None:
-                parent_path  = self.graph.get_node_attr(best_parent, 'track_index')
+                parent_track_index = self.graph.get_node_attr(best_parent, 'track_index')
                 new_index    = self.graph.get_new_track_index()
                 cell_uid, track_signature = self._new_cell_identity(curr_cells[b_idx])
                 self._cell_identity[new_index] = (cell_uid, track_signature)
@@ -706,8 +694,8 @@ class RadarCellTracker:
                 split_born.add(b_idx)
                 events.append(self._event_split(curr_time, best_parent, child_node))
                 logger.debug(
-                    "SPLIT: path %d → new path %d (overlap=%.2f)",
-                    parent_path, new_index, best_overlap,
+                    "SPLIT: track %d → new track %d (overlap=%.2f)",
+                    parent_track_index, new_index, best_overlap,
                 )
 
         # ── Step 7: merge detection ───────────────────────────────────────
@@ -733,7 +721,7 @@ class RadarCellTracker:
                 merged_nodes[d_node] = best_target
                 events.append(self._event_merge(curr_time, d_node, best_target))
                 logger.debug(
-                    "MERGE: path %d → path %d (overlap=%.2f)",
+                    "MERGE: track %d → track %d (overlap=%.2f)",
                     self.graph.get_node_attr(d_node, 'track_index'),
                     self.graph.get_node_attr(best_target, 'track_index'),
                     best_overlap,
@@ -767,7 +755,7 @@ class RadarCellTracker:
         return events
 
     # ------------------------------------------------------------------
-    # Scan-local builders (no per-path analytics)
+    # Scan-local builders (no per-track analytics)
     # ------------------------------------------------------------------
 
     def _build_tracked_cells_current(self, time, node_ids: List[int]) -> pd.DataFrame:
@@ -781,7 +769,6 @@ class RadarCellTracker:
                 {
                     "time": time_val,
                     "cell_label": int(node["cell_id"]),
-                    "track_index": int(node["track_index"]),
                     "cell_uid": cell_uid,
                     "area": float(node["area"]),
                     "centroid_x": float(node["centroid_x"]),
@@ -794,86 +781,14 @@ class RadarCellTracker:
         df = pd.DataFrame(rows)
         if not df.empty:
             df["time"] = pd.to_datetime(df["time"])
-            df = df.sort_values(["track_index", "cell_label"]).reset_index(drop=True)
-        return df
-
-    def _translate_adjacency_to_tracks(
-        self,
-        cell_adjacency_df: pd.DataFrame,
-        tracked_cells_df: pd.DataFrame,
-    ) -> pd.DataFrame:
-        if cell_adjacency_df.empty:
-            return pd.DataFrame(
-                columns=[
-                    "time",
-                    "track_index_a",
-                    "track_index_b",
-                    "cell_uid_a",
-                    "cell_uid_b",
-                    "touching_boundary_pixels",
-                ]
-            )
-        required = {"cell_label_a", "cell_label_b", "touching_boundary_pixels"}
-        missing = sorted(required - set(cell_adjacency_df.columns))
-        if missing:
-            raise ValueError(f"cell_adjacency_df missing required columns: {missing}")
-        if tracked_cells_df.empty:
-            raise ValueError("Cannot translate adjacency: tracked_cells_df is empty")
-
-        label_to_track: dict[int, int] = {
-            int(r["cell_label"]): int(r["track_index"]) for _, r in tracked_cells_df.iterrows()
-        }
-
-        time_val = tracked_cells_df["time"].iloc[0]
-        counts: dict[tuple[int, int], int] = {}
-        for _, row in cell_adjacency_df.iterrows():
-            a = int(row["cell_label_a"])
-            b = int(row["cell_label_b"])
-            if a == b:
-                raise ValueError("cell_adjacency_df contains a self-pair")
-            if a not in label_to_track or b not in label_to_track:
-                raise ValueError(f"Adjacency references unknown cell labels: {a}, {b}")
-            ta = int(label_to_track[a])
-            tb = int(label_to_track[b])
-            lo, hi = (ta, tb) if ta < tb else (tb, ta)
-            key = (lo, hi)
-            counts[key] = counts.get(key, 0) + int(row["touching_boundary_pixels"])
-
-        rows = []
-        for k, v in counts.items():
-            cell_uid_a = self.get_cell_identity(int(k[0]))[0]
-            cell_uid_b = self.get_cell_identity(int(k[1]))[0]
-            rows.append(
-                {
-                    "time": time_val,
-                    "track_index_a": k[0],
-                    "track_index_b": k[1],
-                    "cell_uid_a": cell_uid_a,
-                    "cell_uid_b": cell_uid_b,
-                    "touching_boundary_pixels": v,
-                }
-            )
-        if not rows:
-            return pd.DataFrame(
-                columns=[
-                    "time",
-                    "track_index_a",
-                    "track_index_b",
-                    "cell_uid_a",
-                    "cell_uid_b",
-                    "touching_boundary_pixels",
-                ]
-            )
-        df = pd.DataFrame(rows).sort_values(["track_index_a", "track_index_b"]).reset_index(drop=True)
+            df = df.sort_values(["cell_uid", "cell_label"]).reset_index(drop=True)
         return df
 
     @staticmethod
-    def _build_track_events_dataframe(events: list[dict]) -> pd.DataFrame:
+    def _build_cell_events_dataframe(events: list[dict]) -> pd.DataFrame:
         cols = [
             "time",
             "event_type",
-            "source_track_index",
-            "target_track_index",
             "source_cell_uid",
             "target_cell_uid",
             "source_cell_label",
@@ -897,88 +812,79 @@ class RadarCellTracker:
     # ------------------------------------------------------------------
 
     def _event_continue(self, time, prev_node_id: int, curr_node_id: int, cost: float) -> dict:
-        track_index = int(self.graph.get_node_attr(curr_node_id, "track_index"))
         source_cell_uid = self.get_cell_identity(int(self.graph.get_node_attr(prev_node_id, "track_index")))[0]
-        target_cell_uid = self.get_cell_identity(track_index)[0]
+        target_cell_uid = self.get_cell_identity(int(self.graph.get_node_attr(curr_node_id, "track_index")))[0]
         return {
             "time": time,
             "event_type": "CONTINUE",
-            "source_track_index": int(self.graph.get_node_attr(prev_node_id, "track_index")),
-            "target_track_index": track_index,
             "source_cell_uid": source_cell_uid,
             "target_cell_uid": target_cell_uid,
             "source_cell_label": int(self.graph.get_node_attr(prev_node_id, "cell_id")),
             "target_cell_label": int(self.graph.get_node_attr(curr_node_id, "cell_id")),
             "cost": float(cost),
             "is_dominant": True,
-            "event_group_id": f"{self._time_key(time)}:CONTINUE:{track_index}",
+            "event_group_id": f"{self._time_key(time)}:CONTINUE:{target_cell_uid}",
         }
 
     def _event_split(self, time, parent_node_id: int, child_node_id: int) -> dict:
-        parent_path = int(self.graph.get_node_attr(parent_node_id, "track_index"))
-        child_path  = int(self.graph.get_node_attr(child_node_id, "track_index"))
+        parent_uid = self.get_cell_identity(int(self.graph.get_node_attr(parent_node_id, "track_index")))[0]
+        child_uid = self.get_cell_identity(int(self.graph.get_node_attr(child_node_id, "track_index")))[0]
         return {
             "time": time,
             "event_type": "SPLIT",
-            "source_track_index": parent_path,
-            "target_track_index": child_path,
-            "source_cell_uid": self.get_cell_identity(parent_path)[0],
-            "target_cell_uid": self.get_cell_identity(child_path)[0],
+            "source_cell_uid": parent_uid,
+            "target_cell_uid": child_uid,
             "source_cell_label": int(self.graph.get_node_attr(parent_node_id, "cell_id")),
             "target_cell_label": int(self.graph.get_node_attr(child_node_id, "cell_id")),
             "cost": None,
             "is_dominant": False,
-            "event_group_id": f"{self._time_key(time)}:SPLIT:{parent_path}",
+            "event_group_id": f"{self._time_key(time)}:SPLIT:{parent_uid}",
         }
 
     def _event_merge(self, time, source_node_id: int, target_node_id: int) -> dict:
         source_path = int(self.graph.get_node_attr(source_node_id, "track_index"))
         target_path = int(self.graph.get_node_attr(target_node_id, "track_index"))
+        target_uid = self.get_cell_identity(target_path)[0]
         return {
             "time": time,
             "event_type": "MERGE",
-            "source_track_index": source_path,
-            "target_track_index": target_path,
             "source_cell_uid": self.get_cell_identity(source_path)[0],
-            "target_cell_uid": self.get_cell_identity(target_path)[0],
+            "target_cell_uid": target_uid,
             "source_cell_label": int(self.graph.get_node_attr(source_node_id, "cell_id")),
             "target_cell_label": int(self.graph.get_node_attr(target_node_id, "cell_id")),
             "cost": None,
             "is_dominant": False,
-            "event_group_id": f"{self._time_key(time)}:MERGE:{target_path}",
+            "event_group_id": f"{self._time_key(time)}:MERGE:{target_uid}",
         }
 
     def _event_initiation(self, time, node_id: int) -> dict:
-        track_index = int(self.graph.get_node_attr(node_id, "track_index"))
+        target_uid = self.get_cell_identity(int(self.graph.get_node_attr(node_id, "track_index")))[0]
         return {
             "time": time,
             "event_type": "INITIATION",
-            "source_track_index": None,
-            "target_track_index": track_index,
             "source_cell_uid": None,
-            "target_cell_uid": self.get_cell_identity(track_index)[0],
+            "target_cell_uid": target_uid,
             "source_cell_label": None,
             "target_cell_label": int(self.graph.get_node_attr(node_id, "cell_id")),
             "cost": None,
             "is_dominant": False,
-            "event_group_id": f"{self._time_key(time)}:INITIATION:{track_index}",
+            "event_group_id": f"{self._time_key(time)}:INITIATION:{target_uid}",
         }
 
     def _event_termination(self, time, source_node_id: int, target_node_id: Optional[int]) -> dict:
         source_path = int(self.graph.get_node_attr(source_node_id, "track_index"))
         target_path = int(self.graph.get_node_attr(target_node_id, "track_index")) if target_node_id is not None else None
+        source_uid = self.get_cell_identity(source_path)[0]
         return {
             "time": time,
             "event_type": "TERMINATION",
-            "source_track_index": source_path,
-            "target_track_index": target_path,
-            "source_cell_uid": self.get_cell_identity(source_path)[0],
+            "source_cell_uid": source_uid,
             "target_cell_uid": self.get_cell_identity(target_path)[0] if target_path is not None else None,
             "source_cell_label": int(self.graph.get_node_attr(source_node_id, "cell_id")),
             "target_cell_label": int(self.graph.get_node_attr(target_node_id, "cell_id")) if target_node_id is not None else None,
             "cost": None,
             "is_dominant": False,
-            "event_group_id": f"{self._time_key(time)}:TERMINATION:{source_path}",
+            "event_group_id": f"{self._time_key(time)}:TERMINATION:{source_uid}",
         }
 
 
@@ -989,7 +895,7 @@ class RadarCellTracker:
 from adapt.modules.base import BaseModule
 from adapt.execution.module_registry import registry
 from adapt.modules.projection.contracts import assert_projected
-from .contracts import assert_tracked_cells, assert_track_events, assert_track_adjacency
+from .contracts import assert_tracked_cells, assert_cell_events
 
 
 def _check_projected_ds(ds: xr.Dataset) -> None:
@@ -1001,40 +907,32 @@ def _check_tracked_cells(df: pd.DataFrame) -> None:
         assert_tracked_cells(df)
 
 
-def _check_track_events(df: pd.DataFrame) -> None:
+def _check_cell_events(df: pd.DataFrame) -> None:
     if not df.empty:
-        assert_track_events(df)
-
-
-def _check_track_adjacency(df: pd.DataFrame) -> None:
-    if not df.empty:
-        assert_track_adjacency(df)
+        assert_cell_events(df)
 
 
 class TrackingModule(BaseModule):
-    """Assigns path identities to convective cells across consecutive radar scans.
+    """Assign stable `cell_uid` identities to convective cells across consecutive radar scans.
 
-    Produces scan-local paths. A future post-processing stage may group connected
-    path_ids into higher-level tracks; that is outside this module's scope.
+    Produces scan-local tracking outputs. Any higher-level grouping/aggregation
+    is outside this module's scope.
 
     Context outputs
     ---------------
-    pathed_cells : pd.DataFrame
-        Per-cell observations for the current scan with path_id/path_index.
-    path_events : pd.DataFrame
+    tracked_cells : pd.DataFrame
+        Per-cell observations for the current scan with cell_uid/cell_label.
+    cell_events : pd.DataFrame
         Explicit event rows for CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION.
-    path_adjacency : pd.DataFrame
-        Same-scan adjacency pairs in path identity space.
     """
 
     name = "tracking"
-    inputs = ["projected_ds", "cell_stats", "cell_adjacency", "config", "scan_time"]
-    outputs = ["tracked_cells", "track_events", "track_adjacency"]
+    inputs = ["projected_ds", "cell_stats", "config", "scan_time"]
+    outputs = ["tracked_cells", "cell_events"]
     input_contracts = {"projected_ds": _check_projected_ds}
     output_contracts = {
         "tracked_cells": _check_tracked_cells,
-        "track_events": _check_track_events,
-        "track_adjacency": _check_track_adjacency,
+        "cell_events": _check_cell_events,
     }
 
     def __init__(self) -> None:
@@ -1044,62 +942,19 @@ class TrackingModule(BaseModule):
         config = context["config"]
         ds_2d = context["projected_ds"]
         cell_stats = context["cell_stats"]
-        cell_adjacency = context["cell_adjacency"]
 
         if self._tracker is None:
             self._tracker = RadarCellTracker(config)
 
-        tracked_cells, track_events, track_adj = self._tracker.track(
+        tracked_cells, cell_events = self._tracker.track(
             ds_projected=ds_2d,
             cell_stats_df=cell_stats,
-            cell_adjacency_df=cell_adjacency,
-        )
-        tracked_cells = self._attach_neighbor_metadata(
-            tracked_cells=tracked_cells,
-            track_adjacency=track_adj,
         )
 
         return {
             "tracked_cells": tracked_cells,
-            "track_events": track_events,
-            "track_adjacency": track_adj,
+            "cell_events": cell_events,
         }
-
-    @staticmethod
-    def _attach_neighbor_metadata(
-        tracked_cells: pd.DataFrame,
-        track_adjacency: pd.DataFrame,
-    ) -> pd.DataFrame:
-        import json
-        if tracked_cells.empty:
-            tracked_cells = tracked_cells.copy()
-            tracked_cells["n_adjacent_tracks"] = pd.Series(dtype="int64")
-            tracked_cells["adjacent_cell_uids_json"] = pd.Series(dtype="object")
-            return tracked_cells
-
-        uid_col = "cell_uid"
-        neighbors: dict[str, set[str]] = {str(i): set() for i in tracked_cells[uid_col].tolist()}
-        if not track_adjacency.empty:
-            uid_a_col = "cell_uid_a"
-            uid_b_col = "cell_uid_b"
-            for _, row in track_adjacency.iterrows():
-                a = str(row[uid_a_col])
-                b = str(row[uid_b_col])
-                neighbors.setdefault(a, set()).add(b)
-                neighbors.setdefault(b, set()).add(a)
-
-        n_adjacent = []
-        adjacent_ids_json = []
-        for _, row in tracked_cells.iterrows():
-            tid = str(row[uid_col])
-            ids = sorted(neighbors.get(tid, set()))
-            n_adjacent.append(len(ids))
-            adjacent_ids_json.append(json.dumps(ids))
-
-        tracked_cells = tracked_cells.copy()
-        tracked_cells["n_adjacent_tracks"] = n_adjacent
-        tracked_cells["adjacent_cell_uids_json"] = adjacent_ids_json
-        return tracked_cells
 
 
 # Register module

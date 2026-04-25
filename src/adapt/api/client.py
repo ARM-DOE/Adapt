@@ -672,7 +672,7 @@ class DataClient:
                 raise ValueError(f"Unknown file format for {file_path}")
 
     # =========================================================================
-    # Track Methods
+    # Cell Tracking Methods
     # =========================================================================
 
     def _track_store(self, radar: Optional[str] = None) -> TrackStore:
@@ -702,22 +702,22 @@ class DataClient:
         """All scan rows for one track, ordered by scan_time."""
         return self._track_store(radar).get_track_history(run_id, cell_uid)
 
-    def track_events(
+    def cell_events(
         self,
         run_id: str,
         cell_uid: Optional[str] = None,
         radar: Optional[str] = None,
     ) -> pd.DataFrame:
         """Lineage events for a run, optionally filtered to one cell_uid."""
-        return self._track_store(radar).get_track_events(run_id, cell_uid)
+        return self._track_store(radar).get_cell_events(run_id, cell_uid)
 
-    def tracks(
+    def cell_tracks(
         self,
         run_id: str,
         radar: Optional[str] = None,
     ) -> pd.DataFrame:
         """Lifecycle summary for all tracks in a run."""
-        return self._track_store(radar).get_tracks(run_id)
+        return self._track_store(radar).get_cell_tracks(run_id)
 
     # =========================================================================
     # Pipeline Status Methods
@@ -883,7 +883,7 @@ class DataClient:
             - scan_time: str - ISO8601 timestamp
             - segmentation2d: xr.Dataset or None - Segmentation NetCDF
             - cells: pd.DataFrame or None - Cell analysis data
-            - tracks: list of dict - Track paths for cells in this scan
+            - tracks: list of dict - Tracking summary entries for this scan
             - metadata: dict - Scan metadata (num_cells, max_reflectivity, etc.)
 
         Raises
@@ -1005,17 +1005,10 @@ class DataClient:
             if analysis_path.exists():
                 bundle['cells'] = pd.read_parquet(analysis_path, engine='pyarrow')
 
-                # Extract track info from cells DataFrame
-                if 'track_index' in bundle['cells'].columns:
-                    track_indices = bundle['cells'][
-                        bundle['cells']['track_index'].notna() &
-                        (bundle['cells']['track_index'] > 0)
-                    ]['track_index'].unique()
-
-                    for idx in track_indices:
-                        bundle['tracks'].append({
-                            'track_index': int(idx),
-                        })
+                # Extract cell tracking info from cells DataFrame
+                if 'cell_uid' in bundle['cells'].columns:
+                    for uid in sorted(bundle['cells']['cell_uid'].dropna().astype(str).unique().tolist()):
+                        bundle['tracks'].append({'cell_uid': uid})
 
         return bundle
 

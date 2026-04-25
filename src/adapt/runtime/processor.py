@@ -443,7 +443,7 @@ class RadarProcessor(threading.Thread):
         Saves:
         - projected_ds as NetCDF artifact
         - cell_stats, cell_adjacency as Parquet artifacts
-        - tracked_cells, track_events, track_adjacency as SQLite via TrackStore
+        - tracked_cells, cell_events as SQLite via TrackStore (label→uid adjacency mapping in TrackStore)
         """
         if scan_time is not None and scan_time.tzinfo is None:
             scan_time = scan_time.replace(tzinfo=timezone.utc)
@@ -460,8 +460,7 @@ class RadarProcessor(threading.Thread):
         cell_stats     = result.get("cell_stats")
         cell_adjacency = result.get("cell_adjacency")
         tracked_cells  = result.get("tracked_cells")
-        track_events   = result.get("track_events")
-        track_adj      = result.get("track_adjacency")
+        cell_events    = result.get("cell_events")
 
         if cell_stats is not None and not cell_stats.empty:
             writer.write_analysis(df=cell_stats, scan_time=scan_time, producer="analysis")
@@ -470,13 +469,17 @@ class RadarProcessor(threading.Thread):
 
         # SQLite: track identity outputs
         if tracked_cells is not None and not tracked_cells.empty:
+            if cell_stats is None:
+                raise ValueError("Missing required cell_stats for TrackStore persistence")
+            if cell_adjacency is None:
+                raise ValueError("Missing required cell_adjacency for TrackStore persistence")
             TrackStore(self.repository.catalog.db_path).write_scan(
                 run_id=self.repository.run_id,
                 scan_time=scan_time,
-                cell_stats_df=cell_stats if cell_stats is not None else pd.DataFrame(),
+                cell_stats_df=cell_stats,
                 tracked_cells_df=tracked_cells,
-                track_events_df=track_events if track_events is not None else pd.DataFrame(),
-                track_adj_df=track_adj if track_adj is not None else pd.DataFrame(),
+                cell_events_df=cell_events if cell_events is not None else pd.DataFrame(),
+                cell_adjacency_df=cell_adjacency,
             )
 
     # ── Results API (called by orchestrator on shutdown) ──────────────────────

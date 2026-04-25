@@ -116,7 +116,7 @@ _FONT_LBL = ('Courier', 12)
 # Each row: (top_label, hv_key_top, top_fg, bot_label, hv_key_bot, bot_fg)
 # Lat(M)/Lon(M) removed — mouse coords are shown in toolbar coordinate bar
 _BOX_DEFS = [
-    ('Track',    'cell_uid', '#ffffff', 'Area km²', 'area',     '#ffff44'),
+    ('Cell',    'cell_uid', '#ffffff', 'Area km²', 'area',     '#ffff44'),
     ('Lat(C)',   'lat_mass', '#44ff88', 'Lon(C)',   'lon_mass', '#44ff88'),
     ('dBZ mean', 'dbz_mean', '#ff8800', 'dBZ max',  'dbz_max',  '#ffcc44'),
     ('ZDR mean', 'zdr_mean', '#ff44ff', 'ZDR max',  'zdr_max',  '#ff88ff'),
@@ -376,8 +376,7 @@ class AdaptDashboard(tk.Tk):
 
         # Track click overlay state
         self._selected_cell_uid: str | None = None
-        self._selected_track_index: int | None = None
-        self._track_overlay: list | None = None    # matplotlib artists for path overlay
+        self._track_overlay: list | None = None    # matplotlib artists for tracking overlay
         self._ts_axes: tuple | None = None         # (ax_area, ax_dbz, ax_reserved)
         self._show_flow_var: tk.BooleanVar | None = None  # set in _build_scan_tab
         self._colorbar: object | None = None               # active colorbar reference
@@ -904,7 +903,7 @@ class AdaptDashboard(tk.Tk):
                                 hist = TrackStore(db_path_r).get_track_history(
                                     self._current_run_id, self._selected_cell_uid)
                                 if not hist.empty:
-                                    self._update_time_series(self._selected_track_index or 0, hist)
+                                    self._update_time_series(hist)
                                 else:
                                     self._clear_time_series()
                             except Exception:
@@ -1043,8 +1042,8 @@ class AdaptDashboard(tk.Tk):
     def _load_cells_data(self, repo, radar):
         """Load per-cell data for the current run into self._current_cell_df.
 
-        Tries cells_by_scan (SQLite) first — contains track_index, cell_uid,
-        and all cell_stats columns. Falls back to parquet for legacy data.
+        Tries cells_by_scan (SQLite) first — contains cell_uid, cell_label, and
+        all cell_stats columns. Falls back to parquet for legacy data.
         """
         self._current_cell_df = None
         self._current_run_id = None
@@ -1075,7 +1074,7 @@ class AdaptDashboard(tk.Tk):
             except Exception:
                 pass
 
-        # Fallback: parquet (no track_index — time series won't work)
+        # Fallback: parquet (may not contain cell_uid)
         pqs = sorted((Path(repo) / radar / 'analysis').glob('analysis2d_*.parquet'))
         if pqs:
             try:
@@ -1204,7 +1203,6 @@ class AdaptDashboard(tk.Tk):
         # Track overlay artists were removed by ax.clear(); reset references
         self._track_overlay = None
         self._selected_cell_uid = None
-        self._selected_track_index = None
 
         # Close previous dataset
         if self._current_nc_ds is not None and self._current_nc_ds is not ds:
@@ -1277,11 +1275,11 @@ class AdaptDashboard(tk.Tk):
                                           fraction=0.046, pad=0.04)
 
         # ── Cell contours ─────────────────────────────────────────────────────
-        for cell_id in np.unique(labels_data[labels_data > 0]):
-            cs = ax.contour(x_grid, y_grid,
-                            (labels_data == cell_id).astype(float),
-                            levels=[0.5], colors='black', linewidths=1.5, zorder=50)
-            self._cell_contours[int(cell_id)] = cs
+        # for cell_id in np.unique(labels_data[labels_data > 0]):
+        #     cs = ax.contour(x_grid, y_grid,
+        #                     (labels_data == cell_id).astype(float),
+        #                     levels=[0.5], colors='#2C3539', linewidths=0.5, zorder=50)
+        #     self._cell_contours[int(cell_id)] = cs
 
         # ── Projection contours ───────────────────────────────────────────────
         if 'cell_projections' in ds.data_vars:
@@ -1294,12 +1292,12 @@ class AdaptDashboard(tk.Tk):
                 _ls_cycle = ['dashed', 'dashdot', 'dotted']
                 for i in range(1, end_frame):
                     alpha = max(0.5, 1.0 - i / n_frames)
-                    lw    = max(0.5, 1.0 - i * 0.1)
+                    lw    = max(0.5, 1.5 - i * 0.2)
                     ls    = _ls_cycle[(i - 1) % len(_ls_cycle)]
                     lp = proj_da.isel({fo: i}).values
                     for cid in np.unique(lp[~np.isnan(lp) & (lp > 0)]):
                         ax.contour(x_grid, y_grid, (lp == cid).astype(float),
-                                   levels=[0.5], colors='black',
+                                   levels=[0.5], colors='#2C3539',
                                    linewidths=lw, linestyles=ls,
                                    alpha=alpha, zorder=40)
 
@@ -1308,14 +1306,14 @@ class AdaptDashboard(tk.Tk):
                 and 'heading_x' in ds.data_vars and 'heading_y' in ds.data_vars):
             hx, hy = ds['heading_x'].values, ds['heading_y'].values
             if not np.all(np.isnan(hx)):
-                s      = 10
+                s      = 12
                 yi_idx = np.arange(0, len(y_km), s)
                 xi_idx = np.arange(0, len(x_km), s)
                 Xs, Ys = np.meshgrid(x_km[xi_idx], y_km[yi_idx])
                 q = ax.quiver(Xs, Ys,
                               hx[np.ix_(yi_idx, xi_idx)],
                               hy[np.ix_(yi_idx, xi_idx)],
-                              color='#222222', alpha=0.7, scale=0.5, scale_units='xy',
+                              color='#5E7F94', alpha=0.7, scale=0.5, scale_units='xy',
                               width=0.002, headwidth=4, zorder=45)
                 q._adapt_flow = True
 
@@ -1367,7 +1365,7 @@ class AdaptDashboard(tk.Tk):
         self._draw_scan(ds, fig)
         fig.canvas.draw_idle()
 
-    # ── Cell click → track path + time series ────────────────────────────────
+    # ── Cell click → tracking history + time series ─────────────────────────
 
     def _on_cell_click(self, event) -> None:
         if not HAS_MPL or not HAS_DATA or self._canvas_refs is None:
@@ -1387,7 +1385,7 @@ class AdaptDashboard(tk.Tk):
         yi  = int(np.argmin(np.abs(ds['y'].values - y_m)))
         cell_id = int(ds['cell_labels'].values[yi, xi])
         if cell_id <= 0:
-            self._clear_track_path()
+            self._clear_tracking_history()
             self._clear_time_series()
             fig.canvas.draw_idle()
             return
@@ -1397,7 +1395,6 @@ class AdaptDashboard(tk.Tk):
 
         # Resolve cell_uid for clicked cell via SQLite (avoids scan_time format issues)
         cell_uid = None
-        cell_uidx = 0
         if self._current_run_id and db_path.exists() and self._current_scan_ts is not None:
             try:
                 from adapt.persistence.track_store import TrackStore
@@ -1409,14 +1406,13 @@ class AdaptDashboard(tk.Tk):
                     if not matched.empty:
                         r = matched.iloc[0]
                         cell_uid = r.get('cell_uid')
-                        cell_uidx = int(r.get('track_index', 0) or 0)
             except Exception:
                 pass
 
         # Fallback: search loaded cell df with 60-s time window
         if cell_uid is None:
             df = self._current_cell_df
-            if df is None or ('cell_uid' not in df.columns and 'track_index' not in df.columns):
+            if df is None or 'cell_uid' not in df.columns:
                 return
             if self._current_scan_ts is not None and 'scan_time' in df.columns:
                 df_t = df.copy()
@@ -1431,19 +1427,12 @@ class AdaptDashboard(tk.Tk):
             if scan_rows.empty:
                 return
             r = scan_rows.iloc[0]
-            if 'cell_uid' in df.columns:
-                cell_uid = r.get('cell_uid')
-                cell_uidx = int(r.get('track_index', 0) or 0)
-            else:
-                ti = r.get('track_index')
-                if ti is None or (isinstance(ti, float) and pd.isna(ti)):
-                    return
-                cell_uidx = int(ti)
+            cell_uid = r.get('cell_uid')
 
         if cell_uid is not None and (isinstance(cell_uid, float) and pd.isna(cell_uid)):
             cell_uid = None
 
-        # Load full path history from birth to current scan
+        # Load full tracking history from birth to current scan
         history_df = None
         if self._current_run_id and db_path.exists():
             try:
@@ -1458,18 +1447,15 @@ class AdaptDashboard(tk.Tk):
             if df is not None:
                 if cell_uid is not None and 'cell_uid' in df.columns:
                     history_df = df[df['cell_uid'] == cell_uid].copy()
-                elif cell_uidx > 0 and 'track_index' in df.columns:
-                    history_df = df[df['track_index'] == float(cell_uidx)].copy()
 
-        self._clear_track_path()
+        self._clear_tracking_history()
         self._selected_cell_uid = str(cell_uid) if cell_uid is not None else None
-        self._selected_track_index = cell_uidx
-        self._draw_track_path(ax_radar, cell_uidx, history_df)
-        self._update_time_series(cell_uidx, history_df)
+        self._draw_tracking_history(ax_radar, history_df)
+        self._update_time_series(history_df)
         fig.canvas.draw_idle()
 
-    def _draw_track_path(self, ax, track_index: int, path_df: pd.DataFrame | None = None) -> None:
-        df = path_df if path_df is not None else self._current_cell_df
+    def _draw_tracking_history(self, ax, history_df: pd.DataFrame | None = None) -> None:
+        df = history_df if history_df is not None else self._current_cell_df
         if df is None:
             return
         lat_col, lon_col = 'cell_centroid_mass_lat', 'cell_centroid_mass_lon'
@@ -1491,15 +1477,16 @@ class AdaptDashboard(tk.Tk):
         x_km = (lons - lon0) * (np.pi / 180.0) * R * np.cos(np.radians(lat0))
         line, = ax.plot(x_km, y_km, '-', color='cyan',
                         linewidth=1.5, alpha=0.85, zorder=10)
-        dots  = ax.scatter(x_km, y_km, s=18, color='cyan', zorder=11, alpha=0.9)
+        dots  = ax.scatter(x_km, y_km, s=18, color='cyan', 
+                        zorder=11, alpha=0.9)
         cur   = track_df.iloc[-1]
         cy    = float((cur[lat_col] - lat0) * np.pi / 180.0 * R)
         cx    = float((cur[lon_col] - lon0) * np.pi / 180.0 * R
                        * np.cos(np.radians(lat0)))
-        star  = ax.scatter([cx], [cy], s=60, color='yellow', marker='*', zorder=12)
+        star  = ax.scatter([cx], [cy], s=60, color='#8aff9c', marker='*', zorder=12)
         self._track_overlay = [line, dots, star]
 
-    def _clear_track_path(self) -> None:
+    def _clear_tracking_history(self) -> None:
         if self._track_overlay:
             for artist in self._track_overlay:
                 try:
@@ -1508,7 +1495,6 @@ class AdaptDashboard(tk.Tk):
                     pass
             self._track_overlay = None
         self._selected_cell_uid = None
-        self._selected_track_index = None
 
     # ── Time series panels ────────────────────────────────────────────────────
 
@@ -1535,18 +1521,25 @@ class AdaptDashboard(tk.Tk):
             plt.setp(ax.get_xticklabels(), visible=False)
             ax.tick_params(axis='x', colors='#aaaaaa', which='both')
 
-    def _update_time_series(self, track_index: int, path_df: pd.DataFrame | None = None) -> None:
+    def _update_time_series(self, history_df: pd.DataFrame | None = None) -> None:
         if self._ts_axes is None:
             return
         ax_area, ax_dbz, ax_extra = self._ts_axes
-        if path_df is not None and not path_df.empty:
-            track_df = path_df.sort_values('scan_time')
-        elif self._current_cell_df is not None:
-            track_df = self._current_cell_df[
-                self._current_cell_df['track_index'] == track_index
-            ].sort_values('scan_time')
+        if history_df is not None and not history_df.empty:
+            track_df = history_df.sort_values('scan_time')
+            cell_uid = None
+            if 'cell_uid' in track_df.columns and track_df['cell_uid'].notna().any():
+                cell_uid = str(track_df['cell_uid'].dropna().iloc[0])
         else:
-            return
+            cell_uid = self._selected_cell_uid
+            if not cell_uid or self._current_cell_df is None or 'cell_uid' not in self._current_cell_df.columns:
+                return
+            track_df = (
+                self._current_cell_df[self._current_cell_df['cell_uid'] == str(cell_uid)]
+                .sort_values('scan_time')
+            )
+            if track_df.empty:
+                return
 
         for ax in (ax_area, ax_dbz, ax_extra):
             ax.cla()
@@ -1561,7 +1554,8 @@ class AdaptDashboard(tk.Tk):
         if 'area_40dbz_km2' in track_df.columns:
             ax_area.plot(times, track_df['area_40dbz_km2'].values,
                          color='#ff9944', linewidth=1.0, linestyle='--', label='≥40 dBZ core')
-        self._style_ts_ax(ax_area, 'km²', f'Track {track_index} — Area')
+        cell_uid_disp = str(cell_uid) if cell_uid is not None else '\u2014'
+        self._style_ts_ax(ax_area, 'km²', f'Cell {cell_uid_disp} — Area')
         if ax_area.get_lines():
             ax_area.legend(fontsize=6, labelcolor='#444', framealpha=0.5,
                            loc='upper left', handlelength=1.2)
@@ -1614,7 +1608,7 @@ class AdaptDashboard(tk.Tk):
     # ── Escape: clear overlay ─────────────────────────────────────────────────
 
     def _on_escape(self, _event=None) -> None:
-        self._clear_track_path()
+        self._clear_tracking_history()
         self._clear_time_series()
         if self._canvas_refs:
             _, fig, _, _ = self._canvas_refs
@@ -1626,7 +1620,7 @@ class AdaptDashboard(tk.Tk):
         if hasattr(self, 'btn_loop'):
             self.btn_loop.config(text='Show Loop')
 
-        self._clear_track_path()
+        self._clear_tracking_history()
         self._ts_axes = None
         self._colorbar = None
         self._cbar_ax = None
@@ -1713,14 +1707,12 @@ class AdaptDashboard(tk.Tk):
 
                     pid = r.get('cell_uid')
                     if pid and pid == pid:
-                        self._hv['cell_uid'].set(str(pid)[:4])
-                    elif 'track_index' in r and r.get('track_index') == r.get('track_index'):
-                        self._hv['cell_uid'].set(f'#{int(r["track_index"])}')
+                        self._hv['cell_uid'].set(str(pid))
                     else:
                         self._hv['cell_uid'].set(_em)
                     self._hv['area'].set(_f('cell_area_sqkm'))
 
-                    # Age: prefer age_seconds; fallback = count unique scans for path
+                    # Age: prefer age_seconds; fallback = count unique scans for tracking history
                     age_raw = r.get('age_seconds')
                     if age_raw is not None and age_raw == age_raw:
                         age_s = float(age_raw)
@@ -1736,8 +1728,6 @@ class AdaptDashboard(tk.Tk):
                         cdf = self._current_cell_df
                         if pid and 'cell_uid' in cdf.columns:
                             mask = cdf['cell_uid'] == str(pid)
-                        elif 'track_index' in r and r.get('track_index') == r.get('track_index') and 'track_index' in cdf.columns:
-                            mask = cdf['track_index'] == r['track_index']
                         else:
                             mask = None
                         if mask is not None:
@@ -1787,7 +1777,7 @@ class AdaptDashboard(tk.Tk):
                 ts_obj = TrackStore(db_path)
                 conn = ts_obj._connect()
                 rows = conn.execute(
-                    "SELECT * FROM cells_by_scan WHERE run_id=? ORDER BY scan_time, track_index",
+                    "SELECT * FROM cells_by_scan WHERE run_id=? ORDER BY scan_time, cell_uid",
                     (self._current_run_id,),
                 ).fetchall()
                 if rows:
@@ -1856,12 +1846,12 @@ class AdaptDashboard(tk.Tk):
 
         # Build column list dynamically from available data
         preferred = [
-            'time_label', 'cell_uid', 'track_index', 'cell_label',
+            'time_label', 'cell_uid', 'cell_label',
             'cell_area_sqkm', 'area_40dbz_km2',
             'radar_reflectivity_max', 'radar_reflectivity_mean',
             'radar_differential_reflectivity_max', 'radar_differential_reflectivity_mean',
             'cell_centroid_mass_lat', 'cell_centroid_mass_lon',
-            'n_adjacent_tracks',
+            'n_adjacent_cells',
         ]
         show_cols = [c for c in preferred if c in filt.columns]
         # Rebuild treeview columns if they changed
@@ -1869,12 +1859,12 @@ class AdaptDashboard(tk.Tk):
             self._tv_cols = show_cols
             self.tv['columns'] = show_cols
             col_widths = {
-                'time_label': 65, 'cell_uid': 90, 'track_index': 55, 'cell_label': 55,
+                'time_label': 65, 'cell_uid': 160, 'cell_label': 55,
                 'cell_area_sqkm': 70, 'area_40dbz_km2': 70,
                 'radar_reflectivity_max': 75, 'radar_reflectivity_mean': 75,
                 'radar_differential_reflectivity_max': 75, 'radar_differential_reflectivity_mean': 75,
                 'cell_centroid_mass_lat': 80, 'cell_centroid_mass_lon': 80,
-                'n_adjacent_tracks': 65,
+                'n_adjacent_cells': 65,
             }
             for c in show_cols:
                 hdr = (c.replace('radar_differential_reflectivity_', 'ZDR ')

@@ -122,7 +122,6 @@ CREATE TABLE IF NOT EXISTS cells_by_scan (
     scan_time               TEXT NOT NULL,       -- ISO8601 UTC
     cell_label              INTEGER NOT NULL,
     cell_uid                TEXT NOT NULL,
-    track_index             INTEGER NOT NULL,
 
     -- Core cell stats (extended dynamically for all cell_stats columns)
     cell_area_sqkm          REAL,
@@ -136,7 +135,7 @@ CREATE TABLE IF NOT EXISTS cells_by_scan (
     area_40dbz_km2          REAL,
 
     -- Track adjacency summary
-    n_adjacent_tracks        INTEGER NOT NULL DEFAULT 0,
+    n_adjacent_cells         INTEGER NOT NULL DEFAULT 0,
     adjacent_cell_uids_json  TEXT,
 
     -- Forward-set convenience flags (known at write time)
@@ -144,10 +143,10 @@ CREATE TABLE IF NOT EXISTS cells_by_scan (
     is_split_target_here    INTEGER NOT NULL DEFAULT 0,
     is_merge_target_here    INTEGER NOT NULL DEFAULT 0,
 
-    -- Age since track birth
+    -- Age since cell_uid birth
     age_seconds             REAL NOT NULL DEFAULT 0,
 
-    -- Retroactively updated flags (canonical truth in track_events)
+    -- Retroactively updated flags (canonical truth in cell_events)
     is_split_source_here    INTEGER NOT NULL DEFAULT 0,
     is_merge_source_here    INTEGER NOT NULL DEFAULT 0,
     is_terminated_after_here INTEGER NOT NULL DEFAULT 0,
@@ -161,11 +160,11 @@ CREATE INDEX IF NOT EXISTS idx_cbs_scan  ON cells_by_scan(run_id, scan_time);
 CREATE INDEX IF NOT EXISTS idx_cbs_label ON cells_by_scan(run_id, cell_label, scan_time);
 
 -- ====================================================================
--- Table: track_events
+-- Table: cell_events
 --
 -- Authoritative lineage table: one row per lineage edge or lifecycle event.
 -- ====================================================================
-CREATE TABLE IF NOT EXISTS track_events (
+CREATE TABLE IF NOT EXISTS cell_events (
     event_id           INTEGER PRIMARY KEY,      -- autoincrement surrogate
     run_id             TEXT NOT NULL,
     source_scan_time   TEXT,                     -- ISO8601 UTC; NULL for INITIATION
@@ -173,8 +172,6 @@ CREATE TABLE IF NOT EXISTS track_events (
     event_type         TEXT NOT NULL,            -- CONTINUE|SPLIT|MERGE|INITIATION|TERMINATION
     source_cell_uid    TEXT,
     target_cell_uid    TEXT,
-    source_track_index INTEGER,
-    target_track_index INTEGER,
     source_cell_label  INTEGER,
     target_cell_label  INTEGER,
     cost               REAL,
@@ -182,20 +179,19 @@ CREATE TABLE IF NOT EXISTS track_events (
     event_group_id     TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_te_source ON track_events(run_id, source_cell_uid);
-CREATE INDEX IF NOT EXISTS idx_te_target ON track_events(run_id, target_cell_uid);
-CREATE INDEX IF NOT EXISTS idx_te_group  ON track_events(run_id, event_group_id);
+CREATE INDEX IF NOT EXISTS idx_ce_source ON cell_events(run_id, source_cell_uid);
+CREATE INDEX IF NOT EXISTS idx_ce_target ON cell_events(run_id, target_cell_uid);
+CREATE INDEX IF NOT EXISTS idx_ce_group  ON cell_events(run_id, event_group_id);
 
 -- ====================================================================
--- Table: tracks
+-- Table: cell_tracks
 --
 -- Convenience summary index: one row per track lifecycle.
--- Not authoritative for lineage — use track_events for that.
+-- Not authoritative for lineage — use cell_events for that.
 -- ====================================================================
-CREATE TABLE IF NOT EXISTS tracks (
+CREATE TABLE IF NOT EXISTS cell_tracks (
     run_id                          TEXT NOT NULL,
     cell_uid                        TEXT NOT NULL,
-    track_index                     INTEGER NOT NULL,
     first_seen_time                 TEXT NOT NULL,
     last_seen_time                  TEXT NOT NULL,
     n_scans                         INTEGER NOT NULL DEFAULT 0,
@@ -213,4 +209,4 @@ CREATE TABLE IF NOT EXISTS tracks (
     PRIMARY KEY (run_id, cell_uid)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tracks_run ON tracks(run_id);
+CREATE INDEX IF NOT EXISTS idx_cell_tracks_run ON cell_tracks(run_id);

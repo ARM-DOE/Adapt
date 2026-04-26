@@ -1,5 +1,11 @@
 # Adapt
 
+[![CI](https://github.com/ARM-DOE/Adapt/actions/workflows/ci.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions?query=workflow%3ACI)
+[![Codecov](https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov)](https://codecov.io/gh/ARM-DOE/Adapt)
+[![Docs](https://img.shields.io/badge/docs-users-4088b8.svg)](https://arm-doe.github.io/Adapt/)
+[![Downloads](https://img.shields.io/github/downloads/ARM-DOE/Adapt/total?label=downloads)](https://github.com/ARM-DOE/Adapt/releases)
+[![ARM](https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&colorB=00539c)](https://www.arm.gov/)
+
 **Real-time processing for informed adaptive scanning of ARM weather radars**
 
 `Adapt` is a framewrok for near real-time weather radar data processing for ARM operations and field campaigns. Currently, it ingests NEXRAD Level-II data, performs gridding/segmentation/analysis, and writes results for downstream visualization and scientific workflows.

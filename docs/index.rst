@@ -1,7 +1,20 @@
 Adapt Documentation
 ===================
 
-Adaptive Radar Data Processing Platform — modular NEXRAD analysis for storm cell detection, motion projection, and tracking.
+Adaptive Radar Data Processing Platform — modular NEXRAD analysis for storm cell
+detection, motion projection, and tracking.
 
-.. note::
-   Full API reference and usage guides are coming soon.
+.. toctree::
+   :maxdepth: 1
+   :caption: Overview
+
+   readme
+   usage
+   license
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference
+
+   api/cli
+   api/dashboard

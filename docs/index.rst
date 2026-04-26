@@ -9,7 +9,8 @@ detection, motion projection, and tracking.
    :caption: Overview
 
    readme
-   usage
+   USAGE
+   cli_reference
    license
 
 .. toctree::

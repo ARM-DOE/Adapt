@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Radar segmentation and projection visualization.
 
 Renders reflectivity + cell segmentation + motion projections to PNG.

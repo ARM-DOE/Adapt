@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """InternalConfig: Authoritative runtime configuration.
 
 This is the ONLY config schema that runtime code sees. It is fully validated,
@@ -95,21 +98,32 @@ class InternalProjectorConfig(AdaptBaseModel):
     nan_fill_value: float
     flow_params: InternalFlowParamsConfig
     min_motion_threshold: float
+    max_flow_magnitude: float
 
 
 class InternalAnalyzerConfig(AdaptBaseModel):
     """Runtime analysis configuration."""
     radar_variables: list[str]
     exclude_fields: list[str]
+    adjacency_min_touching_boundary_pixels: int = Field(ge=1)
 
 
 class InternalTrackerConfig(AdaptBaseModel):
     """Runtime tracking configuration."""
+    class InternalCellUidConfig(AdaptBaseModel):
+        """Runtime cell UID configuration."""
+        time_step_s: int = Field(ge=1)
+        latlon_step_deg: float = Field(gt=0.0)
+        area_step_km2: float = Field(gt=0.0)
+        width: int = Field(ge=1)
+        alphabet: Literal["base36_upper"]
+
     match_cost_threshold: float = Field(default=0.15, ge=0.0)
     keep_cost_threshold: float = Field(default=1.0, ge=0.0)
     unmatch_cost_threshold: float = Field(default=2.0, ge=0.0)
     split_overlap_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     core_reflectivity_threshold: float = Field(default=40.0, ge=0.0)
+    cell_uid: InternalCellUidConfig
 
 
 class InternalVisualizationConfig(AdaptBaseModel):

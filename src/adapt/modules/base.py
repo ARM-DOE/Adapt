@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Base interface for all Adapt processing modules.
 
 Every module in the system — whether in modules/ or extensions/ — must

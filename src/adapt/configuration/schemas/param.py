@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """ParamConfig: Expert defaults for Adapt pipeline.
 
 This module defines the complete, scientifically-validated default configuration.
@@ -110,7 +113,8 @@ class ProjectorConfig(AdaptBaseModel):
     nan_fill_value: float = 0.0
     flow_params: FlowParamsConfig = Field(default_factory=FlowParamsConfig)
     min_motion_threshold: float = Field(0.5, ge=0)
-    
+    max_flow_magnitude: float = Field(20.0, gt=0, description="Clip flow vectors exceeding this magnitude (pixels/frame)")
+
     @field_validator("method", mode="before")
     @classmethod
     def normalize_method_name(cls, v):
@@ -141,15 +145,29 @@ class AnalyzerConfig(AdaptBaseModel):
             "clutter_filter_power_removed",
         ]
     )
+    adjacency_min_touching_boundary_pixels: int = Field(
+        1,
+        ge=1,
+        description="Min number of touching boundary pixels to count two labels as adjacent in the same scan",
+    )
 
 
 class TrackerConfig(AdaptBaseModel):
     """Cell tracking configuration."""
+    class CellUidConfig(AdaptBaseModel):
+        """Track ID generation configuration."""
+        time_step_s: int = Field(10, ge=1)
+        latlon_step_deg: float = Field(0.1, gt=0.0)
+        area_step_km2: float = Field(5.0, gt=0.0)
+        width: int = Field(10, ge=1)
+        alphabet: Literal["base36_upper"] = "base36_upper"
+
     match_cost_threshold: float = Field(0.15, ge=0.0, description="Cost below this is forced to 0 before Hungarian (guaranteed match)")
     keep_cost_threshold: float = Field(1.0, ge=0.0, description="Post-Hungarian: cost <= this confirms CONTINUE, else pair is rejected")
     unmatch_cost_threshold: float = Field(2.0, ge=0.0, description="Cost above this is forced to dummy_cost before Hungarian (unlikely match)")
     split_overlap_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Min fraction of projected hull area overlapping born/surviving cell to confirm SPLIT or MERGE")
     core_reflectivity_threshold: float = Field(40.0, ge=0.0, description="Reflectivity threshold for core area (dBZ)")
+    cell_uid: CellUidConfig = Field(default_factory=CellUidConfig)
 
 
 class VisualizationConfig(AdaptBaseModel):

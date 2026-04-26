@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Directory setup and path generation utilities for Adapt pipeline.
 
 This module provides functions for creating the standard Adapt directory structure

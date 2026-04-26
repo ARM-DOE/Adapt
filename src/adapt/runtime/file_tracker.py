@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """SQLite-based file processing state tracker.
 
 Tracks radar files through pipeline stages (downloaded, regridded, analyzed, plotted).

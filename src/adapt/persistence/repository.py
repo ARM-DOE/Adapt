@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Centralized data access and artifact management for Adapt pipeline.
 
 Provides a unified API for:
@@ -123,37 +126,24 @@ class DataRepository:
         # Create directory structure FIRST (radar_catalog needs the dir to exist)
         self._init_directories()
 
-        # Initialize new catalog system
+        # Catalog system
         self.registry = RepositoryRegistry.get_instance(self.base_dir)
         self.catalog = RadarCatalog(self.base_dir / radar)
 
         # Thread safety
         self._lock = threading.RLock()
-        
-        # Legacy catalog connection (DEPRECATED - will be removed)
-        self._conn: Optional[sqlite3.Connection] = None
-        self.catalog_path = self.catalog_dir / f"{run_id}_pipeline_catalog.db"
 
-        # Initialize legacy catalog for backward compatibility
-        self._init_legacy_catalog()
-
-        # Register this run in new registry
+        # Register this run in catalog and registry
         self._register_in_new_catalog()
 
         logger.debug("DataRepository ready: run=%s radar=%s", run_id, radar)
 
     def _init_directories(self) -> None:
         """Create directory structure for this radar."""
-        # Catalog directory at root level
-        self.catalog_dir = self.base_dir / "catalog"
-        self.catalog_dir.mkdir(parents=True, exist_ok=True)
-
-        # Radar-specific directories: root_dir/RADAR_ID/type/
         radar_base = self.base_dir / self.radar
 
         self.output_dirs = {
             "base": self.base_dir,
-            "catalog": self.catalog_dir,
             "nexrad": radar_base / "nexrad",
             "gridnc": radar_base / "gridnc",
             "analysis": radar_base / "analysis",
@@ -161,111 +151,24 @@ class DataRepository:
             "logs": self.base_dir / "logs",
         }
 
-        # Create all directories
         for path in self.output_dirs.values():
             path.mkdir(parents=True, exist_ok=True)
 
     # =========================================================================
-    # Database Initialization
+    # Catalog Registration
     # =========================================================================
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get thread-safe database connection (LEGACY - for backward compatibility)."""
-        if self._conn is None:
-            self._conn = sqlite3.connect(
-                str(self.catalog_path),
-                check_same_thread=False,
-                isolation_level='DEFERRED'
-            )
-            self._conn.row_factory = sqlite3.Row
-            # Enable WAL mode for concurrent reads
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        return self._conn
-
-    def _init_legacy_catalog(self) -> None:
-        """Create legacy catalog database schema (DEPRECATED - for backward compatibility)."""
-        conn = self._get_connection()
-
-        with self._lock:
-            # Main artifacts table - renamed to pipeline_artifacts for clarity
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS pipeline_artifacts (
-                    artifact_id TEXT PRIMARY KEY,
-                    run_id TEXT NOT NULL,
-                    product_type TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    producer TEXT NOT NULL,
-                    parent_ids TEXT,
-                    radar TEXT NOT NULL,
-                    scan_time TEXT,
-                    metadata TEXT,
-                    status TEXT DEFAULT 'active',
-                    created_at TEXT NOT NULL,
-                    file_hash TEXT
-                )
-            """)
-
-            # Processing status table - renamed to artifact_processing_status for clarity
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS artifact_processing_status (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    artifact_id TEXT NOT NULL,
-                    plugin_name TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    error_message TEXT,
-                    output_artifact_id TEXT,
-                    FOREIGN KEY (artifact_id) REFERENCES pipeline_artifacts(artifact_id),
-                    UNIQUE(artifact_id, plugin_name)
-                )
-            """)
-
-            # Runs table - renamed to pipeline_runs for clarity
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS pipeline_runs (
-                    run_id TEXT PRIMARY KEY,
-                    start_time TEXT NOT NULL,
-                    end_time TEXT,
-                    mode TEXT,
-                    config_hash TEXT,
-                    radar TEXT NOT NULL,
-                    status TEXT DEFAULT 'running'
-                )
-            """)
-
-            # Create indexes
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_product_type ON pipeline_artifacts(product_type)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_radar_id ON pipeline_artifacts(radar)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_scan_time ON pipeline_artifacts(scan_time)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_processing_status_artifact ON artifact_processing_status(artifact_id)")
-
-            conn.commit()
-
-            # Register this run
-            self._register_run()
-
-    def _register_run(self) -> None:
-        """Register current pipeline run in legacy catalog (DEPRECATED)."""
-        conn = self._get_connection()
-        config_hash = self._compute_config_hash() if self.config else None
-        mode = self.config.mode if self.config else None
-
-        conn.execute("""
-            INSERT OR IGNORE INTO pipeline_runs (run_id, start_time, mode, config_hash, radar, status)
-            VALUES (?, ?, ?, ?, ?, 'running')
-        """, (
-            self.run_id,
-            datetime.now(timezone.utc).isoformat(),
-            mode,
-            config_hash,
-            self.radar
-        ))
-        conn.commit()
 
     def _register_in_new_catalog(self) -> None:
         """Register this run in the new Registry and RadarCatalog system."""
-        # Register radar in global registry (idempotent)
-        self.registry.register_radar(self.radar)
+        # Register radar in global registry (idempotent), including optional location metadata.
+        radars = self.registry.list_radars()
+        row = radars[radars["radar"] == self.radar] if not radars.empty else None
+        existing_lat = row.iloc[0]["location_lat"] if row is not None and not row.empty else None
+        existing_lon = row.iloc[0]["location_lon"] if row is not None and not row.empty else None
+
+        # Do not use external lookup tables for location metadata. The pipeline
+        # will populate location_lat/location_lon from the first ingested radar file.
+        self.registry.register_radar(self.radar, lat=existing_lat, lon=existing_lon)
         
         # Save runtime config to radar directory first
         config_path = None
@@ -288,13 +191,6 @@ class DataRepository:
             config_path=config_path,
             repository_version="0.1.0"
         )
-
-    def _compute_config_hash(self) -> str:
-        """Compute hash of configuration for reproducibility tracking."""
-        if self.config is None:
-            return ""
-        config_str = json.dumps(self.config.model_dump(), sort_keys=True, default=str)
-        return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
     # =========================================================================
     # Artifact ID Generation
@@ -345,7 +241,7 @@ class DataRepository:
         parent_ids: Optional[List[str]] = None,
         metadata: Optional[Dict] = None
     ) -> str:
-        """Register an artifact in both legacy and new catalog systems.
+        """Register an artifact in the RadarCatalog.
 
         Parameters
         ----------
@@ -371,7 +267,6 @@ class DataRepository:
         parent_ids = parent_ids or []
         metadata = metadata or {}
 
-        # Generate artifact ID
         artifact_id = self.generate_artifact_id(
             product_type=product_type,
             radar=self.radar,
@@ -380,154 +275,29 @@ class DataRepository:
             content_hint=str(file_path)
         )
 
-        # LEGACY: Register in per-run catalog database
-        conn = self._get_connection()
-
-        with self._lock:
-            conn.execute("""
-                INSERT OR REPLACE INTO pipeline_artifacts
-                (artifact_id, run_id, product_type, file_path, producer,
-                 parent_ids, radar, scan_time, metadata, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-            """, (
-                artifact_id,
-                self.run_id,
-                product_type,
-                str(file_path),
-                producer,
-                json.dumps(parent_ids),
-                self.radar,
-                scan_time.isoformat() if scan_time else None,
-                json.dumps(metadata),
-                datetime.now(timezone.utc).isoformat()
-            ))
-            conn.commit()
-
-        # NEW: Also register in RadarCatalog for query API
+        radar_dir = self.base_dir / self.radar
         try:
-            # Calculate relative path from radar directory
-            radar_dir = self.base_dir / self.radar
-            try:
-                relative_path = file_path.relative_to(radar_dir)
-            except ValueError:
-                # File is outside radar directory, use full path
-                relative_path = file_path
-            
-            # Add file size and hash if available
-            file_size = file_path.stat().st_size if file_path.exists() else None
-            
-            # Prepare metadata for new catalog
-            catalog_metadata = metadata.copy()
-            catalog_metadata['producer'] = producer
-            catalog_metadata['artifact_id'] = artifact_id  # Link to legacy ID
-            
-            # Register in new catalog
-            self.catalog.register_item(
-                item_id=artifact_id,  # Reuse same ID for consistency
-                run_id=self.run_id,
-                item_type=product_type,  # Already mapped (e.g., "segmentation2d")
-                scan_time=scan_time.isoformat() if scan_time else None,
-                file_path=str(relative_path),
-                parent_ids=parent_ids,
-                metadata=catalog_metadata,
-                file_size_bytes=file_size
-            )
-            logger.debug(f"Registered in RadarCatalog: {artifact_id} ({product_type})")
-        except Exception as e:
-            logger.warning(f"Failed to register in RadarCatalog: {e}")
-            # Don't fail the whole registration if new catalog fails
+            relative_path = file_path.relative_to(radar_dir)
+        except ValueError:
+            relative_path = file_path
 
-        logger.debug(f"Registered artifact: {artifact_id} ({product_type})")
+        file_size = file_path.stat().st_size if file_path.exists() else None
+
+        catalog_metadata = metadata.copy()
+        catalog_metadata['producer'] = producer
+
+        self.catalog.register_item(
+            item_id=artifact_id,
+            run_id=self.run_id,
+            item_type=product_type,
+            scan_time=scan_time.isoformat() if scan_time else None,
+            file_path=str(relative_path),
+            parent_ids=parent_ids,
+            metadata=catalog_metadata,
+            file_size_bytes=file_size,
+        )
+        logger.debug("Registered artifact: %s (%s)", artifact_id, product_type)
         return artifact_id
-
-    # =========================================================================
-    # Public API: Processing Status
-    # =========================================================================
-
-    def get_unprocessed(
-        self,
-        product_type: str,
-        plugin_name: str,
-        limit: Optional[int] = None
-    ) -> List[Dict]:
-        """Get artifacts pending processing by a plugin.
-
-        Parameters
-        ----------
-        product_type : str
-            Type of artifacts to query
-        plugin_name : str
-            Name of processing plugin
-        limit : int, optional
-            Maximum number of results
-
-        Returns
-        -------
-        list of dict
-            Artifacts that have not been processed by the plugin
-        """
-        conn = self._get_connection()
-
-        query = """
-            SELECT a.* FROM pipeline_artifacts a
-            LEFT JOIN artifact_processing_status ps
-                ON a.artifact_id = ps.artifact_id AND ps.plugin_name = ?
-            WHERE a.product_type = ?
-                AND a.run_id = ?
-                AND (ps.status IS NULL OR ps.status = 'pending')
-            ORDER BY a.scan_time
-        """
-        params: List = [plugin_name, product_type, self.run_id]
-
-        if limit:
-            query += " LIMIT ?"
-            params.append(limit)
-
-        with self._lock:
-            cursor = conn.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
-
-    def mark_complete(
-        self,
-        artifact_id: str,
-        plugin_name: str,
-        status: str = "completed",
-        error_message: Optional[str] = None,
-        output_artifact_id: Optional[str] = None
-    ) -> None:
-        """Mark artifact as processed by a plugin.
-
-        Parameters
-        ----------
-        artifact_id : str
-            ID of processed artifact
-        plugin_name : str
-            Name of processing plugin
-        status : str
-            Processing status ('completed', 'failed', 'skipped')
-        error_message : str, optional
-            Error details if status is 'failed'
-        output_artifact_id : str, optional
-            ID of artifact produced by this processing step
-        """
-        conn = self._get_connection()
-
-        with self._lock:
-            conn.execute("""
-                INSERT OR REPLACE INTO artifact_processing_status
-                (artifact_id, plugin_name, status, updated_at, error_message, output_artifact_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                artifact_id,
-                plugin_name,
-                status,
-                datetime.now(timezone.utc).isoformat(),
-                error_message,
-                output_artifact_id
-            ))
-            conn.commit()
-
-        logger.debug(f"Marked {artifact_id} as {status} by {plugin_name}")
 
     # =========================================================================
     # Public API: Data Access
@@ -628,41 +398,30 @@ class DataRepository:
         time_range : tuple of datetime, optional
             (start_time, end_time) filter
         radar : str, optional
-            Filter by radar ID (defaults to repository radar)
+            Ignored — repository is already scoped to one radar
         limit : int, optional
             Maximum results
 
         Returns
         -------
         list of dict
-            Matching artifacts
+            Matching artifacts with absolute file_path resolved
         """
-        conn = self._get_connection()
-
-        conditions = ["run_id = ?"]
-        params: List = [self.run_id]
-
-        if product_type:
-            conditions.append("product_type = ?")
-            params.append(product_type)
+        df = self.catalog.query_items(
+            item_type=product_type, run_id=self.run_id, order_by="scan_time ASC"
+        )
+        if df.empty:
+            return []
 
         if time_range:
-            conditions.append("scan_time >= ? AND scan_time <= ?")
-            params.extend([time_range[0].isoformat(), time_range[1].isoformat()])
-
-        if radar:
-            conditions.append("radar = ?")
-            params.append(radar)
-
-        where_clause = " AND ".join(conditions)
-        query_str = f"SELECT * FROM pipeline_artifacts WHERE {where_clause} ORDER BY scan_time"
+            t0 = time_range[0].isoformat()
+            t1 = time_range[1].isoformat()
+            df = df[(df["scan_time"] >= t0) & (df["scan_time"] <= t1)]
 
         if limit:
-            query_str += f" LIMIT {limit}"
+            df = df.head(limit)
 
-        with self._lock:
-            cursor = conn.execute(query_str, params)
-            return [dict(row) for row in cursor.fetchall()]
+        return [self._normalize_item(row) for _, row in df.iterrows()]
 
     def get_latest(
         self,
@@ -671,42 +430,20 @@ class DataRepository:
     ) -> Optional[Dict]:
         """Get the most recent artifact of a given type.
 
-        Queries the catalog for the latest artifact by scan_time descending.
-        Used by downstream consumers (e.g., plot consumer) to poll for new data.
-
         Parameters
         ----------
         product_type : str
             Artifact type to query (use ProductType constants)
         radar : str, optional
-            Filter by radar ID (defaults to repository radar)
+            Ignored — repository is already scoped to one radar
 
         Returns
         -------
         dict or None
             Most recent artifact record, or None if no artifacts exist
         """
-        conn = self._get_connection()
-
-        conditions = ["run_id = ?", "product_type = ?"]
-        params: List = [self.run_id, product_type]
-
-        if radar:
-            conditions.append("radar = ?")
-            params.append(radar)
-
-        where_clause = " AND ".join(conditions)
-        query_str = f"""
-            SELECT * FROM pipeline_artifacts
-            WHERE {where_clause}
-            ORDER BY scan_time DESC
-            LIMIT 1
-        """
-
-        with self._lock:
-            cursor = conn.execute(query_str, params)
-            row = cursor.fetchone()
-            return dict(row) if row else None
+        item = self.catalog.get_latest_item(item_type=product_type, run_id=self.run_id)
+        return self._normalize_item(item) if item else None
 
     def get_all_since(
         self,
@@ -716,52 +453,35 @@ class DataRepository:
     ) -> List[Dict]:
         """Get all artifacts of a type created after a given artifact.
 
-        Used by consumers to catch up on missed artifacts during polling gaps.
-
         Parameters
         ----------
         product_type : str
             Artifact type to query
         since_artifact_id : str, optional
-            Return artifacts created after this artifact's scan_time.
+            Return artifacts with scan_time after this artifact's scan_time.
             If None, returns all artifacts of this type.
         radar : str, optional
-            Filter by radar ID
+            Ignored — repository is already scoped to one radar
 
         Returns
         -------
         list of dict
             Artifacts in chronological order (oldest first)
         """
-        conn = self._get_connection()
+        df = self.catalog.query_items(item_type=product_type, run_id=self.run_id)
+        if df.empty:
+            return []
 
-        conditions = ["run_id = ?", "product_type = ?"]
-        params: List = [self.run_id, product_type]
-
-        if radar:
-            conditions.append("radar = ?")
-            params.append(radar)
-
-        # If since_artifact_id provided, get its scan_time and filter
         if since_artifact_id:
-            ref_artifact = self._get_artifact(since_artifact_id)
-            if ref_artifact and ref_artifact.get('scan_time'):
-                conditions.append("scan_time > ?")
-                params.append(ref_artifact['scan_time'])
+            ref = self._get_artifact(since_artifact_id)
+            if ref and ref.get("scan_time"):
+                df = df[df["scan_time"] > ref["scan_time"]]
 
-        where_clause = " AND ".join(conditions)
-        query_str = f"""
-            SELECT * FROM pipeline_artifacts
-            WHERE {where_clause}
-            ORDER BY scan_time ASC
-        """
-
-        with self._lock:
-            cursor = conn.execute(query_str, params)
-            return [dict(row) for row in cursor.fetchall()]
+        df = df.sort_values("scan_time", ascending=True)
+        return [self._normalize_item(row) for _, row in df.iterrows()]
 
     def get_artifact(self, artifact_id: str) -> Optional[Dict]:
-        """Get artifact record by ID (public method).
+        """Get artifact record by ID.
 
         Parameters
         ----------
@@ -771,9 +491,40 @@ class DataRepository:
         Returns
         -------
         dict or None
-            Artifact record or None if not found
+            Artifact record with absolute file_path, or None if not found
         """
         return self._get_artifact(artifact_id)
+
+    def _normalize_item(self, item) -> Dict:
+        """Convert a RadarCatalog item row to a repository artifact dict.
+
+        Resolves relative file_path to absolute, aliases item_id → artifact_id,
+        and hoists producer from the metadata JSON for backward compatibility.
+        """
+        if hasattr(item, 'to_dict'):
+            d = item.to_dict()
+        else:
+            d = dict(item)
+        # Resolve relative path stored in catalog to absolute
+        rel = d.get("file_path", "")
+        if rel and not Path(rel).is_absolute():
+            d["file_path"] = str(self.base_dir / self.radar / rel)
+        # Alias item_id → artifact_id
+        if "artifact_id" not in d:
+            d["artifact_id"] = d.get("item_id", "")
+        # Alias item_type → product_type
+        if "product_type" not in d:
+            d["product_type"] = d.get("item_type", "")
+        # Hoist producer from metadata JSON for backward compatibility
+        meta_raw = d.get("metadata")
+        if meta_raw and isinstance(meta_raw, str):
+            try:
+                meta = json.loads(meta_raw)
+                if "producer" not in d and "producer" in meta:
+                    d["producer"] = meta["producer"]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return d
 
     # =========================================================================
     # Public API: Write Operations
@@ -954,7 +705,11 @@ class DataRepository:
                 datetime_cols = ['time', 'scan_time', 'start_time', 'end_time', 'time_volume_start', 'time_volume_end']
                 for col in datetime_cols:
                     if col in combined_df.columns:
-                        combined_df[col] = pd.to_datetime(combined_df[col], errors='coerce')
+                        combined_df[col] = pd.to_datetime(
+                            combined_df[col],
+                            errors='coerce',
+                            utc=True,
+                        ).dt.tz_convert(None)
 
                 table = pa.Table.from_pandas(combined_df)
                 logger.debug(f"Appended {len(df)} rows to {parquet_path} (schema evolution handled)")
@@ -1324,58 +1079,36 @@ class DataRepository:
     # =========================================================================
 
     def _get_artifact(self, artifact_id: str) -> Optional[Dict]:
-        """Get artifact record by ID."""
-        conn = self._get_connection()
-
-        with self._lock:
-            cursor = conn.execute(
-                "SELECT * FROM pipeline_artifacts WHERE artifact_id = ?",
-                (artifact_id,)
-            )
-            row = cursor.fetchone()
-            return dict(row) if row else None
+        """Get artifact record by ID from RadarCatalog."""
+        row = self.catalog.get_item(artifact_id)
+        return self._normalize_item(row) if row else None
 
     # =========================================================================
     # Lifecycle
     # =========================================================================
 
     def finalize_run(self, status: str = "completed") -> None:
-        """Mark pipeline run as complete in both catalog and registry.
-        
-        Updates both the radar catalog and the root registry to reflect
-        the final run status and completion time.
-        
+        """Mark pipeline run as complete in the registry.
+
         Parameters
         ----------
         status : str
             Final status (completed, failed, cancelled)
         """
-        conn = self._get_connection()
         end_time = datetime.now(timezone.utc).isoformat()
-
-        with self._lock:
-            # Update radar catalog
-            conn.execute("""
-                UPDATE pipeline_runs SET end_time = ?, status = ? WHERE run_id = ?
-            """, (end_time, status, self.run_id))
-            conn.commit()
-
-        # Update root registry as well
         if self.registry:
             self.registry.update_run_status(
                 run_id=self.run_id,
                 status=status,
-                end_time=end_time
+                end_time=end_time,
             )
-
-        logger.info(f"Run {self.run_id} finalized with status: {status}")
+        logger.info("Run %s finalized with status: %s", self.run_id, status)
 
     def close(self) -> None:
-        """Close database connection."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-            logger.debug("DataRepository connection closed")
+        """Close catalog connections."""
+        if self.catalog:
+            self.catalog.close()
+        logger.debug("DataRepository closed")
 
     def __enter__(self):
         return self

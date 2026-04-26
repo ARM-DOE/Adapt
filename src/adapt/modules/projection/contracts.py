@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Output contracts for the projection module.
 
 The projection module produces cell projections with motion vectors. This

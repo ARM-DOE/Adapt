@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Output contracts for the analysis module.
 
 The analysis module produces cell statistics dataframes. This module defines
@@ -44,6 +47,12 @@ def assert_analysis_output(df: pd.DataFrame, min_expected_rows: int = 0) -> None
         "cell_label",
         "cell_area_sqkm",
         "time",
+        "time_volume_start",
+        "cell_centroid_mass_lat",
+        "cell_centroid_mass_lon",
+        "radar_reflectivity_max",
+        "radar_differential_reflectivity_max",
+        "area_40dbz_km2",
     ]
 
     for col in required_cols:
@@ -63,4 +72,45 @@ def assert_analysis_output(df: pd.DataFrame, min_expected_rows: int = 0) -> None
     require(
         len(df) >= min_expected_rows,
         f"Analysis contract violated: got {len(df)} cells, expected >= {min_expected_rows}"
+    )
+
+
+def assert_cell_adjacency(df: pd.DataFrame) -> None:
+    """Enforce analysis adjacency contract.
+
+    The analysis module may produce a scan-local adjacency table describing
+    direct boundary touching between labeled cells.
+    """
+    require(
+        isinstance(df, pd.DataFrame),
+        f"Cell adjacency contract violated: output is {type(df)}, expected DataFrame"
+    )
+
+    required_cols = [
+        "time",
+        "cell_label_a",
+        "cell_label_b",
+        "touching_boundary_pixels",
+    ]
+
+    for col in required_cols:
+        require(
+            col in df.columns,
+            f"Cell adjacency contract violated: missing required column '{col}'"
+        )
+
+    if len(df) == 0:
+        return
+
+    require(
+        (df["cell_label_a"] > 0).all() and (df["cell_label_b"] > 0).all(),
+        "Cell adjacency contract violated: cell labels must be > 0"
+    )
+    require(
+        (df["cell_label_a"] < df["cell_label_b"]).all(),
+        "Cell adjacency contract violated: expected canonical ordering cell_label_a < cell_label_b"
+    )
+    require(
+        (df["touching_boundary_pixels"] >= 1).all(),
+        "Cell adjacency contract violated: touching_boundary_pixels must be >= 1"
     )

@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Radar-level catalog manager for Adapt repository.
 
 Manages catalog.db at {root_dir}/{radar}/catalog.db.
@@ -67,7 +70,7 @@ class RadarCatalog:
         # Initialize database
         self._init_database()
         
-        logger.debug("RadarCatalog initialized for %s at %s", self.radar, self.db_path)
+        logger.info(f"RadarCatalog initialized for {self.radar} at {self.db_path}")
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-safe database connection."""
@@ -85,7 +88,7 @@ class RadarCatalog:
     
     def _init_database(self) -> None:
         """Initialize database schema from SQL file."""
-        schema_path = Path(__file__).parent / "schemas" / "radar_catalog_schema.sql"
+        schema_path = Path(__file__).resolve().parents[1] / "configuration" / "schemas" / "radar_catalog_schema.sql"
         
         if not schema_path.exists():
             # Fallback to embedded schema
@@ -99,9 +102,10 @@ class RadarCatalog:
         with self._lock:
             conn.executescript(schema_sql)
             conn.commit()
-        
+
         logger.debug(f"Radar catalog schema initialized from {schema_path}")
-    
+
+
     def _create_schema_inline(self) -> None:
         """Create schema inline (fallback)."""
         conn = self._get_connection()
@@ -339,7 +343,16 @@ class RadarCatalog:
                 """, (item_type,)).fetchone()
         
         return dict(row) if row else None
-    
+
+    def get_item(self, item_id: str) -> Optional[Dict]:
+        """Get a single item record by ID. Returns None if not found."""
+        conn = self._get_connection()
+        with self._lock:
+            row = conn.execute(
+                "SELECT * FROM items WHERE item_id = ?", (item_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
     # =========================================================================
     # Progress Tracking
     # =========================================================================
@@ -746,355 +759,6 @@ class RadarCatalog:
                 """).fetchone()
 
         return dict(row) if row else None
-
-    # =========================================================================
-    # Track Management
-    # =========================================================================
-
-    def register_track(
-        self,
-        track_index: int,
-        run_id: str,
-        start_time: datetime,
-        birth_event: str = "NEW",
-        birth_track_id: Optional[str] = None
-    ) -> str:
-        """Register a new track.
-
-        Parameters
-        ----------
-        track_index : int
-            Human-readable track index (starts at 1)
-        run_id : str
-            Run identifier
-        start_time : datetime
-            When track first appeared
-        birth_event : str
-            How track started: NEW or SPLIT
-        birth_track_id : str, optional
-            Parent track ID if SPLIT
-
-        Returns
-        -------
-        str
-            Track ID
-        """
-        import uuid
-
-        track_id = str(uuid.uuid4())[:16]
-        start_time_str = start_time.isoformat()
-        now = datetime.now(timezone.utc).isoformat()
-
-        conn = self._get_connection()
-        with self._lock:
-            conn.execute("""
-                INSERT INTO tracks
-                (track_id, track_index, run_id, start_time, birth_event,
-                 birth_track_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (track_id, track_index, run_id, start_time_str, birth_event,
-                  birth_track_id, now, now))
-            conn.commit()
-
-        logger.debug(f"Track registered: {track_id} (index {track_index})")
-        return track_id
-
-    def update_track(
-        self,
-        track_id: str,
-        end_time: Optional[datetime] = None,
-        death_event: Optional[str] = None,
-        death_track_id: Optional[str] = None,
-        max_area_sqkm: Optional[float] = None,
-        max_reflectivity: Optional[float] = None,
-        bbox: Optional[Tuple[float, float, float, float]] = None
-    ) -> None:
-        """Update track state.
-
-        Parameters
-        ----------
-        track_id : str
-            Track identifier
-        end_time : datetime, optional
-            When track ended
-        death_event : str, optional
-            How track ended: DISSIPATED or MERGED
-        death_track_id : str, optional
-            Target track ID if MERGED
-        max_area_sqkm : float, optional
-            Update maximum area
-        max_reflectivity : float, optional
-            Update maximum reflectivity
-        bbox : tuple, optional
-            Bounding box (min_x, min_y, max_x, max_y)
-        """
-        now = datetime.now(timezone.utc).isoformat()
-
-        updates = ["updated_at = ?"]
-        params = [now]
-
-        if end_time is not None:
-            updates.append("end_time = ?")
-            params.append(end_time.isoformat())
-            # Calculate lifetime
-            conn = self._get_connection()
-            with self._lock:
-                row = conn.execute(
-                    "SELECT start_time FROM tracks WHERE track_id = ?",
-                    (track_id,)
-                ).fetchone()
-            if row:
-                start = datetime.fromisoformat(row['start_time'])
-                lifetime = (end_time - start).total_seconds() / 60.0
-                updates.append("lifetime_minutes = ?")
-                params.append(lifetime)
-
-        if death_event is not None:
-            updates.append("death_event = ?")
-            params.append(death_event)
-        if death_track_id is not None:
-            updates.append("death_track_id = ?")
-            params.append(death_track_id)
-        if max_area_sqkm is not None:
-            updates.append("max_area_sqkm = COALESCE(MAX(max_area_sqkm, ?), ?)")
-            params.extend([max_area_sqkm, max_area_sqkm])
-        if max_reflectivity is not None:
-            updates.append("max_reflectivity = COALESCE(MAX(max_reflectivity, ?), ?)")
-            params.extend([max_reflectivity, max_reflectivity])
-        if bbox is not None:
-            updates.extend([
-                "bbox_min_x = COALESCE(MIN(bbox_min_x, ?), ?)",
-                "bbox_min_y = COALESCE(MIN(bbox_min_y, ?), ?)",
-                "bbox_max_x = COALESCE(MAX(bbox_max_x, ?), ?)",
-                "bbox_max_y = COALESCE(MAX(bbox_max_y, ?), ?)"
-            ])
-            params.extend([bbox[0], bbox[0], bbox[1], bbox[1],
-                           bbox[2], bbox[2], bbox[3], bbox[3]])
-
-        params.append(track_id)
-
-        conn = self._get_connection()
-        with self._lock:
-            conn.execute(f"""
-                UPDATE tracks
-                SET {', '.join(updates)}
-                WHERE track_id = ?
-            """, params)
-            conn.commit()
-
-    def add_track_observation(
-        self,
-        track_id: str,
-        scan_time: datetime,
-        cell_id: int,
-        centroid_x: float,
-        centroid_y: float,
-        centroid_lat: Optional[float] = None,
-        centroid_lon: Optional[float] = None,
-        area_sqkm: Optional[float] = None,
-        mean_reflectivity: Optional[float] = None,
-        max_reflectivity: Optional[float] = None,
-        core_area_sqkm: Optional[float] = None,
-        vx: Optional[float] = None,
-        vy: Optional[float] = None,
-        speed: Optional[float] = None,
-        lifecycle_phase: Optional[str] = None
-    ) -> str:
-        """Add observation to track.
-
-        Parameters
-        ----------
-        track_id : str
-            Track identifier
-        scan_time : datetime
-            Observation timestamp
-        cell_id : int
-            Segmentation label
-        centroid_x : float
-            X position (km from radar)
-        centroid_y : float
-            Y position (km from radar)
-        centroid_lat : float, optional
-            Geographic latitude
-        centroid_lon : float, optional
-            Geographic longitude
-        area_sqkm : float, optional
-            Cell area
-        mean_reflectivity : float, optional
-            Mean dBZ
-        max_reflectivity : float, optional
-            Max dBZ
-        core_area_sqkm : float, optional
-            Core area (>40 dBZ)
-        vx : float, optional
-            X velocity (km/min)
-        vy : float, optional
-            Y velocity (km/min)
-        speed : float, optional
-            Speed (km/min)
-        lifecycle_phase : str, optional
-            GROWTH | MATURE | DECAY
-
-        Returns
-        -------
-        str
-            Observation ID
-        """
-        import uuid
-
-        observation_id = str(uuid.uuid4())[:16]
-        scan_time_str = scan_time.isoformat()
-        now = datetime.now(timezone.utc).isoformat()
-
-        conn = self._get_connection()
-        with self._lock:
-            conn.execute("""
-                INSERT OR REPLACE INTO track_observations
-                (observation_id, track_id, scan_time, cell_id,
-                 centroid_x, centroid_y, centroid_lat, centroid_lon,
-                 area_sqkm, mean_reflectivity, max_reflectivity, core_area_sqkm,
-                 vx, vy, speed, lifecycle_phase, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (observation_id, track_id, scan_time_str, cell_id,
-                  centroid_x, centroid_y, centroid_lat, centroid_lon,
-                  area_sqkm, mean_reflectivity, max_reflectivity, core_area_sqkm,
-                  vx, vy, speed, lifecycle_phase, now))
-            conn.commit()
-
-        # Update track max values
-        self.update_track(
-            track_id,
-            max_area_sqkm=area_sqkm,
-            max_reflectivity=max_reflectivity,
-            bbox=(centroid_x, centroid_y, centroid_x, centroid_y)
-        )
-
-        return observation_id
-
-    def get_track(self, track_id: str) -> Optional[Dict]:
-        """Get track by ID.
-
-        Parameters
-        ----------
-        track_id : str
-            Track identifier
-
-        Returns
-        -------
-        dict or None
-            Track record
-        """
-        conn = self._get_connection()
-        with self._lock:
-            row = conn.execute(
-                "SELECT * FROM tracks WHERE track_id = ?",
-                (track_id,)
-            ).fetchone()
-
-        return dict(row) if row else None
-
-    def get_track_by_index(self, track_index: int, run_id: str) -> Optional[Dict]:
-        """Get track by human-readable index and run.
-
-        Parameters
-        ----------
-        track_index : int
-            Track index
-        run_id : str
-            Run identifier
-
-        Returns
-        -------
-        dict or None
-            Track record
-        """
-        conn = self._get_connection()
-        with self._lock:
-            row = conn.execute("""
-                SELECT * FROM tracks
-                WHERE track_index = ? AND run_id = ?
-            """, (track_index, run_id)).fetchone()
-
-        return dict(row) if row else None
-
-    def get_track_path(self, track_id: str) -> List[Dict]:
-        """Get all observations for a track in temporal order.
-
-        Parameters
-        ----------
-        track_id : str
-            Track identifier
-
-        Returns
-        -------
-        list of dict
-            Observations ordered by time
-        """
-        conn = self._get_connection()
-        with self._lock:
-            rows = conn.execute("""
-                SELECT * FROM track_observations
-                WHERE track_id = ?
-                ORDER BY scan_time ASC
-            """, (track_id,)).fetchall()
-
-        return [dict(row) for row in rows]
-
-    def get_active_tracks(self, run_id: Optional[str] = None) -> List[Dict]:
-        """Get all tracks without end_time (still active).
-
-        Parameters
-        ----------
-        run_id : str, optional
-            Filter by run ID
-
-        Returns
-        -------
-        list of dict
-            Active track records
-        """
-        conn = self._get_connection()
-        with self._lock:
-            if run_id:
-                rows = conn.execute("""
-                    SELECT * FROM tracks
-                    WHERE end_time IS NULL AND run_id = ?
-                    ORDER BY start_time DESC
-                """, (run_id,)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT * FROM tracks
-                    WHERE end_time IS NULL
-                    ORDER BY start_time DESC
-                """).fetchall()
-
-        return [dict(row) for row in rows]
-
-    def get_tracks_at_time(self, scan_time: datetime) -> List[Dict]:
-        """Get all tracks that were active at a specific time.
-
-        Parameters
-        ----------
-        scan_time : datetime
-            Timestamp to query
-
-        Returns
-        -------
-        list of dict
-            Track records
-        """
-        scan_time_str = scan_time.isoformat()
-
-        conn = self._get_connection()
-        with self._lock:
-            rows = conn.execute("""
-                SELECT t.* FROM tracks t
-                INNER JOIN track_observations o ON t.track_id = o.track_id
-                WHERE o.scan_time = ?
-            """, (scan_time_str,)).fetchall()
-
-        return [dict(row) for row in rows]
-
     def close(self) -> None:
         """Close database connection."""
         if self._conn:

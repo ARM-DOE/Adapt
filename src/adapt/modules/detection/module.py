@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Segment convective cells from gridded radar reflectivity.
 
 This module detects convective cell boundaries using thresholding and

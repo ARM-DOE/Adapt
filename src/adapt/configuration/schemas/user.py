@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """UserConfig: Forgiving, minimal user-facing configuration.
 
 This schema accepts user inputs in a variety of formats, with aliases
@@ -63,6 +66,7 @@ class UserProjectorConfig(AdaptBaseModel):
     nan_fill_value: Optional[float] = None
     flow_params: Optional[dict[str, Any]] = None
     min_motion_threshold: Optional[float] = None
+    max_flow_magnitude: Optional[float] = None
 
     @field_validator("method", mode="before")
     @classmethod

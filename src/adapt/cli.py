@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Adapt command-line interface.
 
 Entry point: ``adapt``
@@ -121,7 +124,10 @@ def _run_nexrad(args: argparse.Namespace) -> None:
     from adapt.runtime.orchestrator import PipelineOrchestrator
 
     config = init_runtime_config(args)
-    orchestrator = PipelineOrchestrator(config)
+    orchestrator = PipelineOrchestrator(
+        config,
+        close_repository_on_stop=bool(args.no_plot),
+    )
 
     stop_event = threading.Event()
 
@@ -195,6 +201,7 @@ def _run_nexrad(args: argparse.Namespace) -> None:
             plot_consumer.join(timeout=10)
             if plot_consumer.is_alive():
                 print('Warning: Plot consumer did not stop cleanly')
+        orchestrator.close_repository()
         _remove_pid()
         print('Pipeline shutdown complete.')
 
@@ -220,7 +227,7 @@ _CONFIG_TEMPLATE = """\
 # --------------------------------------------------------------------------
 radar: KHTX                 # NWS NEXRAD radar ID (e.g. KLOT, KHTX, KDIX)
 mode: realtime              # "realtime" or "historical"
-base_dir: ""                # Output directory (override with --base-dir)
+base_dir: "{base_dir}"                # Output directory (override with --base-dir)
 
 # --------------------------------------------------------------------------
 # REALTIME MODE
@@ -274,8 +281,29 @@ def _build_config_parser(sub: argparse.ArgumentParser) -> None:
 def _config_cmd(args: argparse.Namespace) -> None:
     """Write a config.yaml template to the specified path."""
     from datetime import datetime
+    import os
 
-    out = Path(args.output) if args.output else Path.cwd() / 'config.yaml'
+    try:
+        cwd = Path.cwd()
+        cwd_missing = False
+    except FileNotFoundError:
+        cwd = None
+        cwd_missing = True
+
+    if args.output:
+        out = Path(args.output)
+        if cwd_missing and not out.is_absolute():
+            raise ValueError(
+                "Current working directory no longer exists. "
+                "Pass an absolute output path, e.g. `adapt config /path/to/config.yaml`."
+            )
+    else:
+        if cwd_missing:
+            raise FileNotFoundError(
+                "Current working directory no longer exists. "
+                "Run `cd` into an existing directory, or pass an absolute output path."
+            )
+        out = cwd / "config.yaml"
 
     if out.is_dir():
         out = out / 'config.yaml'
@@ -289,7 +317,8 @@ def _config_cmd(args: argparse.Namespace) -> None:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    out.write_text(_CONFIG_TEMPLATE.format(timestamp=timestamp))
+    base_dir = str(out.parent.resolve())
+    out.write_text(_CONFIG_TEMPLATE.format(timestamp=timestamp, base_dir=base_dir))
     print(f'Config written: {out}')
     print(f'Edit it, then run:  adapt run-nexrad {out} --radar KLOT')
 

@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Execution graph node.
 
 Each node wraps a module and tracks its position in the DAG: which nodes

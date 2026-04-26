@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Builds an execution DAG from a list of modules.
 
 The builder inspects each module's declared ``inputs`` and ``outputs``,

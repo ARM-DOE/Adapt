@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Multi-threaded pipeline orchestration.
 
 Coordinates downloader and processor threads with queue-based inter-thread
@@ -92,7 +95,12 @@ class PipelineOrchestrator:
         orch.start(max_runtime=60)  # Run for 60 minutes then stop
     """
 
-    def __init__(self, config: "InternalConfig", max_queue_size: int = 20):
+    def __init__(
+        self,
+        config: "InternalConfig",
+        max_queue_size: int = 20,
+        close_repository_on_stop: bool = True,
+    ):
         """Initialize orchestrator with fully resolved runtime configuration.
 
         Parameters
@@ -129,6 +137,7 @@ class PipelineOrchestrator:
         self._interrupted = False  # Track user interrupt (Ctrl+C) vs normal completion
         self._start_time = None
         self._max_duration = None
+        self._close_repository_on_stop = close_repository_on_stop
 
     def _setup_logging(self):
         """Configure logging and file tracking systems.
@@ -279,7 +288,12 @@ class PipelineOrchestrator:
             if self._stop_event:
                 break
 
-            # 1. Check for thread failures or self-stops (e.g. ContractViolation)
+            # 1. Historical completion check (must run before downloader death check)
+            if mode == "historical":
+                if self._check_historical_complete():
+                    break
+
+            # 2. Check for thread failures or self-stops (e.g. ContractViolation)
             if self.processor.stopped():
                 logger.critical("Processor has stopped (likely due to contract violation). Exiting.")
                 break
@@ -289,21 +303,20 @@ class PipelineOrchestrator:
                 break
 
             if not self.downloader.is_alive():
+                if mode == "historical" and self.downloader.is_historical_complete():
+                    logger.info("Downloader exited after historical completion.")
+                    break
                 logger.critical("Downloader thread died unexpectedly. Exiting.")
                 break
 
-            # 2. Mode-specific exit conditions
-            if mode == "historical":
-                if self._check_historical_complete():
-                    break
-
+            # 3. Mode-specific exit conditions
             if mode == "realtime" and self._max_duration:
                 elapsed = time.time() - self._start_time
                 if elapsed > self._max_duration:
                     logger.info("Max duration reached")
                     break
 
-            # 3. Status logging (every 30s)
+            # 4. Status logging (every 30s)
             if time.time() - last_status_time > 30:
                 self._log_status()
                 last_status_time = time.time()
@@ -312,10 +325,7 @@ class PipelineOrchestrator:
 
     def _check_historical_complete(self) -> bool:
         """Check if historical mode is complete. Returns True to exit."""
-        downloader_complete = (
-            self.downloader.is_historical_complete() or
-            not self.downloader.is_alive()
-        )
+        downloader_complete = self.downloader.is_historical_complete()
 
         if not downloader_complete:
             return False
@@ -415,7 +425,8 @@ class PipelineOrchestrator:
         if self.repository:
             final_status = "cancelled" if self._interrupted else "completed"
             self.repository.finalize_run(final_status)
-            self.repository.close()
+            if self._close_repository_on_stop:
+                self.repository.close()
 
         # Summary
         elapsed = time.time() - self._start_time if self._start_time else 0
@@ -448,3 +459,8 @@ class PipelineOrchestrator:
             self.downloader_queue.qsize(),
             hist_status
         )
+
+    def close_repository(self) -> None:
+        """Close repository connection if present."""
+        if self.repository:
+            self.repository.close()

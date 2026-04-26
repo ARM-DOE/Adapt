@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Executes a DAG of nodes in dependency order.
 
 The executor runs a simple topological loop: nodes whose dependencies have

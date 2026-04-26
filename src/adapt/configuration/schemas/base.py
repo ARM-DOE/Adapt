@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Base Pydantic model with strict defaults for Adapt configs.
 
 All Adapt config schemas inherit from this base to ensure consistent

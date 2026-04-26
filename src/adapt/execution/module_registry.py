@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Module registry — discover and instantiate registered modules.
 
 Modules register their class at import time by calling ``registry.register()``.

@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.abspath("../src"))
 
 project = "Adapt"
 author = "Bhupendra Raut"
-copyright = "2026, Bhupendra Raut"
+copyright = "2026, UChicago Argonne, LLC"
 release = "0.2.0"
 
 extensions = [

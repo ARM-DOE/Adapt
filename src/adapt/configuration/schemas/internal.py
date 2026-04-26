@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """InternalConfig: Authoritative runtime configuration.
 
 This is the ONLY config schema that runtime code sees. It is fully validated,

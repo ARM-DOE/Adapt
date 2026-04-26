@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """CLIConfig: Command-line operational overrides.
 
 Minimal configuration for operational parameters that commonly change

@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Read-only DataClient for Adapt repository (Refactored).
 
 This is the user-facing, read-only interface for querying Adapt pipeline data.

@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Execution graph: build and run DAGs from module declarations."""
 
 from adapt.execution.graph.node import Node

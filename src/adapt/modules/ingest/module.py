@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Read and regrid NEXRAD Level-II files to Cartesian xarray.Dataset.
 
 This module handles loading raw NEXRAD archive files and transforming them into

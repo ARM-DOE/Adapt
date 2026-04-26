@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Adapt Radar Dashboard — Tkinter GUI for exploring pipeline outputs.
 
 Entry point: adapt dashboard [--repo /path/to/repo]

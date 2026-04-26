@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """UserConfig: Forgiving, minimal user-facing configuration.
 
 This schema accepts user inputs in a variety of formats, with aliases

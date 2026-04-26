@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Contracts for the tracking module outputs.
 
 Tracking emits scan-local outputs for persistence and downstream consumers:

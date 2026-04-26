@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Track convective cells across consecutive radar scans using mask overlap and motion prediction.
 
 This module implements a cell tracking algorithm inspired from TINT (Raut et al., 2021) with following improvements.

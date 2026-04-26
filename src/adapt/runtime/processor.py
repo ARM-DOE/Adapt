@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Radar data processor thread.
 
 Reads NEXRAD file paths from the downloader queue and delegates all

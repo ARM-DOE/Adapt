@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """NEXRAD pipeline assembly via ModuleRegistry + GraphBuilder.
 
 This module shows how the controller builds the full processing pipeline

@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Repository writer — module-facing interface for persisting pipeline outputs.
 
 Thin facade over DataRepository. Modules call RepositoryWriter methods

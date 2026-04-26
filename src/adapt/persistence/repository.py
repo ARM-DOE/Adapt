@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Centralized data access and artifact management for Adapt pipeline.
 
 Provides a unified API for:

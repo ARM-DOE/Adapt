@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """TrackStore — read/write the three track persistence tables in catalog.db.
 
 Tables managed:

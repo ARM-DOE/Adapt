@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Radar-level catalog manager for Adapt repository.
 
 Manages catalog.db at {root_dir}/{radar}/catalog.db.

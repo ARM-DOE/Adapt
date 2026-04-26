@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Root-level registry manager for Adapt repository.
 
 Manages the adapt_registry.db database at the repository root level.

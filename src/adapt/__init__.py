@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """``Adapt`` - Automated Detection And Projection of storm cells using Tracking.
 
 Subpackages:

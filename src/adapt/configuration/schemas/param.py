@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """ParamConfig: Expert defaults for Adapt pipeline.
 
 This module defines the complete, scientifically-validated default configuration.

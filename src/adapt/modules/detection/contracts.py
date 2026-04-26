@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Output contracts for the detection module.
 
 The detection module produces segmented cell labels. This module defines

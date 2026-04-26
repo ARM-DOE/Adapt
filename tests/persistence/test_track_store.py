@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Unit tests for TrackStore.
 
 Each test uses an in-memory SQLite database with the three-table schema.

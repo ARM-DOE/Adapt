@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Estimate cell motion and project future positions using optical flow.
 
 This module computes cell motion vectors from radar reflectivity patterns

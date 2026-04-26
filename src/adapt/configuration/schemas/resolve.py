@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Configuration resolution and merging logic.
 
 This module provides the SINGLE AUTHORITATIVE ENTRYPOINT for configuration 

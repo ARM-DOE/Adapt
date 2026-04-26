@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """AWS S3 NEXRAD Level-II file discovery and download.
 
 Monitors AWS S3 bucket for new NEXRAD radar files and downloads them locally

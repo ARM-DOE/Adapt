@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Visualization and plotting module for radar data."""
 
 # OBSOLETE — RadarPlotter and PlotterThread are exported but never imported externally.

@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Output contracts for the ingest module.
 
 The ingest module produces gridded radar data. This module defines the

@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Output contracts for the analysis module.
 
 The analysis module produces cell statistics dataframes. This module defines

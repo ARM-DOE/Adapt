@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Multi-threaded pipeline orchestration.
 
 Coordinates downloader and processor threads with queue-based inter-thread

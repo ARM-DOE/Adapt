@@ -1,0 +1,45 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main, devel]
+  pull_request:
+    branches: [main, devel]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: environment.yml
+          create-args: python=${{ matrix.python-version }}
+          cache-environment: true
+          init-shell: bash
+          condarc: |
+            channels:
+              - conda-forge
+            channel_priority: strict
+
+      - name: Show environment info
+        shell: bash -l {0}
+        run: |
+          python --version
+          pip list | head -n 30
+
+      - name: Run tests
+        shell: bash -l {0}
+        run: |
+          pytest -m "not integration" \
+            --cov=src/adapt \
+            --cov-report=term

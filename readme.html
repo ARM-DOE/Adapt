@@ -45,6 +45,7 @@
               <p class="caption" role="heading"><span class="caption-text">Overview</span></p>
 <ul class="current">
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Adapt</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#installation-stable-release">Installation (stable release)</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#quickstart">Quickstart</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#documentation">Documentation</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#status-and-compatibility">Status and compatibility</a></li>
@@ -94,14 +95,25 @@
 <a class="reference external" href="https://www.arm.gov/"><img alt="ARM" src="https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&amp;colorB=00539c" /></a></p>
 <p><strong>Real-time processing for informed adaptive scanning of ARM weather radars</strong></p>
 <p><code class="docutils literal notranslate"><span class="pre">Adapt</span></code> is a framewrok for near real-time weather radar data processing for ARM operations and field campaigns. Currently, it ingests NEXRAD Level-II data, performs gridding/segmentation/analysis, and writes results for downstream visualization and scientific workflows.</p>
-<section id="quickstart">
-<h2>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading"></a></h2>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/ARM-DOE/Adapt.git
-<span class="nb">cd</span><span class="w"> </span>Adapt
+<section id="installation-stable-release">
+<h2>Installation (stable release)<a class="headerlink" href="#installation-stable-release" title="Link to this heading"></a></h2>
+<ol class="arabic simple">
+<li><p>Go to the <a class="reference external" href="https://github.com/ARM-DOE/Adapt/releases">releases page</a> and download the latest <code class="docutils literal notranslate"><span class="pre">Source</span> <span class="pre">code</span> <span class="pre">(tar.gz)</span></code> or <code class="docutils literal notranslate"><span class="pre">Source</span> <span class="pre">code</span> <span class="pre">(zip)</span></code>.</p></li>
+<li><p>Extract and create the environment:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># extract</span>
+tar<span class="w"> </span>-xzf<span class="w"> </span>Adapt-&lt;version&gt;.tar.gz
+<span class="nb">cd</span><span class="w"> </span>Adapt-&lt;version&gt;
+
+<span class="c1"># create environment and install adapt</span>
 mamba<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>-f<span class="w"> </span>environment.yml
 mamba<span class="w"> </span>activate<span class="w"> </span>adapt_env
-
-adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output
+</pre></div>
+</div>
+</section>
+<section id="quickstart">
+<h2>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading"></a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output
 adapt<span class="w"> </span>dashboard<span class="w"> </span>--repo<span class="w"> </span>~/adapt_output
 </pre></div>
 </div>

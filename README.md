@@ -10,14 +10,25 @@
 
 `Adapt` is a framewrok for near real-time weather radar data processing for ARM operations and field campaigns. Currently, it ingests NEXRAD Level-II data, performs gridding/segmentation/analysis, and writes results for downstream visualization and scientific workflows.
 
+## Installation (stable release)
+
+1. Go to the [releases page](https://github.com/ARM-DOE/Adapt/releases) and download the latest `Source code (tar.gz)` or `Source code (zip)`.
+
+2. Extract and create the environment:
+
+```bash
+# extract
+tar -xzf Adapt-<version>.tar.gz
+cd Adapt-<version>
+
+# create environment and install adapt
+mamba env create -f environment.yml
+mamba activate adapt_env
+```
+
 ## Quickstart
 
 ```bash
-git clone https://github.com/ARM-DOE/Adapt.git
-cd Adapt
-mamba env create -f environment.yml
-mamba activate adapt_env
-
 adapt run-nexrad --radar KLOT --base-dir ~/adapt_output
 adapt dashboard --repo ~/adapt_output
 ```

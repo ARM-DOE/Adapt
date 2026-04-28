@@ -1,0 +1,109 @@
+name: Bug Report
+description: Something is not working correctly in Adapt
+labels: ["bug"]
+body:
+
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, check the [documentation](https://arm-doe.github.io/Adapt/) and open issues.
+        Fill in every section — incomplete reports slow down diagnosis.
+
+  - type: dropdown
+    id: pipeline_stage
+    attributes:
+      label: Pipeline stage where the bug occurs
+      description: Which part of the pipeline failed? Select the closest match.
+      options:
+        - Acquisition — downloading or queuing NEXRAD files
+        - Ingest — reading or regridding radar files
+        - Detection — segmentation or cell labelling
+        - Analysis — cell property computation
+        - Projection — multi-scan projection
+        - Tracking — cell linking, events, or track IDs
+        - Persistence — SQLite catalog or Parquet read/write
+        - Configuration — config parsing, validation, or defaults
+        - CLI — command parsing, configuration loading, or startup
+        - Dashboard — display, refresh, or layout
+        - Other / unknown
+    validations:
+      required: true
+
+  - type: input
+    id: adapt_version
+    attributes:
+      label: Adapt version
+      description: Run `adapt --version` and paste the output.
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: radar
+    attributes:
+      label: Radar site and data source
+      description: Radar ID and data type, if applicable.
+      placeholder: "e.g. KLOT / NEXRAD Level-II"
+    validations:
+      required: false
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly. What did you observe? What did you expect?
+      placeholder: |
+        Expected: ...
+        Got: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal sequence of commands or actions that trigger the bug.
+      placeholder: |
+        1. Run `adapt ...`
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Full error message or traceback
+      render: python
+      description: Paste the complete traceback. Do not truncate it.
+    validations:
+      required: false
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration file (redact credentials)
+      render: yaml
+      description: Paste the config file used, or the relevant section.
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, and install method.
+      placeholder: "e.g. macOS 14 / Python 3.11 / installed from source archive v0.1.0"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I checked the documentation and existing issues
+          required: true
+        - label: I can reproduce this consistently
+          required: false
+        - label: This occurs on the latest release
+          required: false

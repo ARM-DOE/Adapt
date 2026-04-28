@@ -1,0 +1,89 @@
+name: Feature Request or Enhancement
+description: Propose a new capability or improvement to an existing one
+labels: ["enhancement"]
+body:
+
+  - type: markdown
+    attributes:
+      value: |
+        Describe the capability you need, not the implementation.
+        Be specific about the scientific or operational problem this solves.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Adapt does this affect?
+      options:
+        - Acquisition — data download or queuing
+        - Ingest — file reading or regridding
+        - Detection — segmentation or cell labelling
+        - Analysis — cell property computation
+        - Projection — multi-scan projection
+        - Tracking — cell linking or events
+        - Persistence — catalog or data storage
+        - Configuration — config schema or validation
+        - CLI — commands or output
+        - Dashboard — display or interaction
+        - New module or data source
+        - Other / cross-cutting
+    validations:
+      required: true
+
+  - type: dropdown
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What is driving this request?
+      options:
+        - Science — needed for a research or analysis workflow
+        - Operations — needed for real-time ARM radar operations
+        - Developer experience — improves development or testing
+        - Performance — speed or resource usage
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can you not do today, or what works poorly? Be concrete.
+      placeholder: "Currently, Adapt cannot ... which means ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed solution
+      description: How should it work? Describe behaviour, not implementation.
+      placeholder: "Adapt should ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you evaluated and why you ruled them out.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: References, papers, related issues, or example data.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this has not been requested before
+          required: true
+        - label: This is one focused request, not multiple features bundled together
+          required: true

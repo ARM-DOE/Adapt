@@ -1,0 +1,65 @@
+name: Documentation Issue
+description: Something in the documentation is missing, wrong, or unclear
+labels: ["documentation"]
+body:
+
+  - type: markdown
+    attributes:
+      value: |
+        Good documentation reports are specific — include the exact page or section and what is wrong or missing.
+
+  - type: dropdown
+    id: doc_type
+    attributes:
+      label: Documentation type
+      description: Which part of the documentation is affected?
+      options:
+        - Installation or setup guide
+        - Configuration reference
+        - CLI reference
+        - API / module reference
+        - Architecture or design docs
+        - Usage examples
+        - Troubleshooting guide
+        - Missing documentation (topic not covered anywhere)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: Type of issue
+      options:
+        - Incorrect — documentation says something wrong
+        - Incomplete — documentation is missing key information
+        - Unclear — documentation is hard to understand
+        - Outdated — documentation no longer matches current behaviour
+        - Missing — this topic is not documented at all
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Location
+      description: URL, file path, or section name where the issue is.
+      placeholder: "e.g. docs/USAGE.md — Configuration section"
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What is wrong or missing?
+      description: Be specific. Quote the incorrect text if applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested correction or addition
+      description: What should the documentation say or include?
+    validations:
+      required: false

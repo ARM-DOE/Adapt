@@ -1,0 +1,146 @@
+name: New Analysis or Algorithm Request
+description: Request a new calculation, measurement, or algorithm to be added to Adapt
+labels: ["algorithm", "enhancement"]
+body:
+
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to request any new scientific calculation, cell property, classification,
+        or algorithm — whether it produces a new column in the cell table, a new gridded field,
+        or an entirely new output. Be as specific as possible in every section.
+
+  - type: input
+    id: algorithm_name
+    attributes:
+      label: Name of the algorithm or analysis
+      placeholder: "e.g. Hail detection using ZDR columns, elliptical shape analysis of cell masks"
+    validations:
+      required: true
+
+  - type: textarea
+    id: science_case
+    attributes:
+      label: Why is this important?
+      description: |
+        What scientific question does this answer or what operational need does it serve?
+        How would the results be interpreted and used?
+      placeholder: |
+        This is important because ...
+        The results would be interpreted as ...
+        It would be used for ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the algorithm
+      description: |
+        Explain how the algorithm works in your own words. Include the physical principle,
+        key variables involved, and any thresholds or parameters that matter.
+      placeholder: |
+        The algorithm works by ...
+        Key variables: ...
+        Important thresholds or parameters: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Papers, technical reports, or documentation. Include DOI where available.
+      placeholder: |
+        - Author et al. (year), Title, Journal. DOI:
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing_code
+    attributes:
+      label: Existing code or notebooks
+      description: |
+        Link or attach any existing implementation, notebook, or open-source code that demonstrates
+        this algorithm. Not required but significantly speeds up implementation.
+      placeholder: |
+        - GitHub / notebook URL:
+        - Library (e.g. PyART, CSU_RadarTools, Tobac):
+        - Personal script or notebook (paste below or attach):
+    validations:
+      required: false
+
+  - type: textarea
+    id: inputs_outputs
+    attributes:
+      label: Inputs and outputs
+      description: |
+        What data does the algorithm need as input?
+        What does it produce? Describe variables, units, and dimensions.
+      placeholder: |
+        Inputs:
+          - e.g. reflectivity (x, y, z) in dBZ
+          - e.g. differential reflectivity ZDR (x, y, z) in dB
+
+        Output:
+          - e.g. hail probability per cell (0–1, scalar per cell)
+          - e.g. classification field (x, y) gridded
+    validations:
+      required: true
+
+  - type: textarea
+    id: output_schema
+    attributes:
+      label: Output schema
+      description: |
+        Does the output fit an existing Adapt table (cell properties table with scan_time + cell_uid,
+        or track events table), or does it produce a gridded field, or does it need a new table entirely?
+        Describe the columns or fields needed, with types and units.
+      placeholder: |
+        Output type: gridded field / new column in cell table / new table / other
+
+        If new column in cell table:
+          - column name, type, unit: ...
+
+        If gridded:
+          - dimensions: x, y, z, time
+          - variable name, unit: ...
+
+        If new table:
+          - columns, types, units: ...
+
+        Fits existing scan_time + cell_uid schema: yes / no / partially
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Are you offering to contribute this?
+      description: Let us know whether you are requesting this from the team or offering to implement it yourself.
+      options:
+        - I am requesting this — I would like the Adapt team to implement it
+        - I can contribute a PR — I am willing to implement this and open a pull request
+        - I can contribute partially — I can provide code, a notebook, or a prototype but need help integrating it
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that would help — related issues, example data, field campaign context.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have provided at least one literature reference
+          required: true
+        - label: I have described what goes in and what comes out
+          required: true
+        - label: I have checked that this is not already implemented in Adapt
+          required: true

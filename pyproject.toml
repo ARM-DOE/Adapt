@@ -1,27 +1,28 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77", "wheel", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "adapt"
-version = "0.1.0"
-description = "Adaptive Radar Data Processing Platform - Modular NEXRAD analysis for storm cell detection and motion projection"
+name = "arm-adapt"
+dynamic = ["version"]
+description = "Real-Time Analysis, Tracking, and Adaptive Radar Sampling of Convective Storms"
 readme = "README.md"
-requires-python = ">=3.8"
-license = { file = "LICENSE" }
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+license-files = ["LICENSE*"]
 authors = [
-    {name = "Bhupendra Raut", email = "raut2@llnl.gov"},
+    {name = "Bhupendra A. Raut", email = "braut@anl.gov"},
 ]
-keywords = ["radar", "NEXRAD", "weather", "cell-detection", "optical-flow"]
+keywords = ["Radar", "NEXRAD", "tracking", "cell-detection", "adaptive-sampling", "Thunderstorm", "Nowcasting", "TITAN", "Py-ART", "ARM"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "License :: OSI Approved :: BSD License",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
@@ -31,6 +32,7 @@ dependencies = [
     "scipy",
     "scikit-image",
     "matplotlib",
+    "networkx",
     "h5py",
     "netCDF4",
     "tqdm",
@@ -45,42 +47,48 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/RBhupi/adapt"
-Repository = "https://github.com/RBhupi/adapt.git"
-Issues = "https://github.com/RBhupi/adapt/issues"
+Homepage = "https://arm-doe.github.io/Adapt/"
+Documentation = "https://arm-doe.github.io/Adapt/"
+Repository = "https://github.com/ARM-DOE/Adapt.git"
+Issues = "https://github.com/ARM-DOE/Adapt/issues"
 
 [project.scripts]
 adapt = "adapt.cli:main"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+docs = [
+    "sphinx>=7.0",
+    "pydata-sphinx-theme>=0.15",
+    "sphinx-autodoc-typehints",
+    "myst-parser>=2.0",
+]
+
+[tool.setuptools]
+include-package-data = true
+platforms = ["Linux", "Mac OS-X", "Unix", "Windows"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+namespaces = false
 
 [tool.setuptools.package-data]
 "adapt.data" = ["user_config.py"]
 "adapt.schemas" = ["*.sql"]
 "adapt.config" = ["*.yaml"]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov",
-    "xarray",
-    "numpy",
-    "arm_pyart",
-]
-
-docs = [
-    "sphinx>=4.0",
-    "sphinx-rtd-theme>=1.0",
-    "sphinx-autodoc-typehints",
-    "myst-parser>=2.0",
-]
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "dirty-tag"
+fallback_version = "0.1.0"
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
 minversion = "7.0"
-
 markers = [
     "unit: fast unit tests (no IO)",
     "pipeline: pipeline tests with mocks",

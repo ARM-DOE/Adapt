@@ -6,11 +6,15 @@
 [![Downloads](https://img.shields.io/github/downloads/ARM-DOE/Adapt/total?label=downloads)](https://github.com/ARM-DOE/Adapt/releases)
 [![ARM](https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&colorB=00539c)](https://www.arm.gov/)
 
-**Real-time processing for informed adaptive scanning of ARM weather radars**
+**Real-time processing for informed adaptive scanning of ARM weather radar operations and field campaigns.**
 
-`Adapt` is a framewrok for near real-time weather radar data processing for ARM operations and field campaigns. Currently, it ingests NEXRAD Level-II data, performs gridding/segmentation/analysis, and writes results for downstream visualization and scientific workflows.
+`Adapt` is a configuration-driven modular framework for near real-time analysis of convective systems designed to support the adaptive sampling and study of convective storms and their life cycles. The system implements a modular pipeline that ingests radar observations, performs gridding and segmentation to identify convective cells, and maintains their identity through time using tracking. It further derives cell-level properties and motion to characterize storm evolution and generate candidate targets for adaptive radar scanning.
 
-## Installation (stable release)
+Adapt operates in both real-time and archival modes, producing standardized data products in the form of gridded fields, tabular summaries, and relational tracking records. Its design emphasizes reproducibility, extensibility, and consistency, allowing new analysis methods and data sources to be integrated without altering core workflows.
+
+Currently, it ingests NEXRAD Level-II data, performs gridding/segmentation/analysis, and writes results for downstream visualization and scientific workflows.
+
+## Installation
 
 1. Go to the [releases page](https://github.com/ARM-DOE/Adapt/releases) and download the latest `Source code (tar.gz)` or `Source code (zip)`.
 
@@ -34,6 +38,8 @@ adapt dashboard --repo ~/adapt_output
 ```
 
 Open the dashboard in a second terminal for live viewing.
+
+
 
 ## Documentation
 

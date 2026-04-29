@@ -1,12 +1,13 @@
 import os
 import sys
+from importlib.metadata import version as _pkg_version
 
 sys.path.insert(0, os.path.abspath("../src"))
 
 project = "Adapt"
 author = "Bhupendra Raut"
 copyright = "2026, UChicago Argonne, LLC"
-release = "0.2.0"
+release = _pkg_version("adapt")
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -24,8 +25,10 @@ autodoc_default_options = {
 }
 autodoc_typehints = "description"
 
-html_theme = "sphinx_rtd_theme"
-html_static_path = []
+root_doc = "readme"
+
+html_theme = "pydata_sphinx_theme"
+html_static_path = ["_static"]
 
 templates_path = []
 exclude_patterns = ["_build", "design", "*.md.bak"]

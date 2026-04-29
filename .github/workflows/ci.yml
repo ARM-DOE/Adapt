@@ -1,44 +1,55 @@
 name: Continuous Integration
 
 on:
+  schedule:
+    - cron: "0 9 * * *"  # daily at 09Z
   push:
     branches: [main, devel]
   pull_request:
     branches: [main, devel]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }}-py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}-latest
+    defaults:
+      run:
+        shell: bash -l {0}
 
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12"]
+        os: [ubuntu, macOS]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required for setuptools_scm version tag detection
 
       - name: Set up micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: environment.yml
           create-args: python=${{ matrix.python-version }}
-          cache-environment: true
           init-shell: bash
-          condarc: |
-            channels:
-              - conda-forge
-            channel_priority: strict
+          cache-downloads: true
+          post-cleanup: "all"
+
+      - name: Install adapt
+        run: pip install -e . --no-deps --force-reinstall
 
       - name: Show environment info
-        shell: bash -l {0}
         run: |
           python --version
           pip list | head -n 30
 
       - name: Run tests
-        shell: bash -l {0}
         run: |
           pytest -m "not integration" \
             --cov=src/adapt \
@@ -51,4 +62,4 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           flags: unittests
-          fail_ci_if_error: true
+          fail_ci_if_error: false

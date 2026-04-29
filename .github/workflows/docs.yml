@@ -13,25 +13,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up micromamba
-        uses: mamba-org/setup-micromamba@v1
         with:
-          environment-file: environment.yml
-          create-args: python=3.11
-          cache-environment: true
-          init-shell: bash
-          condarc: |
-            channels:
-              - conda-forge
-            channel_priority: strict
+          fetch-depth: 0  # required for setuptools_scm version tag detection
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install doc dependencies
-        shell: bash -l {0}
-        run: pip install -e .[docs]
+        run: |
+          pip install sphinx>=7.0 pydata-sphinx-theme>=0.15 \
+                      sphinx-autodoc-typehints myst-parser>=2.0
+          pip install --no-deps -e .
 
       - name: Build HTML docs
-        shell: bash -l {0}
         run: sphinx-build -b html docs docs/_build/html
 
       - name: Deploy to GitHub Pages

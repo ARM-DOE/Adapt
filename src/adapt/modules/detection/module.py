@@ -370,11 +370,9 @@ class RadarCellSegmenter:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
+from adapt.contracts import assert_gridded, assert_segmented  # noqa: E402
 from adapt.execution.module_registry import registry  # noqa: E402
 from adapt.modules.base import BaseModule  # noqa: E402
-from adapt.modules.ingest.contracts import assert_gridded  # noqa: E402
-
-from .contracts import assert_segmented  # noqa: E402
 
 
 def _check_grid_ds_2d(ds):

@@ -4,13 +4,18 @@
 """Radar data processor thread.
 
 Reads NEXRAD file paths from the downloader queue and delegates all
-scientific processing to NexradPipeline (the graph-based execution engine).
-After each file the segmentation NetCDF is saved to the repository.
+scientific processing to two GraphExecutors built at startup:
+
+- ``_single_executor``: ingest + detection (runs every file)
+- ``_multi_executor``: projection + analysis + tracking (runs when 2-frame
+  pair is ready)
 
 Responsibilities of this class (orchestration only):
 - Queue management: pop filepath, mark task done
 - File deduplication via FileProcessingTracker
-- NetCDF persistence after graph run
+- Frame pairing: accumulate segmented history, validate time gap
+- Context assembly: inject dataset_history before calling multi-executor
+- NetCDF + Parquet persistence after graph run
 - Stop/start lifecycle
 """
 
@@ -24,7 +29,11 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from adapt.modules.base import ContractViolation
+from adapt.contracts import ContractViolation
+from adapt.execution.graph.builder import GraphBuilder
+from adapt.execution.graph.executor import GraphExecutor
+from adapt.execution.module_registry import registry
+from adapt.execution.pipeline_builder import _ensure_modules_registered
 from adapt.persistence import DataRepository, ProductType
 from adapt.persistence.track_store import TrackStore
 from adapt.persistence.writer import RepositoryWriter
@@ -38,16 +47,18 @@ logger = logging.getLogger(__name__)
 
 
 class RadarProcessor(threading.Thread):
-    """Worker thread that processes NEXRAD files through the execution graph.
+    """Worker thread that processes NEXRAD files through two execution graphs.
 
-    Receives file paths from the downloader queue and runs them through
-    ``NexradPipeline``, which executes the module DAG (ingest → detection →
-    projection → analysis → tracking). Scientific module instances inside the pipeline
-    persist across files so stateful modules (e.g. ProjectionModule frame
-    history) work correctly.
+    Receives file paths from the downloader queue. For each file:
 
-    After the graph runs, this class saves the projected/segmented dataset
-    to a NetCDF artifact in the repository for downstream consumers.
+    1. Runs the single-frame graph (ingest → detection) via ``_single_executor``.
+    2. Accumulates segmented datasets in a rolling history.
+    3. When a valid 2-frame pair is ready, runs the multi-frame graph
+       (projection → analysis → tracking) via ``_multi_executor``,
+       passing the frame history in context.
+
+    Both executors enforce input/output contracts at every DAG edge via
+    ``GraphExecutor``. The processor itself performs no validation.
 
     Example usage (called by PipelineOrchestrator)::
 
@@ -88,18 +99,28 @@ class RadarProcessor(threading.Thread):
                 "Initialize it in the orchestrator before creating the processor."
             )
 
-        # Build the graph-based pipeline once — module instances (and their
-        # frame history) persist across process_file() calls.
-        from adapt.execution.pipeline_builder import NexradPipeline
-        self._pipeline = NexradPipeline(config, dict(output_dirs))
+        # Build two execution graphs; module instances are shared (stateful
+        # projector/tracker state persists across files via the module objects).
+        _ensure_modules_registered()
+        modules = registry.create_modules()
+
+        single_modules = [m for m in modules if m.name in {"ingest", "detection"}]
+        multi_modules  = [m for m in modules if m.name in {"projection", "analysis", "tracking"}]
+
+        self._single_executor = GraphExecutor(GraphBuilder(single_modules).build())
+        self._multi_executor  = GraphExecutor(GraphBuilder(multi_modules).build())
+
+        logger.info(
+            "RadarProcessor graphs: single=[%s] multi=[%s]",
+            ", ".join(m.name for m in single_modules),
+            ", ".join(m.name for m in multi_modules),
+        )
 
         # Frame pairing orchestration state
-        # We maintain a rolling list of segmented datasets and only call
-        # projection/analysis/tracking when we have 2 valid frames
-        self._segmented_history = []  # List of (filepath, ds_2d, scan_time) tuples
-        self._max_history = config.processor.max_history  # Should be 2
+        self._segmented_history = []  # list of (filepath, ds_2d, scan_time)
+        self._max_history = config.processor.max_history
         self._max_time_gap_minutes = config.projector.max_time_interval_minutes
-        self._last_skipped = False  # Set True when process_file skips an analyzed file
+        self._last_skipped = False
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -145,26 +166,22 @@ class RadarProcessor(threading.Thread):
     # ── Per-file processing ───────────────────────────────────────────────────
 
     def process_file(self, filepath) -> bool:
-        """Process NEXRAD file with frame pairing orchestration.
+        """Process a NEXRAD file with frame-pairing orchestration.
 
-        New architecture:
-        - File 1: Load → Detect → Wait (build history, no projection yet)
-        - File 2: Load → Detect → Check pair → Projection → Analysis → Tracking
+        Phase 1 — ingest + detection (every file):
+            Runs single-frame executor. Contract-validated by GraphExecutor.
 
-        Only calls projection/analysis/tracking when we have 2 segmented
-        datasets with an acceptable time gap. This prevents crashes when
-        modules expect projected_ds but only 1 file has been processed.
+        Phase 2 — frame pairing:
+            Accumulates segmented datasets. Waits until 2 frames are ready.
 
-        Parameters
-        ----------
-        filepath : str or dict
-            Path to the NEXRAD Level-II file. Dict format ``{"path": ...}``
-            is accepted for backwards compatibility with the downloader queue.
+        Phase 3 — projection + analysis + tracking (when pair is ready):
+            Injects dataset_history into context. Runs multi-frame executor.
+            Contract-validated by GraphExecutor.
 
         Returns
         -------
         bool
-            True if the file was processed (or ready to pair), False on error.
+            True if processed or deferred (waiting for pair), False on error.
         """
         queued_at = None
         if isinstance(filepath, dict):
@@ -183,86 +200,88 @@ class RadarProcessor(threading.Thread):
         logger.info("Processing: %s", Path(filepath).name)
 
         try:
-            # ──────────────────────────────────────────────────────────────────
-            # PHASE 1: Load + Detect (always run, even for first file)
-            # ──────────────────────────────────────────────────────────────────
-            context_initial = {
+            # ── Phase 1: ingest + detection ────────────────────────────────
+            t0 = time.perf_counter()
+            base_ctx = {
                 "nexrad_file": filepath,
                 "config": self.config,
                 "output_dirs": self.output_dirs,
             }
             if self.repository:
-                context_initial["repository"] = self.repository
+                base_ctx["repository"] = self.repository
 
-            ds_2d, scan_time, ingest_s, detect_s = self._run_ingest_detection_only(context_initial)
+            frame_ctx = self._single_executor.run(base_ctx)
+            single_s  = time.perf_counter() - t0
 
-            # ──────────────────────────────────────────────────────────────────
-            # PHASE 2: Add to rolling history
-            # ──────────────────────────────────────────────────────────────────
-            self._segmented_history.append((filepath, ds_2d, scan_time))
+            # Register radar location from first scan (idempotent after that)
+            if self.repository:
+                grid_ds = frame_ctx.get("grid_ds") or frame_ctx.get("grid_ds_2d")
+                if grid_ds is not None:
+                    lat = grid_ds.attrs.get("radar_latitude")
+                    lon = grid_ds.attrs.get("radar_longitude")
+                    if lat is not None and lon is not None:
+                        self.repository.registry.ensure_radar_location(
+                            self.config.downloader.radar, lat=float(lat), lon=float(lon)
+                        )
+
+            scan_time = frame_ctx.get("scan_time")
+
+            # ── Phase 2: accumulate frame history ──────────────────────────
+            self._segmented_history.append((filepath, frame_ctx["segmented_ds"], scan_time))
             if len(self._segmented_history) > self._max_history:
                 self._segmented_history.pop(0)
 
-            # ──────────────────────────────────────────────────────────────────
-            # PHASE 3: Check if ready for full processing
-            # ──────────────────────────────────────────────────────────────────
             if len(self._segmented_history) < 2:
                 logger.info(
-                    "Segmented %s, waiting for pair | ingest=%.1fs detect=%.1fs",
-                    Path(filepath).name, ingest_s, detect_s,
+                    "Segmented %s, waiting for pair | %.1fs",
+                    Path(filepath).name, single_s,
                 )
-                return True  # Success, but waiting for second file
+                return True
 
-            # ──────────────────────────────────────────────────────────────────
-            # PHASE 4: Validate time gap between frames
-            # ──────────────────────────────────────────────────────────────────
+            # ── Phase 3: validate time gap ─────────────────────────────────
             time_gap_valid, time_gap_minutes = self._validate_time_gap()
             if not time_gap_valid:
                 logger.warning(
-                    "Time gap %.1f min > %.1f min, discarding oldest frame. "
-                    "Waiting for next file with smaller gap.",
-                    time_gap_minutes,
-                    self._max_time_gap_minutes
+                    "Time gap %.1f min > %.1f min, discarding oldest frame.",
+                    time_gap_minutes, self._max_time_gap_minutes,
                 )
-                # Keep newest frame in history, wait for next file
-                return True  # Not an error, just waiting for better pair
+                return True
 
-            # ──────────────────────────────────────────────────────────────────
-            # PHASE 5: Run full pipeline (projection → analysis → tracking)
-            # ──────────────────────────────────────────────────────────────────
             logger.info(
                 "Processing pair: %s + %s (gap: %.1f min)",
                 Path(self._segmented_history[0][0]).name,
                 Path(self._segmented_history[1][0]).name,
-                time_gap_minutes
+                time_gap_minutes,
             )
 
+            # ── Phase 4: projection + analysis + tracking ──────────────────
             t_proj = time.perf_counter()
-            result = self._run_full_pipeline(context_initial)
+            pair_ctx = {
+                **frame_ctx,
+                "config": self.config,
+                "output_dirs": self.output_dirs,
+                "dataset_history": [(fp, ds) for fp, ds, _ in self._segmented_history],
+            }
+            if self.repository:
+                pair_ctx["repository"] = self.repository
+
+            result = self._multi_executor.run(pair_ctx)
             project_s = time.perf_counter() - t_proj
 
-            # ──────────────────────────────────────────────────────────────────
-            # PHASE 6: Save outputs to repository
-            # ──────────────────────────────────────────────────────────────────
+            # ── Phase 5: persist results ───────────────────────────────────
             if self.repository and result:
                 self._save_results(result, scan_time)
 
-            # Log cell count + timing
             cell_stats = result.get("cell_stats")
             n_cells = len(cell_stats) if cell_stats is not None else 0
             logger.info(
-                "Processed pair: %d cells | ingest=%.1fs detect=%.1fs project=%.1fs%s",
-                n_cells, ingest_s, detect_s, project_s,
+                "Processed pair: %d cells | %.1fs proj%s",
+                n_cells, project_s,
                 f" queue={queue_wait_s:.1f}s" if queue_wait_s is not None else "",
             )
 
-            # Mark both files as processed
             if tracker:
-                timings = {
-                    "ingest_seconds": ingest_s,
-                    "detect_seconds": detect_s,
-                    "project_seconds": project_s,
-                }
+                timings = {"project_seconds": project_s}
                 if queue_wait_s is not None:
                     timings["queue_wait_seconds"] = queue_wait_s
                 for fp, _, _ in self._segmented_history:
@@ -272,14 +291,10 @@ class RadarProcessor(threading.Thread):
             return True
 
         except ContractViolation as e:
-            logger.critical(
-                "CRITICAL: Pipeline contract violated: %s. Stopping pipeline.", e
-            )
+            logger.critical("CRITICAL: Pipeline contract violated: %s. Stopping pipeline.", e)
             self.stop()
             if tracker:
-                tracker.mark_stage_complete(
-                    file_id, "analyzed", error=f"ContractViolation: {e}"
-                )
+                tracker.mark_stage_complete(file_id, "analyzed", error=f"ContractViolation: {e}")
             return False
 
         except Exception as e:
@@ -288,7 +303,18 @@ class RadarProcessor(threading.Thread):
                 tracker.mark_stage_complete(file_id, "analyzed", error=str(e))
             return False
 
-    # ── NetCDF persistence ────────────────────────────────────────────────────
+    # ── Frame pairing helpers ─────────────────────────────────────────────────
+
+    def _validate_time_gap(self):
+        """Return (valid, gap_minutes) for the two frames in history."""
+        if len(self._segmented_history) < 2:
+            return False, 0.0
+        time1 = self._segmented_history[0][2]
+        time2 = self._segmented_history[1][2]
+        gap_minutes = (time2 - time1).total_seconds() / 60.0
+        return abs(gap_minutes) <= self._max_time_gap_minutes, gap_minutes
+
+    # ── Persistence helpers ───────────────────────────────────────────────────
 
     def _save_analysis_netcdf(self, ds, filepath: str, scan_time) -> str | None:
         """Write the analysis dataset to a NetCDF artifact in the repository."""
@@ -321,144 +347,16 @@ class RadarProcessor(threading.Thread):
             logger.warning("Could not save analysis NetCDF: %s", e)
             return None
 
-    # ── Frame Pairing Orchestration Helpers ───────────────────────────────────
-
-    def _run_ingest_detection_only(self, context: dict):
-        """Run ONLY ingest + detection modules (segmentation).
-
-        This runs the first part of the pipeline (ingest and detection) without
-        calling projection/analysis/tracking. Used to build up the rolling
-        history of segmented datasets.
-
-        Returns
-        -------
-        ds_2d : xr.Dataset
-            Segmented 2D dataset with cell_labels
-        scan_time : datetime
-            Scan timestamp
-        ingest_seconds : float
-            Wall time for the ingest (regridding) step
-        detect_seconds : float
-            Wall time for the detection (segmentation) step
-        """
-        # Import modules directly (not through pipeline graph)
-        from adapt.modules.detection.module import DetectModule
-        from adapt.modules.ingest.module import LoadModule
-
-        # Instantiate if not cached (persist across calls)
-        if not hasattr(self, '_ingest_module'):
-            self._ingest_module = LoadModule()
-            self._detection_module = DetectModule()
-
-        # Run ingest module
-        t0 = time.perf_counter()
-        result = self._ingest_module.run(context)
-        context.update(result)
-        ingest_s = time.perf_counter() - t0
-
-        # Persist radar location from actual data on first file (idempotent after that).
-        if self.repository:
-            grid_ds = context.get("grid_ds") or context.get("grid_ds_2d")
-            if grid_ds is not None:
-                lat = grid_ds.attrs.get("radar_latitude")
-                lon = grid_ds.attrs.get("radar_longitude")
-                if lat is not None and lon is not None:
-                    self.repository.registry.ensure_radar_location(
-                        self.config.downloader.radar, lat=float(lat), lon=float(lon)
-                    )
-
-        # Run detection module
-        t1 = time.perf_counter()
-        result = self._detection_module.run(context)
-        context.update(result)
-        detect_s = time.perf_counter() - t1
-
-        # Extract outputs
-        ds_2d = context.get("segmented_ds")
-        scan_time = context.get("scan_time")
-
-        return ds_2d, scan_time, ingest_s, detect_s
-
-    def _validate_time_gap(self):
-        """Check if time gap between frames is acceptable for optical flow.
-
-        Returns
-        -------
-        valid : bool
-            True if time gap is within max_time_interval_minutes
-        gap_minutes : float
-            Actual time gap in minutes
-        """
-        if len(self._segmented_history) < 2:
-            return False, 0.0
-
-        # Extract scan times from history tuples
-        time1 = self._segmented_history[0][2]  # (filepath, ds_2d, scan_time)
-        time2 = self._segmented_history[1][2]
-
-        # Compute gap in minutes
-        gap_minutes = (time2 - time1).total_seconds() / 60.0
-        valid = abs(gap_minutes) <= self._max_time_gap_minutes
-
-        return valid, gap_minutes
-
-    def _run_full_pipeline(self, context: dict):
-        """Run projection → analysis → tracking on validated frame pair.
-
-        Reuses the context already populated by _run_ingest_detection_only
-        (which contains grid_ds, segmented_ds, scan_time, etc.) to avoid
-        re-running the expensive ingest step.
-
-        Returns
-        -------
-        dict
-            Updated context with projected_ds, cell_stats, pathed_cells, etc.
-        """
-        # Inject segmented history into ProjectionModule
-        projection_module = self._get_projection_module()
-        if projection_module:
-            projection_module._dataset_history = [
-                (fp, ds) for fp, ds, _ in self._segmented_history
-            ]
-
-        # Run only the stages after ingest+detection — they are already in context
-        _skip = {"ingest", "detection"}
-        for node in self._pipeline._nodes:
-            if node.name not in _skip:
-                result = node.module.run(context)
-                context.update(result)
-
-        return context
-
-    def _get_projection_module(self):
-        """Get ProjectionModule instance from pipeline graph."""
-        try:
-            for node in self._pipeline._nodes:
-                if node.name == "projection":
-                    return node.module
-        except Exception:
-            logger.warning("Could not find ProjectionModule in pipeline")
-        return None
-
     def _save_results(self, result: dict, scan_time):
-        """Save all pipeline outputs to the repository.
-
-        Saves:
-        - projected_ds as NetCDF artifact
-        - cell_stats, cell_adjacency as Parquet artifacts
-        - tracked_cells, cell_events as SQLite via TrackStore
-          (label→uid adjacency mapping in TrackStore)
-        """
+        """Save all pipeline outputs to the repository."""
         if scan_time is not None and scan_time.tzinfo is None:
             scan_time = scan_time.replace(tzinfo=UTC)
 
-        # NetCDF: segmentation + projections + flow vectors
         projected_ds = result.get("projected_ds")
         if projected_ds is not None:
-            filepath = self._segmented_history[-1][0]  # Most recent file
+            filepath = self._segmented_history[-1][0]
             self._save_analysis_netcdf(projected_ds, filepath, scan_time)
 
-        # Parquet: analysis outputs
         writer = RepositoryWriter(self.repository)
 
         cell_stats     = result.get("cell_stats")
@@ -471,7 +369,6 @@ class RadarProcessor(threading.Thread):
         if cell_adjacency is not None and not cell_adjacency.empty:
             writer.write_analysis(df=cell_adjacency, scan_time=scan_time, producer="cell_adjacency")
 
-        # SQLite: track identity outputs
         if tracked_cells is not None and not tracked_cells.empty:
             if cell_stats is None:
                 raise ValueError("Missing required cell_stats for TrackStore persistence")

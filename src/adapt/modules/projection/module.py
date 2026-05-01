@@ -569,9 +569,9 @@ class RadarCellProjector:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
+from adapt.contracts import assert_segmented  # noqa: E402
 from adapt.execution.module_registry import registry  # noqa: E402
 from adapt.modules.base import BaseModule  # noqa: E402
-from adapt.modules.detection.contracts import assert_segmented  # noqa: E402
 
 
 def _check_segmented_ds(ds):
@@ -582,67 +582,47 @@ class ProjectionModule(BaseModule):
     """BaseModule wrapper for RadarCellProjector.
 
     Computes optical flow between consecutive radar frames and projects
-    cell positions forward in time. Maintains a rolling frame history
-    as instance state so it persists across files.
+    cell positions forward in time. Stateless: receives the frame pair
+    via the context key ``dataset_history`` (injected by the processor).
 
     Context inputs
     --------------
     segmented_ds : xr.Dataset
-        2D segmented dataset (output of DetectModule).
-    nexrad_file : str
-        Current file path (used as history key).
+        2D segmented dataset for the current frame (output of DetectModule).
+    dataset_history : list of (str, xr.Dataset)
+        Rolling history of (filepath, segmented_ds) tuples supplied by the
+        processor. Must contain exactly 2 entries before this module is called.
     config : InternalConfig
         Runtime configuration.
 
     Context outputs
     ---------------
     projected_ds : xr.Dataset
-        2D dataset with projection fields added (or original if <2 frames).
+        2D dataset with heading_x, heading_y, and cell_projections added.
     """
 
     name = "projection"
-    inputs = ["segmented_ds", "nexrad_file", "config"]
+    inputs = ["segmented_ds", "dataset_history", "config"]
     outputs = ["projected_ds"]
     input_contracts = {"segmented_ds": _check_segmented_ds}
-    # Output: projected_ds only present when 2+ frames available and projection succeeds
-    # Raises exception if time gap too large or computation fails
-    # Returns context unchanged (no projected_ds) if insufficient history (< 2 frames)
 
     def __init__(self) -> None:
         self._projector = None
-        self._dataset_history = []  # list of (filepath, ds_2d) tuples
 
     def run(self, context: dict) -> dict:
         config = context["config"]
-        ds_2d = context["segmented_ds"]
-        filepath = context["nexrad_file"]
+        dataset_history = context["dataset_history"]  # list of (filepath, ds_2d)
 
         if self._projector is None:
             self._projector = RadarCellProjector(config)
 
-        # Note: Processor orchestration injects history directly into
-        # self._dataset_history before calling pipeline. For standalone
-        # testing, we still support building history internally.
-        max_history = config.processor.max_history
-
-        # If history is empty or doesn't contain current file, build internally
-        if not self._dataset_history or self._dataset_history[-1][0] != filepath:
-            # Build history internally (standalone mode)
-            self._dataset_history.append((filepath, ds_2d))
-            if len(self._dataset_history) > max_history:
-                self._dataset_history.pop(0)
-            logger.debug("Building history internally (%d frames)", len(self._dataset_history))
-
-        # Must have 2 frames (guaranteed by processor orchestration, but double-check)
-        if len(self._dataset_history) < 2:
+        if len(dataset_history) < 2:
             raise ValueError(
-                f"ProjectionModule requires 2 frames, but only "
-                f"{len(self._dataset_history)} available. "
-                "Processor should orchestrate frame pairing before calling projection."
+                f"ProjectionModule requires 2 frames in dataset_history, "
+                f"got {len(dataset_history)}. Processor must pair frames before calling."
             )
 
-        # Compute optical flow
-        ds_list = [ds for _, ds in self._dataset_history]
+        ds_list = [ds for _, ds in dataset_history]
         projected = self._projector.project(ds_list)
         return {"projected_ds": projected}
 

@@ -930,11 +930,13 @@ class RadarCellTracker:
 # BaseModule wrapper (Phase 6 implementation placeholder)
 # =============================================================================
 
+from adapt.contracts import (  # noqa: E402
+    assert_cell_events,
+    assert_projected,
+    assert_tracked_cells,
+)
 from adapt.execution.module_registry import registry  # noqa: E402
 from adapt.modules.base import BaseModule  # noqa: E402
-from adapt.modules.projection.contracts import assert_projected  # noqa: E402
-
-from .contracts import assert_cell_events, assert_tracked_cells  # noqa: E402
 
 
 def _check_projected_ds(ds: xr.Dataset) -> None:

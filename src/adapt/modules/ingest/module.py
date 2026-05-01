@@ -356,10 +356,9 @@ import numpy as np  # noqa: E402
 import xarray as _xr  # noqa: E402
 
 from adapt.configuration.schemas.directories import get_netcdf_path  # noqa: E402
+from adapt.contracts import assert_gridded  # noqa: E402
 from adapt.execution.module_registry import registry  # noqa: E402
 from adapt.modules.base import BaseModule  # noqa: E402
-
-from .contracts import assert_gridded  # noqa: E402
 
 
 def _check_grid_ds_2d(ds):

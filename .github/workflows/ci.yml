@@ -47,6 +47,9 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
+      - name: Install import-linter
+        run: pip install import-linter
+
       - name: Show environment info
         run: |
           python --version
@@ -54,6 +57,9 @@ jobs:
 
       - name: Lint with ruff
         run: ruff check src tests
+
+      - name: Check import architecture
+        run: lint-imports --no-cache
 
       - name: Run tests
         run: |

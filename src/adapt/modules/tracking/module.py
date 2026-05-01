@@ -45,7 +45,6 @@ import pandas as pd
 import xarray as xr
 from scipy.optimize import linear_sum_assignment
 
-
 __all__ = ['RadarCellTracker', 'TrackingModule']
 
 logger = logging.getLogger(__name__)

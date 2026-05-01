@@ -27,6 +27,8 @@ import threading
 import time
 from pathlib import Path
 
+from adapt import __version__
+
 # ---------------------------------------------------------------------------
 # Single-instance enforcement
 # ---------------------------------------------------------------------------
@@ -356,6 +358,15 @@ def main() -> None:
             'of ARM weather radars.'
         ),
     )
+    
+    # Add version argument
+    adapt_module_path = Path(__file__).parent
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {__version__}\nInstalled at: {adapt_module_path}',
+    )
+    
     subparsers = parser.add_subparsers(dest='command', metavar='COMMAND')
     subparsers.required = True
 

@@ -23,16 +23,12 @@ Key capabilities:
 """
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 import xarray as xr
 from scipy.ndimage import label
 from skimage.morphology import h_maxima
 from skimage.segmentation import watershed
-
-if TYPE_CHECKING:
-    from adapt.configuration.schemas import InternalConfig
 
 __all__ = ['RadarCellSegmenter']
 
@@ -140,7 +136,7 @@ class RadarCellSegmenter:
     >>> print(f"Found {ds_labeled['cell_labels'].max()} cells")
     """
 
-    def __init__(self, config: "InternalConfig"):
+    def __init__(self, config):
         """Initialize segmenter with validated configuration.
         
         Parameters
@@ -160,19 +156,16 @@ class RadarCellSegmenter:
         >>> config = resolve_config(ParamConfig())
         >>> segmenter = RadarCellSegmenter(config)
         """
-        self.config = config
-        self.method = config.segmenter.method
-        self.threshold = config.segmenter.threshold
-        self.kernel_size = config.segmenter.closing_kernel
-        self.filter_by_size = config.segmenter.filter_by_size
-        self.min_gridpoints = config.segmenter.min_cellsize_gridpoint
-        self.max_gridpoints = config.segmenter.max_cellsize_gridpoint
-        self.h_maxima = config.segmenter.h_maxima
-        
-        # Variable names from global config
-        self.refl_name = config.global_.var_names.reflectivity
-        self.labels_name = config.global_.var_names.cell_labels
-        self.z_level = config.global_.z_level
+        self.method = config.method
+        self.threshold = config.threshold
+        self.kernel_size = config.closing_kernel
+        self.filter_by_size = config.filter_by_size
+        self.min_gridpoints = config.min_cellsize_gridpoint
+        self.max_gridpoints = config.max_cellsize_gridpoint
+        self.h_maxima = config.h_maxima
+        self.refl_name = config.reflectivity_var
+        self.labels_name = config.labels_var
+        self.z_level = config.z_level
 
         logger.info("RadarCellSegmenter initialized: method=%s, threshold=%s", 
                     self.method, self.threshold)
@@ -405,7 +398,7 @@ class DetectModule(BaseModule):
     """
 
     name = "detection"
-    inputs = ["grid_ds_2d", "config"]
+    inputs = ["grid_ds_2d", "detection_config"]
     outputs = ["segmented_ds", "num_cells"]
     input_contracts  = {"grid_ds_2d": _check_grid_ds_2d}
     output_contracts = {"segmented_ds": _check_segmented_ds}
@@ -414,15 +407,14 @@ class DetectModule(BaseModule):
         self._segmenter = None
 
     def run(self, context: dict) -> dict:
-        config = context["config"]
+        config = context["detection_config"]
         ds_2d = context["grid_ds_2d"]
 
         if self._segmenter is None:
             self._segmenter = RadarCellSegmenter(config)
 
         segmented = self._segmenter.segment(ds_2d)
-        labels_name = config.global_.var_names.cell_labels
-        num_cells = int(segmented[labels_name].max().item())
+        num_cells = int(segmented[config.labels_var].max().item())
 
         return {"segmented_ds": segmented, "num_cells": num_cells}
 

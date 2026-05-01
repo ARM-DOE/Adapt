@@ -12,14 +12,10 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from nexradaws import NexradAwsInterface
 
-from adapt.configuration.schemas.directories import get_nexrad_path
-
-if TYPE_CHECKING:
-    from adapt.configuration.schemas import InternalConfig
+from adapt.utils.paths import get_nexrad_path
 
 __all__ = ['AwsNexradDownloader']
 
@@ -73,7 +69,7 @@ class AwsNexradDownloader(threading.Thread):
 
     def __init__(
         self,
-        config: "InternalConfig",
+        config,
         output_dir: Path = None,
         output_dirs: dict = None,
         result_queue=None,

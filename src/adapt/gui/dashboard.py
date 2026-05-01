@@ -1284,11 +1284,11 @@ class AdaptDashboard(tk.Tk):
                                           fraction=0.046, pad=0.04)
 
         # ── Cell contours ─────────────────────────────────────────────────────
-        # for cell_id in np.unique(labels_data[labels_data > 0]):
-        #     cs = ax.contour(x_grid, y_grid,
-        #                     (labels_data == cell_id).astype(float),
-        #                     levels=[0.5], colors='#2C3539', linewidths=0.5, zorder=50)
-        #     self._cell_contours[int(cell_id)] = cs
+        for cell_id in np.unique(labels_data[labels_data > 0]):
+            cs = ax.contour(x_grid, y_grid,
+                            (labels_data == cell_id).astype(float),
+                            levels=[0.8], colors='#2C3539', linewidths=0.5, zorder=50)
+            self._cell_contours[int(cell_id)] = cs
 
         # ── Projection contours ───────────────────────────────────────────────
         if 'cell_projections' in ds.data_vars:
@@ -1301,7 +1301,7 @@ class AdaptDashboard(tk.Tk):
                 _ls_cycle = ['dashed', 'dashdot', 'dotted']
                 for i in range(1, end_frame):
                     alpha = max(0.5, 1.0 - i / n_frames)
-                    lw    = max(0.5, 1.5 - i * 0.2)
+                    lw    = max(0.7, 1.6 - i * 0.2)
                     ls    = _ls_cycle[(i - 1) % len(_ls_cycle)]
                     lp = proj_da.isel({fo: i}).values
                     for cid in np.unique(lp[~np.isnan(lp) & (lp > 0)]):

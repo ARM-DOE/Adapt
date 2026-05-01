@@ -26,16 +26,12 @@ import contextlib
 import json
 import logging
 from datetime import UTC
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 from scipy.ndimage import center_of_mass
 from skimage.measure import regionprops
-
-if TYPE_CHECKING:
-    from adapt.configuration.schemas import InternalConfig
 
 __all__ = ['RadarCellAnalyzer']
 
@@ -120,7 +116,7 @@ class RadarCellAnalyzer:
     >>> print(len(df))  # number of cells in this frame
     """
     
-    def __init__(self, config: "InternalConfig"):
+    def __init__(self, config):
         """Initialize analyzer with validated configuration.
         
         Parameters
@@ -140,12 +136,12 @@ class RadarCellAnalyzer:
         >>> config = resolve_config(ParamConfig())
         >>> analyzer = RadarCellAnalyzer(config)
         """
-        self.config = config
-        self.reflectivity_field = config.global_.var_names.reflectivity
-        self.radar_variables = config.analyzer.radar_variables
-        self.exclude_fields = config.analyzer.exclude_fields
-        self.max_projection_steps = config.projector.max_projection_steps
-        self._adjacency_min_touching = config.analyzer.adjacency_min_touching_boundary_pixels
+        self.reflectivity_field = config.reflectivity_var
+        self.labels_field = config.labels_var
+        self.radar_variables = config.radar_variables
+        self.exclude_fields = config.exclude_fields
+        self.max_projection_steps = config.max_projection_steps
+        self._adjacency_min_touching = config.adjacency_min_touching
 
     def extract(self, ds: xr.Dataset, z_level: int = None) -> pd.DataFrame:
         """Extract geometric and statistical properties from all labeled cells.
@@ -221,7 +217,7 @@ class RadarCellAnalyzer:
         >>> df.to_sql('cells', conn, if_exists='append')  # Database storage
         """
         # Get labels variable name from config
-        labels_name = self.config.global_.var_names.cell_labels
+        labels_name = self.labels_field
 
         # Extract reflectivity (already 2D)
         refl = ds[self.reflectivity_field].values
@@ -269,7 +265,7 @@ class RadarCellAnalyzer:
         along a shared boundary with at least N touching boundary pixel-edges,
         where N is config-driven (`analyzer.adjacency_min_touching_boundary_pixels`).
         """
-        labels_name = self.config.global_.var_names.cell_labels
+        labels_name = self.labels_field
         if labels_name not in ds.data_vars:
             raise ValueError(
                 f"Missing required labels variable '{labels_name}' for adjacency extraction"
@@ -703,7 +699,7 @@ class AnalysisModule(BaseModule):
     """
 
     name = "analysis"
-    inputs = ["projected_ds", "config", "scan_time"]
+    inputs = ["projected_ds", "analysis_config", "scan_time"]
     outputs = ["cell_stats", "cell_adjacency"]
     output_contracts = {"cell_stats": _check_cell_stats, "cell_adjacency": _check_cell_adjacency}
 
@@ -711,14 +707,13 @@ class AnalysisModule(BaseModule):
         self._analyzer = None
 
     def run(self, context: dict) -> dict:
-        config = context["config"]
+        config = context["analysis_config"]
         ds_2d = context["projected_ds"]
 
         if self._analyzer is None:
             self._analyzer = RadarCellAnalyzer(config)
 
-        z_level = config.global_.z_level
-        df_cells = self._analyzer.extract(ds_2d, z_level=z_level)
+        df_cells = self._analyzer.extract(ds_2d, z_level=config.z_level)
         df_adjacency = self._analyzer.extract_adjacency(ds_2d)
 
         return {"cell_stats": df_cells, "cell_adjacency": df_adjacency}

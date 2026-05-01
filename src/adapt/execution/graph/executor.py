@@ -17,6 +17,7 @@ up to the caller (e.g. ``RadarProcessor``) which handles it.
 
 import logging
 
+from adapt.contracts.pipeline import require
 from adapt.execution.graph.node import Node
 
 logger = logging.getLogger(__name__)
@@ -85,10 +86,13 @@ class GraphExecutor:
                 if not ready:
                     continue
 
-                # Validate inputs declared by the module
+                # Validate inputs declared by the module — fail immediately if absent
                 for key, validator in (node.module.input_contracts or {}).items():
-                    if key in context:
-                        validator(context[key])
+                    require(
+                        key in context,
+                        f"Required input '{key}' missing for module '{node.name}'",
+                    )
+                    validator(context[key])
 
                 outputs = node.module.run(context)
 

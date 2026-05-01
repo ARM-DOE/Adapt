@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from adapt.configuration.schemas.materialization import materialize_module_configs
 from adapt.contracts import ContractViolation
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
@@ -109,6 +110,8 @@ class RadarProcessor(threading.Thread):
 
         self._single_executor = GraphExecutor(GraphBuilder(single_modules).build())
         self._multi_executor  = GraphExecutor(GraphBuilder(multi_modules).build())
+
+        self._module_configs = materialize_module_configs(config)
 
         logger.info(
             "RadarProcessor graphs: single=[%s] multi=[%s]",
@@ -204,7 +207,8 @@ class RadarProcessor(threading.Thread):
             t0 = time.perf_counter()
             base_ctx = {
                 "nexrad_file": filepath,
-                "config": self.config,
+                "ingest_config": self._module_configs["ingest_config"],
+                "detection_config": self._module_configs["detection_config"],
                 "output_dirs": self.output_dirs,
             }
             if self.repository:
@@ -258,7 +262,9 @@ class RadarProcessor(threading.Thread):
             t_proj = time.perf_counter()
             pair_ctx = {
                 **frame_ctx,
-                "config": self.config,
+                "projection_config": self._module_configs["projection_config"],
+                "analysis_config": self._module_configs["analysis_config"],
+                "tracking_config": self._module_configs["tracking_config"],
                 "output_dirs": self.output_dirs,
                 "dataset_history": [(fp, ds) for fp, ds, _ in self._segmented_history],
             }

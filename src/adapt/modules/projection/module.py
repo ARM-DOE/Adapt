@@ -21,16 +21,12 @@ Output enables cell tracking and motion-based warnings in operational systems.
 """
 
 import logging
-from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 import xarray as xr
 from scipy.ndimage import binary_dilation
 from scipy.spatial import Delaunay
-
-if TYPE_CHECKING:
-    from adapt.configuration.schemas import InternalConfig
 
 __all__ = ['RadarCellProjector']
 
@@ -129,7 +125,7 @@ class RadarCellProjector:
     ... )
     """
 
-    def __init__(self, config: "InternalConfig"):
+    def __init__(self, config):
         """Initialize projector with validated configuration.
         
         Parameters
@@ -149,23 +145,22 @@ class RadarCellProjector:
         >>> config = resolve_config(ParamConfig())
         >>> projector = RadarCellProjector(config)
         """
-        self.config = config
-        self.method = config.projector.method
-        self.nan_fill = config.projector.nan_fill_value
-        self.max_interval_minutes = config.projector.max_time_interval_minutes
-        self.max_proj_steps = config.projector.max_projection_steps
+        self.method = config.method
+        self.nan_fill = config.nan_fill_value
+        self.max_interval_minutes = config.max_time_interval_minutes
+        self.max_proj_steps = config.max_projection_steps
         self.flow_params = {
-            "pyr_scale": config.projector.flow_params.pyr_scale,
-            "levels": config.projector.flow_params.levels,
-            "winsize": config.projector.flow_params.winsize,
-            "iterations": config.projector.flow_params.iterations,
-            "poly_n": config.projector.flow_params.poly_n,
-            "poly_sigma": config.projector.flow_params.poly_sigma,
-            "flags": config.projector.flow_params.flags,
+            "pyr_scale": config.pyr_scale,
+            "levels": config.levels,
+            "winsize": config.winsize,
+            "iterations": config.iterations,
+            "poly_n": config.poly_n,
+            "poly_sigma": config.poly_sigma,
+            "flags": config.flags,
         }
-        self.min_motion_threshold = config.projector.min_motion_threshold
-        self.max_flow_magnitude = config.projector.max_flow_magnitude
-        self.refl_var = config.global_.var_names.reflectivity
+        self.min_motion_threshold = config.min_motion_threshold
+        self.max_flow_magnitude = config.max_flow_magnitude
+        self.refl_var = config.reflectivity_var
 
     def project(self, ds_list):
         """Project cells forward using optical flow motion vectors.
@@ -602,7 +597,7 @@ class ProjectionModule(BaseModule):
     """
 
     name = "projection"
-    inputs = ["segmented_ds", "dataset_history", "config"]
+    inputs = ["segmented_ds", "dataset_history", "projection_config"]
     outputs = ["projected_ds"]
     input_contracts = {"segmented_ds": _check_segmented_ds}
 
@@ -610,7 +605,7 @@ class ProjectionModule(BaseModule):
         self._projector = None
 
     def run(self, context: dict) -> dict:
-        config = context["config"]
+        config = context["projection_config"]
         dataset_history = context["dataset_history"]  # list of (filepath, ds_2d)
 
         if self._projector is None:

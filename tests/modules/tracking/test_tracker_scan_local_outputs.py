@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from adapt.configuration.schemas.materialization import materialize_module_configs
 from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.resolve import resolve_config
 from adapt.configuration.schemas.user import UserConfig
@@ -19,12 +20,13 @@ from adapt.modules.tracking.module import RadarCellTracker
 def config():
     d = tempfile.mkdtemp()
     try:
+        import shutil
         param = ParamConfig()
         param.tracker.split_overlap_threshold = 0.4
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        return resolve_config(param, user, None)
+        internal = resolve_config(param, user, None)
+        return materialize_module_configs(internal)["tracking_config"]
     finally:
-        import shutil
         shutil.rmtree(d, ignore_errors=True)
 
 

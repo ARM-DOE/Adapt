@@ -38,7 +38,6 @@ import hashlib
 import logging
 import string
 from datetime import UTC
-from typing import TYPE_CHECKING
 
 import networkx as nx
 import numpy as np
@@ -46,8 +45,6 @@ import pandas as pd
 import xarray as xr
 from scipy.optimize import linear_sum_assignment
 
-if TYPE_CHECKING:
-    from adapt.configuration.schemas import InternalConfig
 
 __all__ = ['RadarCellTracker', 'TrackingModule']
 
@@ -274,8 +271,8 @@ class TrackingGraph:
 class MatchingEngine:
     """Cost matrix builder using projected masks (cell_projections[0] is already the hull)."""
 
-    def __init__(self, config: "InternalConfig"):
-        self.core_threshold = config.tracker.core_reflectivity_threshold
+    def __init__(self, config):
+        self.core_threshold = config.core_reflectivity_threshold
 
     def compute_cost_matrix(
         self,
@@ -361,15 +358,18 @@ class RadarCellTracker:
     7. True births: remaining unmatched born cells
     """
 
-    def __init__(self, config: "InternalConfig"):
-        self.config        = config
-        self.match_cost    = config.tracker.match_cost_threshold
-        self.keep_cost     = config.tracker.keep_cost_threshold
-        self.unmatch_cost  = config.tracker.unmatch_cost_threshold
-        self.split_overlap = config.tracker.split_overlap_threshold
-        self.core_threshold = config.tracker.core_reflectivity_threshold
-        self.refl_var      = config.global_.var_names.reflectivity
-        self.labels_var    = config.global_.var_names.cell_labels
+    def __init__(self, config):
+        self.match_cost    = config.match_cost
+        self.keep_cost     = config.keep_cost
+        self.unmatch_cost  = config.unmatch_cost
+        self.split_overlap = config.split_overlap
+        self.core_threshold = config.core_reflectivity_threshold
+        self.refl_var      = config.reflectivity_var
+        self.labels_var    = config.labels_var
+        self.uid_time_step_s     = config.uid_time_step_s
+        self.uid_latlon_step_deg = config.uid_latlon_step_deg
+        self.uid_area_step_km2   = config.uid_area_step_km2
+        self.uid_width           = config.uid_width
 
         self.graph          = TrackingGraph()
         self.matcher        = MatchingEngine(config)
@@ -535,7 +535,6 @@ class RadarCellTracker:
         return cells
 
     def _new_cell_identity(self, cell: dict) -> tuple[str, str]:
-        cfg = self.config.tracker.cell_uid
         max_zdr = float(cell['max_zdr'])
         if max_zdr < 0:
             max_zdr = 0.0
@@ -546,11 +545,11 @@ class RadarCellTracker:
             max_dbz=float(cell['max_reflectivity']),
             max_zdr=max_zdr,
             area40_km2=float(cell['area_40dbz_km2']),
-            time_step_s=int(cfg.time_step_s),
-            latlon_step_deg=float(cfg.latlon_step_deg),
-            area_step_km2=float(cfg.area_step_km2),
+            time_step_s=self.uid_time_step_s,
+            latlon_step_deg=self.uid_latlon_step_deg,
+            area_step_km2=self.uid_area_step_km2,
         )
-        cell_uid = _cell_uid_from_signature(signature, width=int(cfg.width))
+        cell_uid = _cell_uid_from_signature(signature, width=self.uid_width)
         return cell_uid, signature
 
     # ------------------------------------------------------------------
@@ -968,7 +967,7 @@ class TrackingModule(BaseModule):
     """
 
     name = "tracking"
-    inputs = ["projected_ds", "cell_stats", "config", "scan_time"]
+    inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time"]
     outputs = ["tracked_cells", "cell_events"]
     input_contracts = {"projected_ds": _check_projected_ds}
     output_contracts = {
@@ -980,7 +979,7 @@ class TrackingModule(BaseModule):
         self._tracker = None
 
     def run(self, context: dict) -> dict:
-        config = context["config"]
+        config = context["tracking_config"]
         ds_2d = context["projected_ds"]
         cell_stats = context["cell_stats"]
 

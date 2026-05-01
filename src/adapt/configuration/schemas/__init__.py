@@ -14,6 +14,6 @@ init_runtime_config : function
 """
 
 from adapt.configuration.schemas.initialization import init_runtime_config
+from adapt.configuration.schemas.materialization import materialize_module_configs
 
-# Single public function - everything else is internal implementation
-__all__ = ['init_runtime_config']
+__all__ = ['init_runtime_config', 'materialize_module_configs']

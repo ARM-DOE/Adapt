@@ -19,13 +19,9 @@ Author: Bhupendra Raut
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pyart
 import xarray as xr
-
-if TYPE_CHECKING:
-    from adapt.configuration.schemas import InternalConfig
 
 __all__ = ['RadarDataLoader']
 
@@ -82,7 +78,7 @@ class RadarDataLoader:
     >>> print(ds.data_vars)  # reflectivity, velocity, etc.
     """
 
-    def __init__(self, config: "InternalConfig"):
+    def __init__(self, config):
         """Initialize loader with validated configuration.
         
         Parameters
@@ -102,14 +98,13 @@ class RadarDataLoader:
         >>> config = resolve_config(ParamConfig())
         >>> loader = RadarDataLoader(config)
         """
-        self.config = config
-        self.file_format = config.reader.file_format
-        self.grid_shape = config.regridder.grid_shape
-        self.grid_limits = config.regridder.grid_limits
-        self.roi_func = config.regridder.roi_func
-        self.min_radius = config.regridder.min_radius
-        self.weighting_function = config.regridder.weighting_function
-        self.save_netcdf = config.regridder.save_netcdf
+        self.file_format = config.file_format
+        self.grid_shape = config.grid_shape
+        self.grid_limits = config.grid_limits
+        self.roi_func = config.roi_func
+        self.min_radius = config.min_radius
+        self.weighting_function = config.weighting_function
+        self.save_netcdf = config.save_netcdf
 
     def read(self, filepath: Path | str) -> object:
         """Read a NEXRAD archive file into a Py-ART Radar object.
@@ -355,10 +350,10 @@ from datetime import datetime as _dt  # noqa: E402
 import numpy as np  # noqa: E402
 import xarray as _xr  # noqa: E402
 
-from adapt.configuration.schemas.directories import get_netcdf_path  # noqa: E402
 from adapt.contracts import assert_gridded  # noqa: E402
 from adapt.execution.module_registry import registry  # noqa: E402
 from adapt.modules.base import BaseModule  # noqa: E402
+from adapt.utils.paths import get_netcdf_path  # noqa: E402
 
 
 def _check_grid_ds_2d(ds):
@@ -391,7 +386,7 @@ class LoadModule(BaseModule):
     """
 
     name = "ingest"
-    inputs = ["nexrad_file", "config"]
+    inputs = ["nexrad_file", "ingest_config"]
     outputs = ["grid_ds", "grid_ds_2d", "scan_time"]
     output_contracts = {"grid_ds_2d": _check_grid_ds_2d}
 
@@ -399,14 +394,14 @@ class LoadModule(BaseModule):
         self._loader = None
 
     def run(self, context: dict) -> dict:
-        config = context["config"]
+        config = context["ingest_config"]
         filepath = context["nexrad_file"]
         output_dirs = context.get("output_dirs", {})
 
         if self._loader is None:
             self._loader = RadarDataLoader(config)
 
-        radar = config.downloader.radar
+        radar = config.radar
         nc_filename = Path(filepath).stem
         scan_time = _dt.now(UTC)
         try:
@@ -421,17 +416,16 @@ class LoadModule(BaseModule):
 
         ds = self._loader.load_and_regrid(
             filepath,
-            save_netcdf=config.regridder.save_netcdf,
+            save_netcdf=config.save_netcdf,
             output_dir=output_dir,
         )
 
         if ds is None:
             raise RuntimeError(f"Ingest failed: load_and_regrid returned None for {filepath}")
 
-        # Extract 2D slice at configured z-level
-        z_level = config.global_.z_level
-        z_name = config.global_.coord_names.z
-        time_name = config.global_.coord_names.time
+        z_level = config.z_level
+        z_name = config.z_coord
+        time_name = config.time_coord
         z_idx = int(np.argmin(np.abs(ds[z_name].values - z_level)))
 
         ds_2d = _xr.Dataset()

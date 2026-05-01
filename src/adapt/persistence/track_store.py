@@ -17,9 +17,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
@@ -69,7 +68,7 @@ class TrackStore:
     def __init__(self, db_path: Path):
         self._db_path = Path(db_path)
         self._lock = threading.RLock()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
 
     # ------------------------------------------------------------------
     # Connection
@@ -197,7 +196,7 @@ class TrackStore:
             ).fetchall()
         return pd.DataFrame([dict(r) for r in rows])
 
-    def get_cell_events(self, run_id: str, cell_uid: Optional[str] = None) -> pd.DataFrame:
+    def get_cell_events(self, run_id: str, cell_uid: str | None = None) -> pd.DataFrame:
         conn = self._connect()
         with self._lock:
             if cell_uid is None:
@@ -368,7 +367,7 @@ class TrackStore:
         # Parse current scan time once for age computation
         from datetime import datetime as _dt
         try:
-            scan_dt = _dt.strptime(scan_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            scan_dt = _dt.strptime(scan_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
         except ValueError:
             scan_dt = None
 
@@ -382,7 +381,7 @@ class TrackStore:
             age_seconds = 0.0
             if scan_dt is not None and cl not in initiated and first_seen_map and tid in first_seen_map:
                 try:
-                    first_dt = _dt.strptime(first_seen_map[tid], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                    first_dt = _dt.strptime(first_seen_map[tid], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
                     age_seconds = max(0.0, (scan_dt - first_dt).total_seconds())
                 except ValueError:
                     pass
@@ -424,7 +423,7 @@ class TrackStore:
         )
         conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
 
-    def _prev_scan_time(self, conn: sqlite3.Connection, run_id: str, scan_iso: str) -> Optional[str]:
+    def _prev_scan_time(self, conn: sqlite3.Connection, run_id: str, scan_iso: str) -> str | None:
         row = conn.execute(
             "SELECT MAX(scan_time) AS t FROM cells_by_scan WHERE run_id=? AND scan_time<?",
             (run_id, scan_iso),
@@ -468,7 +467,7 @@ class TrackStore:
         conn: sqlite3.Connection,
         run_id: str,
         target_iso: str,
-        source_iso: Optional[str],
+        source_iso: str | None,
         cell_events_df: pd.DataFrame,
     ) -> None:
         cols = [
@@ -480,10 +479,10 @@ class TrackStore:
         placeholders = ", ".join("?" * len(cols))
         sql = f"INSERT INTO cell_events ({', '.join(cols)}) VALUES ({placeholders})"
 
-        def _src_time(etype: str) -> Optional[str]:
+        def _src_time(etype: str) -> str | None:
             return None if etype == "INITIATION" else source_iso
 
-        def _tgt_time(etype: str) -> Optional[str]:
+        def _tgt_time(etype: str) -> str | None:
             return None if etype == "TERMINATION" else target_iso
 
         rows = []
@@ -626,7 +625,7 @@ class TrackStore:
 
 def _to_iso(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

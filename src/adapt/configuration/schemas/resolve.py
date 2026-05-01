@@ -31,11 +31,10 @@ Example precedence:
 - Result: {"radar_variables": ["C"], "threshold": 40}  # List replaced
 """
 
-from typing import Union, Optional, Any
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.user import UserConfig
 from adapt.configuration.schemas.cli import CLIConfig
 from adapt.configuration.schemas.internal import InternalConfig
+from adapt.configuration.schemas.param import ParamConfig
+from adapt.configuration.schemas.user import UserConfig
 
 
 def deep_merge(base: dict, *overrides: dict) -> dict:
@@ -78,9 +77,9 @@ def deep_merge(base: dict, *overrides: dict) -> dict:
 
 
 def resolve_config(
-    param_cfg: Union[dict, ParamConfig],
-    user_cfg: Optional[Union[dict, UserConfig]] = None,
-    cli_cfg: Optional[Union[dict, CLIConfig]] = None,
+    param_cfg: dict | ParamConfig,
+    user_cfg: dict | UserConfig | None = None,
+    cli_cfg: dict | CLIConfig | None = None,
 ) -> InternalConfig:
     """Resolve final runtime configuration from param, user, and CLI configs.
     

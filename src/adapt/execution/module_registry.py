@@ -26,7 +26,7 @@ Usage::
     GraphExecutor(nodes).run(context)
 """
 
-from typing import Dict, List, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from adapt.modules.base import BaseModule
@@ -49,9 +49,9 @@ class ModuleRegistry:
     """
 
     def __init__(self) -> None:
-        self._modules: Dict[str, Type["BaseModule"]] = {}
+        self._modules: dict[str, type[BaseModule]] = {}
 
-    def register(self, module_class: Type["BaseModule"]) -> None:
+    def register(self, module_class: type["BaseModule"]) -> None:
         """Register a module class by its ``name`` attribute.
 
         Parameters
@@ -79,7 +79,7 @@ class ModuleRegistry:
             )
         self._modules[name] = module_class
 
-    def create_modules(self) -> List["BaseModule"]:
+    def create_modules(self) -> list["BaseModule"]:
         """Instantiate and return all registered modules.
 
         Returns
@@ -89,7 +89,7 @@ class ModuleRegistry:
         """
         return [cls() for cls in self._modules.values()]
 
-    def get(self, name: str) -> Type["BaseModule"]:
+    def get(self, name: str) -> type["BaseModule"]:
         """Return the module class registered under ``name``.
 
         Raises
@@ -101,7 +101,7 @@ class ModuleRegistry:
             raise KeyError(f"Module '{name}' is not registered.")
         return self._modules[name]
 
-    def list_modules(self) -> List[str]:
+    def list_modules(self) -> list[str]:
         """Return names of all registered modules."""
         return list(self._modules.keys())
 

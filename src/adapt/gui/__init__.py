@@ -23,6 +23,6 @@ Features
 - Hover cell info display
 """
 
-from adapt.gui.dashboard import main, AdaptDashboard
+from adapt.gui.dashboard import AdaptDashboard, main
 
 __all__ = ['main', 'AdaptDashboard']

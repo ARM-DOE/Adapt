@@ -10,10 +10,11 @@ All .get() calls, fallback defaults, and validation logic are FORBIDDEN in
 runtime code - everything is explicit here.
 """
 
-from typing import Literal, Optional
-from pydantic import Field, ConfigDict
-from adapt.configuration.schemas.base import AdaptBaseModel
+from typing import Literal
 
+from pydantic import ConfigDict, Field
+
+from adapt.configuration.schemas.base import AdaptBaseModel
 
 # =============================================================================
 # Nested Configuration Models (Runtime)
@@ -32,8 +33,8 @@ class InternalDownloaderConfig(AdaptBaseModel):
     latest_files: int
     latest_minutes: int
     poll_interval_sec: int
-    start_time: Optional[str]
-    end_time: Optional[str]
+    start_time: str | None
+    end_time: str | None
     min_file_size: int
 
 
@@ -52,7 +53,7 @@ class InternalSegmenterConfig(AdaptBaseModel):
     method: Literal["threshold"]
     threshold: float
     min_cellsize_gridpoint: int
-    max_cellsize_gridpoint: Optional[int]
+    max_cellsize_gridpoint: int | None
     closing_kernel: tuple[int, int]
     filter_by_size: bool
     h_maxima: float
@@ -192,8 +193,8 @@ class InternalConfig(AdaptBaseModel):
     
     mode: Literal["realtime", "historical"]
     base_dir: str
-    run_id: Optional[str] = Field(default=None, description="Unique run identifier generated during initialization")
-    output_dirs: Optional[dict[str, str]] = Field(default=None, description="Output directory paths from initialization")
+    run_id: str | None = Field(default=None, description="Unique run identifier generated during initialization")
+    output_dirs: dict[str, str] | None = Field(default=None, description="Output directory paths from initialization")
     reader: InternalReaderConfig
     downloader: InternalDownloaderConfig
     regridder: InternalRegridderConfig

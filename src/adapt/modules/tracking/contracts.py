@@ -14,6 +14,7 @@ stable cell_uid.
 from __future__ import annotations
 
 import pandas as pd
+
 from adapt.modules.base import require
 
 

@@ -22,11 +22,12 @@ Key capabilities:
 - Metadata preservation (threshold, z-level, configuration)
 """
 
-import xarray as xr
-import numpy as np
 import logging
 from typing import TYPE_CHECKING
-from scipy.ndimage import binary_closing, label
+
+import numpy as np
+import xarray as xr
+from scipy.ndimage import label
 from skimage.morphology import h_maxima
 from skimage.segmentation import watershed
 
@@ -361,9 +362,10 @@ class RadarCellSegmenter:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
-from adapt.modules.base import BaseModule
 from adapt.execution.module_registry import registry
+from adapt.modules.base import BaseModule
 from adapt.modules.ingest.contracts import assert_gridded
+
 from .contracts import assert_segmented
 
 

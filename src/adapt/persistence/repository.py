@@ -21,15 +21,15 @@ import shutil
 import sqlite3
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import pandas as pd
 import xarray as xr
 
-from adapt.persistence.registry import RepositoryRegistry
 from adapt.persistence.catalog import RadarCatalog
+from adapt.persistence.registry import RepositoryRegistry
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
@@ -100,7 +100,7 @@ class DataRepository:
     def __init__(
         self,
         run_id: str,
-        base_dir: Union[str, Path],
+        base_dir: str | Path,
         radar: str,
         config: Optional["InternalConfig"] = None,
     ):
@@ -200,7 +200,7 @@ class DataRepository:
     def generate_artifact_id(
         product_type: str,
         radar: str,
-        scan_time: Optional[datetime],
+        scan_time: datetime | None,
         run_id: str,
         content_hint: str = ""
     ) -> str:
@@ -235,11 +235,11 @@ class DataRepository:
     def register_artifact(
         self,
         product_type: str,
-        file_path: Union[str, Path],
-        scan_time: Optional[datetime] = None,
+        file_path: str | Path,
+        scan_time: datetime | None = None,
         producer: str = "unknown",
-        parent_ids: Optional[List[str]] = None,
-        metadata: Optional[Dict] = None
+        parent_ids: list[str] | None = None,
+        metadata: dict | None = None
     ) -> str:
         """Register an artifact in the RadarCatalog.
 
@@ -341,7 +341,7 @@ class DataRepository:
     def open_table(
         self,
         artifact_id: str,
-        table_name: Optional[str] = None
+        table_name: str | None = None
     ) -> pd.DataFrame:
         """Open SQLite or Parquet artifact as DataFrame.
 
@@ -384,11 +384,11 @@ class DataRepository:
 
     def query(
         self,
-        product_type: Optional[str] = None,
-        time_range: Optional[Tuple[datetime, datetime]] = None,
-        radar: Optional[str] = None,
-        limit: Optional[int] = None
-    ) -> List[Dict]:
+        product_type: str | None = None,
+        time_range: tuple[datetime, datetime] | None = None,
+        radar: str | None = None,
+        limit: int | None = None
+    ) -> list[dict]:
         """Query artifacts by criteria.
 
         Parameters
@@ -426,8 +426,8 @@ class DataRepository:
     def get_latest(
         self,
         product_type: str,
-        radar: Optional[str] = None
-    ) -> Optional[Dict]:
+        radar: str | None = None
+    ) -> dict | None:
         """Get the most recent artifact of a given type.
 
         Parameters
@@ -448,9 +448,9 @@ class DataRepository:
     def get_all_since(
         self,
         product_type: str,
-        since_artifact_id: Optional[str] = None,
-        radar: Optional[str] = None
-    ) -> List[Dict]:
+        since_artifact_id: str | None = None,
+        radar: str | None = None
+    ) -> list[dict]:
         """Get all artifacts of a type created after a given artifact.
 
         Parameters
@@ -480,7 +480,7 @@ class DataRepository:
         df = df.sort_values("scan_time", ascending=True)
         return [self._normalize_item(row) for _, row in df.iterrows()]
 
-    def get_artifact(self, artifact_id: str) -> Optional[Dict]:
+    def get_artifact(self, artifact_id: str) -> dict | None:
         """Get artifact record by ID.
 
         Parameters
@@ -495,7 +495,7 @@ class DataRepository:
         """
         return self._get_artifact(artifact_id)
 
-    def _normalize_item(self, item) -> Dict:
+    def _normalize_item(self, item) -> dict:
         """Convert a RadarCatalog item row to a repository artifact dict.
 
         Resolves relative file_path to absolute, aliases item_id → artifact_id,
@@ -536,9 +536,9 @@ class DataRepository:
         product_type: str,
         scan_time: datetime,
         producer: str,
-        parent_ids: Optional[List[str]] = None,
-        metadata: Optional[Dict] = None,
-        filename_stem: Optional[str] = None
+        parent_ids: list[str] | None = None,
+        metadata: dict | None = None,
+        filename_stem: str | None = None
     ) -> str:
         """Write xarray Dataset to NetCDF and register artifact.
 
@@ -592,9 +592,9 @@ class DataRepository:
         product_type: str,
         scan_time: datetime,
         producer: str,
-        parent_ids: Optional[List[str]] = None,
-        metadata: Optional[Dict] = None,
-        filename_stem: Optional[str] = None
+        parent_ids: list[str] | None = None,
+        metadata: dict | None = None,
+        filename_stem: str | None = None
     ) -> str:
         """Write DataFrame to Parquet and register artifact.
 
@@ -648,8 +648,8 @@ class DataRepository:
         df: pd.DataFrame,
         scan_time: datetime,
         producer: str = "processor",
-        parent_ids: Optional[List[str]] = None,
-        metadata: Optional[Dict] = None
+        parent_ids: list[str] | None = None,
+        metadata: dict | None = None
     ) -> str:
         """Write analysis DataFrame to Parquet file (one per run_id).
 
@@ -893,7 +893,7 @@ class DataRepository:
         self,
         scan_time: datetime,
         producer: str,
-        parent_ids: Optional[List[str]] = None
+        parent_ids: list[str] | None = None
     ) -> str:
         """Get existing cells database or create new one.
 
@@ -940,7 +940,7 @@ class DataRepository:
         self,
         product_type: str,
         scan_time: datetime,
-        filename_stem: Optional[str] = None
+        filename_stem: str | None = None
     ) -> Path:
         """Generate NetCDF output path with run_id suffix.
 
@@ -967,7 +967,7 @@ class DataRepository:
     def _generate_parquet_path(
         self,
         scan_time: datetime,
-        filename_stem: Optional[str] = None
+        filename_stem: str | None = None
     ) -> Path:
         """Generate Parquet output path with run_id suffix.
 
@@ -1078,7 +1078,7 @@ class DataRepository:
     # Internal: Helpers
     # =========================================================================
 
-    def _get_artifact(self, artifact_id: str) -> Optional[Dict]:
+    def _get_artifact(self, artifact_id: str) -> dict | None:
         """Get artifact record by ID from RadarCatalog."""
         row = self.catalog.get_item(artifact_id)
         return self._normalize_item(row) if row else None
@@ -1095,7 +1095,7 @@ class DataRepository:
         status : str
             Final status (completed, failed, cancelled)
         """
-        end_time = datetime.now(timezone.utc).isoformat()
+        end_time = datetime.now(UTC).isoformat()
         if self.registry:
             self.registry.update_run_status(
                 run_id=self.run_id,

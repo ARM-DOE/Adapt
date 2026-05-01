@@ -7,12 +7,12 @@ Monitors AWS S3 bucket for new NEXRAD radar files and downloads them locally
 in realtime or historical batches. Deduplicates files to avoid re-downloading.
 """
 
+import logging
 import threading
 import time
-import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from nexradaws import NexradAwsInterface
 
@@ -140,7 +140,7 @@ class AwsNexradDownloader(threading.Thread):
         self.result_queue = result_queue
         self.conn = conn or NexradAwsInterface()
         # injectable time helpers for testing
-        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._sleep = sleeper or time.sleep
 
         self._stop_event = threading.Event()
@@ -284,7 +284,7 @@ class AwsNexradDownloader(threading.Thread):
         while not self.stopped():
             try:
                 self._download_task()
-            except Exception as e:
+            except Exception:
                 logger.exception("Download task failed")
 
             # Historical: exit after completion
@@ -426,7 +426,7 @@ class AwsNexradDownloader(threading.Thread):
         all_checks_failed = True  # Track if all checks failed (don't warn in that case)
 
         while current <= end_date:
-            dt = datetime(current.year, current.month, current.day, tzinfo=timezone.utc)
+            dt = datetime(current.year, current.month, current.day, tzinfo=UTC)
             y = dt.strftime("%Y")
             m = dt.strftime("%m")
             d = dt.strftime("%d")

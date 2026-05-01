@@ -21,12 +21,13 @@ Output enables cell tracking and motion-based warnings in operational systems.
 """
 
 import logging
+from typing import TYPE_CHECKING
+
+import cv2
 import numpy as np
 import xarray as xr
-import cv2
-from typing import TYPE_CHECKING
-from scipy.spatial import Delaunay
 from scipy.ndimage import binary_dilation
+from scipy.spatial import Delaunay
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
@@ -561,8 +562,8 @@ class RadarCellProjector:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
-from adapt.modules.base import BaseModule
 from adapt.execution.module_registry import registry
+from adapt.modules.base import BaseModule
 from adapt.modules.detection.contracts import assert_segmented
 
 

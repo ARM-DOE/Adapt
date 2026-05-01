@@ -9,12 +9,11 @@ and generating paths for various artifact types.
 Author: Bhupendra Raut
 """
 
-from pathlib import Path
-from typing import Dict
 from datetime import datetime
+from pathlib import Path
 
 
-def setup_output_directories(base_dir: str) -> Dict[str, Path]:
+def setup_output_directories(base_dir: str) -> dict[str, Path]:
     """Setup output directory structure.
     
     Creates the standard Adapt directory layout under base_dir.
@@ -66,7 +65,7 @@ def setup_output_directories(base_dir: str) -> Dict[str, Path]:
 
 
 def get_nexrad_path(
-    output_dirs: Dict[str, Path],
+    output_dirs: dict[str, Path],
     radar: str,
     filename: str,
     scan_time: datetime
@@ -98,7 +97,7 @@ def get_nexrad_path(
 
 
 def get_netcdf_path(
-    output_dirs: Dict[str, Path],
+    output_dirs: dict[str, Path],
     radar: str,
     filename: str,
     scan_time: datetime
@@ -130,7 +129,7 @@ def get_netcdf_path(
 
 
 def get_analysis_path(
-    output_dirs: Dict[str, Path],
+    output_dirs: dict[str, Path],
     radar: str,
     filename: str = None,
     scan_time: datetime = None,
@@ -168,7 +167,7 @@ def get_analysis_path(
 
 
 def get_plot_path(
-    output_dirs: Dict[str, Path],
+    output_dirs: dict[str, Path],
     radar: str,
     plot_type: str = None,
     scan_time: datetime = None,
@@ -214,7 +213,7 @@ def get_plot_path(
 
 
 def get_log_path(
-    output_dirs: Dict[str, Path],
+    output_dirs: dict[str, Path],
     radar: str = None,
     log_name: str = None
 ) -> Path:

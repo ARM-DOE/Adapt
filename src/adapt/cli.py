@@ -26,7 +26,6 @@ import threading
 import time
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Single-instance enforcement
 # ---------------------------------------------------------------------------
@@ -281,7 +280,6 @@ def _build_config_parser(sub: argparse.ArgumentParser) -> None:
 def _config_cmd(args: argparse.Namespace) -> None:
     """Write a config.yaml template to the specified path."""
     from datetime import datetime
-    import os
 
     try:
         cwd = Path.cwd()

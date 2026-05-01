@@ -64,7 +64,7 @@ except Exception:
 
 # ── Tkinter ───────────────────────────────────────────────────────────────────
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext, messagebox
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 # ── Optional deps ─────────────────────────────────────────────────────────────
 try:
@@ -77,8 +77,8 @@ try:
     import matplotlib
     matplotlib.use('TkAgg')
     import cmweather.cm  # registers ChaseSpectral and other radar colormaps — must follow use()
-    import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
     HAS_MPL = True
 except ImportError:
@@ -1065,8 +1065,9 @@ class AdaptDashboard(tk.Tk):
         db_path = Path(repo) / radar / "catalog.db"
         if db_path.exists():
             try:
-                from adapt.persistence.track_store import TrackStore
                 import sqlite3
+
+                from adapt.persistence.track_store import TrackStore
                 conn = sqlite3.connect(str(db_path))
                 conn.row_factory = sqlite3.Row
                 run_row = conn.execute(

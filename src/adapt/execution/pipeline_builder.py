@@ -20,13 +20,13 @@ Usage::
 import importlib
 import logging
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import yaml
 
-from adapt.execution.module_registry import registry
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
+from adapt.execution.module_registry import registry
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
@@ -91,7 +91,7 @@ class NexradPipeline:
     def __init__(
         self,
         config: "InternalConfig",
-        output_dirs: Optional[dict] = None,
+        output_dirs: dict | None = None,
     ) -> None:
         self.config = config
         self.output_dirs = output_dirs or {}

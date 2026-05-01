@@ -16,7 +16,6 @@ up to the caller (e.g. ``RadarProcessor``) which handles it.
 """
 
 import logging
-from typing import List, Set
 
 from adapt.execution.graph.node import Node
 
@@ -38,7 +37,7 @@ class GraphExecutor:
         result_context = executor.run(initial_context={})
     """
 
-    def __init__(self, nodes: List[Node]) -> None:
+    def __init__(self, nodes: list[Node]) -> None:
         self.nodes = nodes
 
     def run(self, context: dict) -> dict:
@@ -62,7 +61,7 @@ class GraphExecutor:
             If the graph contains a cycle (nodes that can never be ready).
         """
         context = dict(context)  # shallow copy — don't mutate caller's dict
-        completed: Set[str] = set()
+        completed: set[str] = set()
 
         max_iterations = len(self.nodes) ** 2 + len(self.nodes) + 1
         iteration = 0

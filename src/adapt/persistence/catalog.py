@@ -19,9 +19,8 @@ import json
 import logging
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 
@@ -51,7 +50,7 @@ class RadarCatalog:
     >>> items = catalog.query_items(item_type="analysis2d", limit=10)
     """
     
-    def __init__(self, radar_dir: Union[str, Path]):
+    def __init__(self, radar_dir: str | Path):
         """Initialize radar catalog.
         
         Parameters
@@ -65,7 +64,7 @@ class RadarCatalog:
         
         # Thread safety
         self._lock = threading.RLock()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         
         # Initialize database
         self._init_database()
@@ -177,10 +176,10 @@ class RadarCatalog:
         file_path: str,
         processing_stage: str = "complete",
         status: str = "complete",
-        parent_ids: Optional[List[str]] = None,
-        metadata: Optional[Dict] = None,
-        file_size_bytes: Optional[int] = None,
-        file_hash: Optional[str] = None
+        parent_ids: list[str] | None = None,
+        metadata: dict | None = None,
+        file_size_bytes: int | None = None,
+        file_hash: str | None = None
     ) -> None:
         """Register a data item in the catalog.
         
@@ -209,7 +208,7 @@ class RadarCatalog:
         file_hash : str, optional
             File hash (SHA256)
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         parent_ids_json = json.dumps(parent_ids) if parent_ids else None
         metadata_json = json.dumps(metadata) if metadata else None
         
@@ -232,7 +231,7 @@ class RadarCatalog:
         self,
         item_id: str,
         status: str,
-        error_message: Optional[str] = None
+        error_message: str | None = None
     ) -> None:
         """Update item status.
         
@@ -245,7 +244,7 @@ class RadarCatalog:
         error_message : str, optional
             Error message if status=failed
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         
         conn = self._get_connection()
         with self._lock:
@@ -258,10 +257,10 @@ class RadarCatalog:
     
     def query_items(
         self,
-        item_type: Optional[str] = None,
-        run_id: Optional[str] = None,
-        status: Optional[str] = None,
-        limit: Optional[int] = None,
+        item_type: str | None = None,
+        run_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
         order_by: str = "scan_time DESC"
     ) -> pd.DataFrame:
         """Query items with optional filters.
@@ -309,8 +308,8 @@ class RadarCatalog:
     def get_latest_item(
         self,
         item_type: str,
-        run_id: Optional[str] = None
-    ) -> Optional[Dict]:
+        run_id: str | None = None
+    ) -> dict | None:
         """Get the most recent item of a type.
         
         Parameters
@@ -344,7 +343,7 @@ class RadarCatalog:
         
         return dict(row) if row else None
 
-    def get_item(self, item_id: str) -> Optional[Dict]:
+    def get_item(self, item_id: str) -> dict | None:
         """Get a single item record by ID. Returns None if not found."""
         conn = self._get_connection()
         with self._lock:
@@ -371,7 +370,7 @@ class RadarCatalog:
         **kwargs
             Progress fields to update (latest_downloaded_time, etc.)
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         
         # Build update query dynamically
         fields = list(kwargs.keys())
@@ -405,7 +404,7 @@ class RadarCatalog:
             
             conn.commit()
     
-    def get_progress(self, run_id: str) -> Optional[Dict]:
+    def get_progress(self, run_id: str) -> dict | None:
         """Get progress status for a run.
         
         Parameters
@@ -434,7 +433,7 @@ class RadarCatalog:
     def register_schema(
         self,
         item_type: str,
-        columns: List[Dict[str, str]],
+        columns: list[dict[str, str]],
         schema_version: int = 1
     ) -> None:
         """Register or update schema for an item type.
@@ -448,7 +447,7 @@ class RadarCatalog:
         schema_version : int
             Schema version number
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         columns_json = json.dumps(columns)
         
         conn = self._get_connection()
@@ -462,7 +461,7 @@ class RadarCatalog:
         
         logger.debug(f"Schema registered for {item_type} (v{schema_version})")
     
-    def get_schema(self, item_type: str) -> Optional[List[Dict]]:
+    def get_schema(self, item_type: str) -> list[dict] | None:
         """Get schema for an item type.
 
         Parameters
@@ -494,7 +493,7 @@ class RadarCatalog:
         self,
         scan_time: datetime,
         run_id: str,
-        nexrad_file_name: Optional[str] = None
+        nexrad_file_name: str | None = None
     ) -> str:
         """Register a new scan. Idempotent on scan_time+run_id.
 
@@ -516,7 +515,7 @@ class RadarCatalog:
 
         scan_time_str = scan_time.isoformat()
         scan_date = scan_time.strftime('%Y%m%d')
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         conn = self._get_connection()
         with self._lock:
@@ -547,9 +546,9 @@ class RadarCatalog:
         scan_time: datetime,
         item_type: str,
         item_id: str,
-        num_cells: Optional[int] = None,
-        max_reflectivity: Optional[float] = None,
-        has_tracks: Optional[bool] = None
+        num_cells: int | None = None,
+        max_reflectivity: float | None = None,
+        has_tracks: bool | None = None
     ) -> None:
         """Link an item to its parent scan.
 
@@ -569,7 +568,7 @@ class RadarCatalog:
             Whether tracks exist for this scan
         """
         scan_time_str = scan_time.isoformat()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Map item_type to column name
         column_map = {
@@ -631,7 +630,7 @@ class RadarCatalog:
 
         logger.debug(f"Item {item_id} linked to scan at {scan_time_str}")
 
-    def get_scan(self, scan_time: datetime) -> Optional[Dict]:
+    def get_scan(self, scan_time: datetime) -> dict | None:
         """Get scan record by time.
 
         Parameters
@@ -655,7 +654,7 @@ class RadarCatalog:
 
         return dict(row) if row else None
 
-    def get_scan_by_id(self, scan_id: str) -> Optional[Dict]:
+    def get_scan_by_id(self, scan_id: str) -> dict | None:
         """Get scan by ID.
 
         Parameters
@@ -679,10 +678,10 @@ class RadarCatalog:
 
     def list_scans(
         self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        run_id: Optional[str] = None,
-        status: Optional[str] = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        run_id: str | None = None,
+        status: str | None = None,
         limit: int = 100
     ) -> pd.DataFrame:
         """List scans with optional time range filter.
@@ -728,7 +727,7 @@ class RadarCatalog:
         with self._lock:
             return pd.read_sql_query(query, conn, params=params)
 
-    def get_latest_scan(self, run_id: Optional[str] = None) -> Optional[Dict]:
+    def get_latest_scan(self, run_id: str | None = None) -> dict | None:
         """Get the most recent scan.
 
         Parameters

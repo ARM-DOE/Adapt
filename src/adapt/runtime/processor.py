@@ -18,16 +18,16 @@ import logging
 import queue
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from adapt.modules.base import ContractViolation
 from adapt.persistence import DataRepository, ProductType
-from adapt.persistence.writer import RepositoryWriter
 from adapt.persistence.track_store import TrackStore
+from adapt.persistence.writer import RepositoryWriter
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
@@ -69,7 +69,7 @@ class RadarProcessor(threading.Thread):
         config: "InternalConfig",
         output_dirs: dict,
         file_tracker=None,
-        repository: Optional[DataRepository] = None,
+        repository: DataRepository | None = None,
         name: str = "RadarProcessor",
     ):
         super().__init__(daemon=True, name=name)
@@ -253,7 +253,7 @@ class RadarProcessor(threading.Thread):
             logger.info(
                 "Processed pair: %d cells | ingest=%.1fs detect=%.1fs project=%.1fs%s",
                 n_cells, ingest_s, detect_s, project_s,
-                f" queue=%.1fs" % queue_wait_s if queue_wait_s is not None else "",
+                " queue=%.1fs" % queue_wait_s if queue_wait_s is not None else "",
             )
 
             # Mark both files as processed
@@ -290,13 +290,13 @@ class RadarProcessor(threading.Thread):
 
     # ── NetCDF persistence ────────────────────────────────────────────────────
 
-    def _save_analysis_netcdf(self, ds, filepath: str, scan_time) -> Optional[str]:
+    def _save_analysis_netcdf(self, ds, filepath: str, scan_time) -> str | None:
         """Write the analysis dataset to a NetCDF artifact in the repository."""
         try:
             radar         = self.config.downloader.radar
             filename_stem = Path(filepath).stem
             if scan_time is None:
-                scan_time = datetime.now(timezone.utc)
+                scan_time = datetime.now(UTC)
 
             ds.attrs.update({
                 "source":      str(filepath),
@@ -342,8 +342,8 @@ class RadarProcessor(threading.Thread):
             Wall time for the detection (segmentation) step
         """
         # Import modules directly (not through pipeline graph)
-        from adapt.modules.ingest.module import LoadModule
         from adapt.modules.detection.module import DetectModule
+        from adapt.modules.ingest.module import LoadModule
 
         # Instantiate if not cached (persist across calls)
         if not hasattr(self, '_ingest_module'):
@@ -449,7 +449,7 @@ class RadarProcessor(threading.Thread):
         - tracked_cells, cell_events as SQLite via TrackStore (label→uid adjacency mapping in TrackStore)
         """
         if scan_time is not None and scan_time.tzinfo is None:
-            scan_time = scan_time.replace(tzinfo=timezone.utc)
+            scan_time = scan_time.replace(tzinfo=UTC)
 
         # NetCDF: segmentation + projections + flow vectors
         projected_ds = result.get("projected_ds")

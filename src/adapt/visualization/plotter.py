@@ -7,17 +7,18 @@ Renders reflectivity + cell segmentation + motion projections to PNG.
 Supports threaded queue-based processing for pipeline integration.
 """
 
-import threading
-import queue
 import logging
+import queue
+import threading
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
-from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
+import matplotlib
 import numpy as np
 import pandas as pd
 import xarray as xr
-import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
@@ -164,7 +165,7 @@ class RadarPlotter:
     def _extract_timestamp(self, ds: xr.Dataset) -> datetime:
         """Extract timestamp from dataset."""
         if 'time' not in ds.coords:
-            return datetime.now(timezone.utc)
+            return datetime.now(UTC)
         
         try:
             time_val = ds.coords['time'].values
@@ -173,9 +174,9 @@ class RadarPlotter:
             else:
                 return pd.Timestamp(time_val[0]).to_pydatetime()
         except Exception:
-            return datetime.now(timezone.utc)
+            return datetime.now(UTC)
     
-    def _get_coordinates_km(self, ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_coordinates_km(self, ds: xr.Dataset) -> tuple[np.ndarray, np.ndarray]:
         """Get x, y coordinates in km."""
         y_name = self._get_coord_name("y", "y")
         x_name = self._get_coord_name("x", "x")
@@ -193,7 +194,7 @@ class RadarPlotter:
             refl_float
         )
     
-    def _setup_figure(self) -> Tuple[plt.Figure, plt.Axes, plt.Axes]:
+    def _setup_figure(self) -> tuple[plt.Figure, plt.Axes, plt.Axes]:
         """Create figure with two subplots."""
         fig, (ax1, ax2) = plt.subplots(
             1, 2,
@@ -202,7 +203,7 @@ class RadarPlotter:
         )
         return fig, ax1, ax2
     
-    def _get_radar_location(self, ds: xr.Dataset) -> Tuple[float, float]:
+    def _get_radar_location(self, ds: xr.Dataset) -> tuple[float, float]:
         """Extract radar lat/lon from dataset."""
         def extract_float(val):
             """Convert various types to Python float scalar."""
@@ -486,7 +487,7 @@ class RadarPlotter:
         self,
         ds: xr.Dataset,
         frame_offset: int = 0,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
     ) -> str:
         """Generate publication-quality two-panel radar visualization.
 
@@ -603,7 +604,7 @@ class RadarPlotter:
     def plot_from_netcdf(
         self,
         segmentation_nc: Path,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
     ) -> str:
         """Load analysis NetCDF and generate visualization.
 
@@ -716,7 +717,7 @@ class PlotterThread(threading.Thread):
     def __init__(
         self,
         input_queue: queue.Queue,
-        output_dirs: Dict,
+        output_dirs: dict,
         config: "InternalConfig" = None,
         file_tracker = None,
         show_plots: bool = False,
@@ -777,12 +778,12 @@ class PlotterThread(threading.Thread):
         
         logger.info(f"{self.name} stopped")
     
-    def _process_item(self, item: Dict):
+    def _process_item(self, item: dict):
         """Process plot item from queue."""
         try:
             seg_nc = item.get('segmentation_nc')
             radar = item.get('radar', 'RADAR')
-            timestamp = item.get('timestamp', datetime.now(timezone.utc))
+            timestamp = item.get('timestamp', datetime.now(UTC))
             
             if not seg_nc or not Path(seg_nc).exists():
                 logger.warning(f"Segmentation file not found: {seg_nc}")
@@ -920,7 +921,7 @@ class PlotConsumer(threading.Thread):
         self.plotter = RadarPlotter(config=config, show_plots=show_live)
 
         # Track last processed artifact to detect new ones
-        self._last_seen_id: Optional[str] = None
+        self._last_seen_id: str | None = None
         self._processed_count = 0
 
         # Import ProductType here to avoid circular imports
@@ -976,7 +977,7 @@ class PlotConsumer(threading.Thread):
         except Exception as e:
             logger.error(f"Error polling repository: {e}", exc_info=True)
 
-    def _process_artifact(self, artifact: Dict):
+    def _process_artifact(self, artifact: dict):
         """Generate plot from artifact."""
         artifact_id = artifact['artifact_id']
         file_path = Path(artifact['file_path'])
@@ -987,7 +988,7 @@ class PlotConsumer(threading.Thread):
             if scan_time_str:
                 scan_time = datetime.fromisoformat(scan_time_str)
             else:
-                scan_time = datetime.now(timezone.utc)
+                scan_time = datetime.now(UTC)
 
             # Load dataset from repository
             ds = self.repository.open_dataset(artifact_id)

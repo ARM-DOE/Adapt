@@ -10,12 +10,13 @@ from storage implementation details.
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 if TYPE_CHECKING:
     import xarray as xr
+
     from adapt.persistence.repository import DataRepository
 
 
@@ -36,8 +37,8 @@ class RepositoryWriter:
         df: pd.DataFrame,
         scan_time: datetime,
         producer: str,
-        parent_ids: Optional[List[str]] = None,
-        metadata: Optional[dict] = None,
+        parent_ids: list[str] | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Persist cell analysis DataFrame as a Parquet artifact. Returns artifact ID."""
         return self.repository.write_analysis2d_parquet(
@@ -54,8 +55,8 @@ class RepositoryWriter:
         path: Path,
         scan_time: datetime,
         producer: str,
-        parent_ids: Optional[List[str]] = None,
-        metadata: Optional[dict] = None,
+        parent_ids: list[str] | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Persist an xarray Dataset as a NetCDF artifact. Returns artifact ID."""
         return self.repository.write_netcdf(

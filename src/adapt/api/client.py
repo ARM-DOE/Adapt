@@ -39,19 +39,18 @@ Example usage::
         print(f"Got {len(batch)} new rows")
 """
 
-import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import duckdb
 import pandas as pd
 import xarray as xr
 
-from adapt.persistence.registry import RepositoryRegistry
 from adapt.persistence.catalog import RadarCatalog
+from adapt.persistence.registry import RepositoryRegistry
 from adapt.persistence.track_store import TrackStore
 
 __all__ = ['DataClient']
@@ -77,7 +76,7 @@ class DataClient:
     >>> df = client.latest("analysis2d", radar="KHTX")
     """
     
-    def __init__(self, repository_root: Union[str, Path]):
+    def __init__(self, repository_root: str | Path):
         """Initialize DataClient from repository root.
         
         Parameters
@@ -94,10 +93,10 @@ class DataClient:
         self.registry = RepositoryRegistry.get_instance(self.root_dir)
         
         # DuckDB connection for SQL queries
-        self._duckdb_conn: Optional[duckdb.DuckDBPyConnection] = None
+        self._duckdb_conn: duckdb.DuckDBPyConnection | None = None
         
         # Cache of radar catalogs
-        self._radar_catalogs: Dict[str, RadarCatalog] = {}
+        self._radar_catalogs: dict[str, RadarCatalog] = {}
         
         logger.info(f"DataClient initialized at {self.root_dir}")
     
@@ -132,7 +131,7 @@ class DataClient:
         registry_path = self.root_dir / "adapt_registry.db"
         return registry_path.exists()
 
-    def get_repository_info(self) -> Dict[str, Any]:
+    def get_repository_info(self) -> dict[str, Any]:
         """Get repository summary information.
 
         Returns
@@ -169,7 +168,7 @@ class DataClient:
     # Discovery Methods
     # =========================================================================
 
-    def list_runs(self, radar: Optional[str] = None) -> pd.DataFrame:
+    def list_runs(self, radar: str | None = None) -> pd.DataFrame:
         """List all runs, optionally filtered by radar.
         
         Parameters
@@ -184,7 +183,7 @@ class DataClient:
         """
         return self.registry.list_runs(radar=radar)
     
-    def list_radars(self) -> List[str]:
+    def list_radars(self) -> list[str]:
         """List all registered radars.
 
         Returns
@@ -195,7 +194,7 @@ class DataClient:
         radars_df = self.registry.list_radars()
         return radars_df['radar'].tolist() if not radars_df.empty else []
 
-    def get_radar_info(self, radar: str) -> Dict[str, Any]:
+    def get_radar_info(self, radar: str) -> dict[str, Any]:
         """Get detailed information for a specific radar.
 
         Parameters
@@ -265,7 +264,7 @@ class DataClient:
             'num_scans': num_scans,
         }
 
-    def get_run_info(self, run_id: str, radar: Optional[str] = None) -> Dict[str, Any]:
+    def get_run_info(self, run_id: str, radar: str | None = None) -> dict[str, Any]:
         """Get detailed information for a specific run.
 
         Parameters
@@ -336,7 +335,7 @@ class DataClient:
             'num_scans': num_scans,
         }
     
-    def item_types(self) -> List[str]:
+    def item_types(self) -> list[str]:
         """List registered item types.
         
         Returns
@@ -346,7 +345,7 @@ class DataClient:
         """
         return self.registry.list_item_types()
     
-    def fields(self, item_type: str, radar: Optional[str] = None) -> List[str]:
+    def fields(self, item_type: str, radar: str | None = None) -> list[str]:
         """Get column names for a Parquet table item type.
         
         Parameters
@@ -390,7 +389,7 @@ class DataClient:
         
         return []
     
-    def status(self, run_id: Optional[str] = None, radar: Optional[str] = None) -> Dict:
+    def status(self, run_id: str | None = None, radar: str | None = None) -> dict:
         """Get processing status/progress.
         
         Parameters
@@ -432,8 +431,8 @@ class DataClient:
     def latest(
         self,
         item_type: str,
-        radar: Optional[str] = None
-    ) -> Union[pd.DataFrame, xr.Dataset]:
+        radar: str | None = None
+    ) -> pd.DataFrame | xr.Dataset:
         """Load the most recent item of a given type.
         
         Parameters
@@ -481,7 +480,7 @@ class DataClient:
             else:
                 raise ValueError(f"Unknown file format for {file_path}")
     
-    def query(self, sql: str, radar: Optional[str] = None) -> pd.DataFrame:
+    def query(self, sql: str, radar: str | None = None) -> pd.DataFrame:
         """Execute SQL query on Parquet tables.
         
         Only SELECT queries are allowed. Dynamically creates DuckDB views
@@ -559,7 +558,7 @@ class DataClient:
     def list_scans(
         self,
         item_type: str,
-        radar: Optional[str] = None,
+        radar: str | None = None,
         limit: int = 50
     ) -> pd.DataFrame:
         """List available scans with timestamps.
@@ -599,10 +598,10 @@ class DataClient:
 
     def get_scan_at(
         self,
-        scan_time: Union[str, datetime],
+        scan_time: str | datetime,
         item_type: str,
-        radar: Optional[str] = None
-    ) -> Union[pd.DataFrame, xr.Dataset]:
+        radar: str | None = None
+    ) -> pd.DataFrame | xr.Dataset:
         """Load a specific scan by timestamp.
 
         Parameters
@@ -678,7 +677,7 @@ class DataClient:
     # Cell Tracking Methods
     # =========================================================================
 
-    def _track_store(self, radar: Optional[str] = None) -> TrackStore:
+    def _track_store(self, radar: str | None = None) -> TrackStore:
         if not radar:
             radars = self.list_radars()
             if not radars:
@@ -691,7 +690,7 @@ class DataClient:
         self,
         run_id: str,
         scan_time: datetime,
-        radar: Optional[str] = None,
+        radar: str | None = None,
     ) -> pd.DataFrame:
         """All tracked cells for a single scan."""
         return self._track_store(radar).get_cells_by_scan(run_id, scan_time)
@@ -700,7 +699,7 @@ class DataClient:
         self,
         run_id: str,
         cell_uid: str,
-        radar: Optional[str] = None,
+        radar: str | None = None,
     ) -> pd.DataFrame:
         """All scan rows for one track, ordered by scan_time."""
         return self._track_store(radar).get_track_history(run_id, cell_uid)
@@ -708,8 +707,8 @@ class DataClient:
     def cell_events(
         self,
         run_id: str,
-        cell_uid: Optional[str] = None,
-        radar: Optional[str] = None,
+        cell_uid: str | None = None,
+        radar: str | None = None,
     ) -> pd.DataFrame:
         """Lineage events for a run, optionally filtered to one cell_uid."""
         return self._track_store(radar).get_cell_events(run_id, cell_uid)
@@ -717,7 +716,7 @@ class DataClient:
     def cell_tracks(
         self,
         run_id: str,
-        radar: Optional[str] = None,
+        radar: str | None = None,
     ) -> pd.DataFrame:
         """Lifecycle summary for all tracks in a run."""
         return self._track_store(radar).get_cell_tracks(run_id)
@@ -726,7 +725,7 @@ class DataClient:
     # Pipeline Status Methods
     # =========================================================================
 
-    def is_pipeline_running(self, radar: Optional[str] = None) -> bool:
+    def is_pipeline_running(self, radar: str | None = None) -> bool:
         """Check if pipeline is actively processing.
 
         Checks for active run status and recent progress updates.
@@ -779,7 +778,7 @@ class DataClient:
                 last_update = datetime.fromisoformat(
                     progress['last_updated'].replace('Z', '+00:00')
                 )
-                age_seconds = (datetime.now(timezone.utc) - last_update).total_seconds()
+                age_seconds = (datetime.now(UTC) - last_update).total_seconds()
                 return age_seconds < 60
 
         except Exception as e:
@@ -789,9 +788,9 @@ class DataClient:
 
     def get_pipeline_progress(
         self,
-        radar: Optional[str] = None,
-        run_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+        radar: str | None = None,
+        run_id: str | None = None
+    ) -> dict[str, Any]:
         """Get detailed pipeline progress.
 
         Parameters
@@ -864,9 +863,9 @@ class DataClient:
 
     def get_scan_bundle(
         self,
-        scan_time: Union[str, datetime],
-        radar: Optional[str] = None
-    ) -> Dict[str, Any]:
+        scan_time: str | datetime,
+        radar: str | None = None
+    ) -> dict[str, Any]:
         """Get all data for a specific scan in a single call.
 
         Returns all linked data products for a scan: segmentation, cells DataFrame,
@@ -908,7 +907,7 @@ class DataClient:
 
         catalog = self._get_radar_catalog(radar)
 
-        bundle: Dict[str, Any] = {
+        bundle: dict[str, Any] = {
             'scan_time': scan_time_dt.isoformat() if isinstance(scan_time_dt, datetime) else scan_time,
             'radar': radar,
             'segmentation2d': None,
@@ -970,8 +969,8 @@ class DataClient:
         self,
         scan_time: datetime,
         radar: str,
-        bundle: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        bundle: dict[str, Any]
+    ) -> dict[str, Any]:
         """Fallback scan bundle using item queries (for legacy data)."""
         scan_time_str = scan_time.isoformat()
         catalog = self._get_radar_catalog(radar)
@@ -1015,7 +1014,7 @@ class DataClient:
 
         return bundle
 
-    def _get_item_by_id(self, radar: str, item_id: str) -> Optional[Dict]:
+    def _get_item_by_id(self, radar: str, item_id: str) -> dict | None:
         """Get item record by ID."""
         catalog = self._get_radar_catalog(radar)
         conn = catalog._get_connection()
@@ -1030,9 +1029,9 @@ class DataClient:
 
     def list_scan_times(
         self,
-        radar: Optional[str] = None,
-        start_time: Optional[Union[str, datetime]] = None,
-        end_time: Optional[Union[str, datetime]] = None,
+        radar: str | None = None,
+        start_time: str | datetime | None = None,
+        end_time: str | datetime | None = None,
         limit: int = 100
     ) -> pd.DataFrame:
         """List available scan times from scans table or items fallback.
@@ -1095,8 +1094,8 @@ class DataClient:
     def _list_scan_times_from_items(
         self,
         radar: str,
-        start_time: Optional[datetime],
-        end_time: Optional[datetime],
+        start_time: datetime | None,
+        end_time: datetime | None,
         limit: int
     ) -> pd.DataFrame:
         """Fallback: get scan times from items table."""
@@ -1136,7 +1135,7 @@ class DataClient:
         self,
         sql: str,
         poll_interval: int = 5,
-        radar: Optional[str] = None
+        radar: str | None = None
     ):
         """Stream new results from a SQL query (generator).
         

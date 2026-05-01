@@ -11,20 +11,22 @@ to override from the expert defaults. Validation is lenient to accept
 both uppercase and lowercase keys, integers where floats are expected, etc.
 """
 
-from typing import Literal, Optional, Any
+from typing import Any, Literal
+
 from pydantic import Field, field_validator, model_validator
+
 from adapt.configuration.schemas.base import AdaptBaseModel
 
 
 class UserSegmenterConfig(AdaptBaseModel):
     """User-facing segmentation config with aliases."""
-    method: Optional[str] = None
-    threshold: Optional[float] = None
-    min_cellsize_gridpoint: Optional[int] = None
-    max_cellsize_gridpoint: Optional[int] = None
-    closing_kernel: Optional[tuple[int, int]] = None
-    filter_by_size: Optional[bool] = None
-    h_maxima: Optional[float] = None
+    method: str | None = None
+    threshold: float | None = None
+    min_cellsize_gridpoint: int | None = None
+    max_cellsize_gridpoint: int | None = None
+    closing_kernel: tuple[int, int] | None = None
+    filter_by_size: bool | None = None
+    h_maxima: float | None = None
 
     @field_validator("threshold", mode="before")
     @classmethod
@@ -45,9 +47,9 @@ class UserSegmenterConfig(AdaptBaseModel):
 
 class UserGlobalConfig(AdaptBaseModel):
     """User-facing global config."""
-    z_level: Optional[float] = None
-    var_names: Optional[dict[str, str]] = None
-    coord_names: Optional[dict[str, str]] = None
+    z_level: float | None = None
+    var_names: dict[str, str] | None = None
+    coord_names: dict[str, str] | None = None
 
     @field_validator("z_level", mode="before")
     @classmethod
@@ -60,13 +62,13 @@ class UserGlobalConfig(AdaptBaseModel):
 
 class UserProjectorConfig(AdaptBaseModel):
     """User-facing projector config."""
-    method: Optional[str] = None
-    max_time_interval_minutes: Optional[int] = None
-    max_projection_steps: Optional[int] = None
-    nan_fill_value: Optional[float] = None
-    flow_params: Optional[dict[str, Any]] = None
-    min_motion_threshold: Optional[float] = None
-    max_flow_magnitude: Optional[float] = None
+    method: str | None = None
+    max_time_interval_minutes: int | None = None
+    max_projection_steps: int | None = None
+    nan_fill_value: float | None = None
+    flow_params: dict[str, Any] | None = None
+    min_motion_threshold: float | None = None
+    max_flow_magnitude: float | None = None
 
     @field_validator("method", mode="before")
     @classmethod
@@ -79,29 +81,29 @@ class UserProjectorConfig(AdaptBaseModel):
 
 class UserRegridderConfig(AdaptBaseModel):
     """User-facing regridder config."""
-    grid_shape: Optional[tuple[int, int, int]] = None
-    grid_limits: Optional[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = None
-    roi_func: Optional[str] = None
-    min_radius: Optional[float] = None
-    weighting_function: Optional[str] = None
-    save_netcdf: Optional[bool] = None
+    grid_shape: tuple[int, int, int] | None = None
+    grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None = None
+    roi_func: str | None = None
+    min_radius: float | None = None
+    weighting_function: str | None = None
+    save_netcdf: bool | None = None
 
 
 class UserDownloaderConfig(AdaptBaseModel):
     """User-facing downloader config."""
-    radar: Optional[str] = None
-    output_dir: Optional[str] = None
-    latest_files: Optional[int] = None
-    latest_minutes: Optional[int] = None
-    poll_interval_sec: Optional[int] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
+    radar: str | None = None
+    output_dir: str | None = None
+    latest_files: int | None = None
+    latest_minutes: int | None = None
+    poll_interval_sec: int | None = None
+    start_time: str | None = None
+    end_time: str | None = None
 
 
 class UserAnalyzerConfig(AdaptBaseModel):
     """User-facing analyzer config."""
-    radar_variables: Optional[list[str]] = None
-    exclude_fields: Optional[list[str]] = None
+    radar_variables: list[str] | None = None
+    exclude_fields: list[str] | None = None
 
 
 class UserConfig(AdaptBaseModel):
@@ -126,46 +128,46 @@ class UserConfig(AdaptBaseModel):
     """
 
     # Top-level operational settings
-    mode: Optional[Literal["realtime", "historical"]] = Field(None, alias="MODE")
-    radar: Optional[str] = Field(None, alias="RADAR_ID")
-    base_dir: Optional[str] = Field(None, alias="BASE_DIR")
+    mode: Literal["realtime", "historical"] | None = Field(None, alias="MODE")
+    radar: str | None = Field(None, alias="RADAR_ID")
+    base_dir: str | None = Field(None, alias="BASE_DIR")
 
     # Realtime settings
-    latest_files: Optional[int] = Field(None, alias="LATEST_FILES")
-    latest_minutes: Optional[int] = Field(None, alias="LATEST_MINUTES")
-    poll_interval_sec: Optional[int] = Field(None, alias="POLL_INTERVAL_SEC")
+    latest_files: int | None = Field(None, alias="LATEST_FILES")
+    latest_minutes: int | None = Field(None, alias="LATEST_MINUTES")
+    poll_interval_sec: int | None = Field(None, alias="POLL_INTERVAL_SEC")
 
     # Historical settings
-    start_time: Optional[str] = Field(None, alias="START_TIME")
-    end_time: Optional[str] = Field(None, alias="END_TIME")
+    start_time: str | None = Field(None, alias="START_TIME")
+    end_time: str | None = Field(None, alias="END_TIME")
 
     # Grid settings (flat aliases)
-    grid_shape: Optional[tuple[int, int, int]] = Field(None, alias="GRID_SHAPE")
-    grid_limits: Optional[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = Field(None, alias="GRID_LIMITS")
+    grid_shape: tuple[int, int, int] | None = Field(None, alias="GRID_SHAPE")
+    grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None = Field(None, alias="GRID_LIMITS")
 
     # Segmentation settings (flat aliases)
-    z_level: Optional[float] = Field(None, alias="Z_LEVEL")
-    reflectivity_var: Optional[str] = Field(None, alias="REFLECTIVITY_VAR")
-    segmentation_method: Optional[str] = Field(None, alias="SEGMENTATION_METHOD")
-    threshold: Optional[float] = Field(None, alias="THRESHOLD_DBZ")
-    min_cellsize_gridpoint: Optional[int] = Field(None, alias="MIN_CELLSIZE_GRIDPOINT")
-    max_cellsize_gridpoint: Optional[int] = Field(None, alias="MAX_CELLSIZE_GRIDPOINT")
+    z_level: float | None = Field(None, alias="Z_LEVEL")
+    reflectivity_var: str | None = Field(None, alias="REFLECTIVITY_VAR")
+    segmentation_method: str | None = Field(None, alias="SEGMENTATION_METHOD")
+    threshold: float | None = Field(None, alias="THRESHOLD_DBZ")
+    min_cellsize_gridpoint: int | None = Field(None, alias="MIN_CELLSIZE_GRIDPOINT")
+    max_cellsize_gridpoint: int | None = Field(None, alias="MAX_CELLSIZE_GRIDPOINT")
 
     # Projection settings (flat aliases)
-    projection_method: Optional[str] = Field(None, alias="PROJECTION_METHOD")
-    max_projection_steps: Optional[int] = Field(None, alias="MAX_PROJECTION_STEPS")
+    projection_method: str | None = Field(None, alias="PROJECTION_METHOD")
+    max_projection_steps: int | None = Field(None, alias="MAX_PROJECTION_STEPS")
 
     # Analyzer settings (flat aliases)
-    radar_variables: Optional[list[str]] = None
-    exclude_fields: Optional[list[str]] = None
+    radar_variables: list[str] | None = None
+    exclude_fields: list[str] | None = None
 
     # Nested overrides (advanced users)
-    downloader: Optional[UserDownloaderConfig] = None
-    regridder: Optional[UserRegridderConfig] = None
-    segmenter: Optional[UserSegmenterConfig] = None
-    global_: Optional[UserGlobalConfig] = Field(None, alias="global")
-    projector: Optional[UserProjectorConfig] = None
-    analyzer: Optional[UserAnalyzerConfig] = None
+    downloader: UserDownloaderConfig | None = None
+    regridder: UserRegridderConfig | None = None
+    segmenter: UserSegmenterConfig | None = None
+    global_: UserGlobalConfig | None = Field(None, alias="global")
+    projector: UserProjectorConfig | None = None
+    analyzer: UserAnalyzerConfig | None = None
 
     model_config = AdaptBaseModel.model_config.copy()
     # Allow forgiving input dictionaries (ignore unknown legacy keys)
@@ -180,10 +182,7 @@ class UserConfig(AdaptBaseModel):
         """
         if self.mode is None:
             # Check top-level times
-            if self.start_time and self.end_time:
-                self.mode = "historical"
-            # Check nested downloader times
-            elif self.downloader and (self.downloader.start_time and self.downloader.end_time):
+            if self.start_time and self.end_time or self.downloader and (self.downloader.start_time and self.downloader.end_time):
                 self.mode = "historical"
 
         return self

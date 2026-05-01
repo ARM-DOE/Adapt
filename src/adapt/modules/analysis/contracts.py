@@ -11,7 +11,7 @@ required columns and fields are well-formed (no spurious NaNs in required fields
 """
 
 import pandas as pd
-import numpy as np
+
 from adapt.modules.base import require
 
 

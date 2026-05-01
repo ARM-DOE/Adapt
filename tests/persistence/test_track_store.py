@@ -7,9 +7,7 @@ Each test uses an in-memory SQLite database with the three-table schema.
 Inputs are synthetic DataFrames; no file I/O.
 """
 import sqlite3
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
@@ -107,7 +105,7 @@ def store(db_path):
 
 
 def _t(iso: str) -> datetime:
-    return datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(iso).replace(tzinfo=UTC)
 
 
 def _cell_stats(cell_label: int, area: float = 4.0, refl: float = 40.0) -> pd.DataFrame:

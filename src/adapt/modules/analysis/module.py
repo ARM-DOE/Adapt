@@ -22,12 +22,14 @@ coordinates (latitude, longitude) for flexibility in downstream analysis.
 Author: Bhupendra Raut
 """
 
-import logging
 import json
+import logging
+from datetime import UTC
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pandas as pd
 import xarray as xr
-from typing import TYPE_CHECKING
 from scipy.ndimage import center_of_mass
 from skimage.measure import regionprops
 
@@ -364,7 +366,7 @@ class RadarCellAnalyzer:
             except Exception:
                 pass
         if getattr(type(tv), "__module__", "").startswith("cftime"):
-            from datetime import datetime, timezone
+            from datetime import datetime
             tv = datetime(
                 int(tv.year),
                 int(tv.month),
@@ -373,7 +375,7 @@ class RadarCellAnalyzer:
                 int(tv.minute),
                 int(tv.second),
                 int(getattr(tv, "microsecond", 0) or 0),
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             )
         return tv
 
@@ -383,9 +385,7 @@ class RadarCellAnalyzer:
         Returns lat/lon grids if available, otherwise returns placeholder grids
         of zeros (valid for in-memory analysis, invalid for geographic output).
         """
-        if "lat" in ds.coords and "lon" in ds.coords:
-            return ds["lat"].values, ds["lon"].values
-        elif "lat" in ds.data_vars and "lon" in ds.data_vars:
+        if "lat" in ds.coords and "lon" in ds.coords or "lat" in ds.data_vars and "lon" in ds.data_vars:
             return ds["lat"].values, ds["lon"].values
         else:
             # No lat/lon available - use placeholder zeros
@@ -638,8 +638,9 @@ class RadarCellAnalyzer:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
-from adapt.modules.base import BaseModule
 from adapt.execution.module_registry import registry
+from adapt.modules.base import BaseModule
+
 from .contracts import assert_analysis_output, assert_cell_adjacency
 
 

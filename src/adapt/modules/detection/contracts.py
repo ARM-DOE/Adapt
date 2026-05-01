@@ -10,8 +10,9 @@ Enforces the guarantee that after segmentation, cell labels are present,
 properly typed, and in canonical form (largest cells first).
 """
 
-import xarray as xr
 import numpy as np
+import xarray as xr
+
 from adapt.modules.base import require
 
 

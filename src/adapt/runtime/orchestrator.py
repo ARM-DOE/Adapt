@@ -11,16 +11,16 @@ the DataRepository independently. This decoupling ensures processing
 is not blocked by visualization and validates repository API integrity.
 """
 
+import logging
 import queue
 import time
-import logging
 from pathlib import Path
-from typing import Optional, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from adapt.modules.acquisition.module import AwsNexradDownloader
-from adapt.runtime.processor import RadarProcessor
-from adapt.runtime.file_tracker import FileProcessingTracker
 from adapt.persistence import DataRepository
+from adapt.runtime.file_tracker import FileProcessingTracker
+from adapt.runtime.processor import RadarProcessor
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
@@ -130,7 +130,7 @@ class PipelineOrchestrator:
 
         # DataRepository (initialized in start()) - use run_id from config or generate
         self.run_id = config.run_id
-        self.repository: Optional[DataRepository] = None
+        self.repository: DataRepository | None = None
 
         # Lifecycle state
         self._stop_event = False
@@ -186,7 +186,7 @@ class PipelineOrchestrator:
         self.tracker = FileProcessingTracker(tracker_path)
         logger.debug("Processing tracker: %s", tracker_path)
 
-    def start(self, max_runtime: Optional[int] = None):
+    def start(self, max_runtime: int | None = None):
         """Start the pipeline and run until completion or user interrupt.
 
         This is a blocking call that starts the downloader and processor

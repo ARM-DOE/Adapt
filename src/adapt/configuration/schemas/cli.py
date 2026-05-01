@@ -9,8 +9,10 @@ between runs: mode, radar ID, output paths, verbosity.
 This schema handles command-line arguments parsed by argparse.
 """
 
-from typing import Literal, Optional
+from typing import Literal
+
 from pydantic import Field, model_validator
+
 from adapt.configuration.schemas.base import AdaptBaseModel
 
 
@@ -44,13 +46,13 @@ class CLIConfig(AdaptBaseModel):
         internal = resolve_config(param_cfg, user_cfg, cli_cfg)
     """
     
-    mode: Optional[Literal["realtime", "historical"]] = None
-    radar: Optional[str] = None
-    base_dir: Optional[str] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    log_level: Optional[Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]] = None
-    run_id: Optional[str] = Field(
+    mode: Literal["realtime", "historical"] | None = None
+    radar: str | None = None
+    base_dir: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = None
+    run_id: str | None = Field(
         default=None,
         description="Optional run ID for continuation (format: YYYYMONDD-HHMM-RADAR)"
     )

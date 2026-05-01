@@ -8,7 +8,7 @@ then wires nodes together so that every node's dependencies point to the
 nodes that produce its required inputs.
 """
 
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from adapt.execution.graph.node import Node
 
@@ -36,10 +36,10 @@ class GraphBuilder:
         nodes = builder.build()
     """
 
-    def __init__(self, modules: List["BaseModule"]) -> None:
+    def __init__(self, modules: list["BaseModule"]) -> None:
         self.modules = modules
 
-    def build(self) -> List[Node]:
+    def build(self) -> list[Node]:
         """Build and return the list of connected nodes.
 
         Returns
@@ -49,10 +49,10 @@ class GraphBuilder:
             Nodes are returned in insertion order; execution order is
             determined by the GraphExecutor.
         """
-        nodes: Dict[str, Node] = {m.name: Node(m) for m in self.modules}
+        nodes: dict[str, Node] = {m.name: Node(m) for m in self.modules}
 
         # Map each output key → the node that produces it
-        output_map: Dict[str, Node] = {}
+        output_map: dict[str, Node] = {}
         for node in nodes.values():
             for output in node.outputs:
                 if output in output_map:

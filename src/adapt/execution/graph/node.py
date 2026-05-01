@@ -8,7 +8,7 @@ it depends on (must complete before this node runs) and which nodes depend
 on it (notified when this node completes).
 """
 
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from adapt.modules.base import BaseModule
@@ -37,10 +37,10 @@ class Node:
 
     def __init__(self, module: "BaseModule") -> None:
         self.module = module
-        self.inputs: List[str] = list(module.inputs)
-        self.outputs: List[str] = list(module.outputs)
-        self.dependencies: List["Node"] = []
-        self.dependents: List["Node"] = []
+        self.inputs: list[str] = list(module.inputs)
+        self.outputs: list[str] = list(module.outputs)
+        self.dependencies: list[Node] = []
+        self.dependents: list[Node] = []
 
     @property
     def name(self) -> str:

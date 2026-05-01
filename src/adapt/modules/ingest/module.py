@@ -17,11 +17,11 @@ Key capabilities:
 Author: Bhupendra Raut
 """
 
-from pathlib import Path
-from typing import Optional, TYPE_CHECKING
 import logging
-import pyart
+from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pyart
 import xarray as xr
 
 if TYPE_CHECKING:
@@ -161,7 +161,7 @@ class RadarDataLoader:
         return radar
 
     def regrid(self, radar: object, grid_kwargs: dict = None,
-               output_dir: str = None, source_filepath: str = None) -> Optional[xr.Dataset]:
+               output_dir: str = None, source_filepath: str = None) -> xr.Dataset | None:
         """Transform a Py-ART Radar object from polar to Cartesian grid.
         
         Performs distance-weighted interpolation to convert irregular polar
@@ -279,7 +279,7 @@ class RadarDataLoader:
 
 
     def load_and_regrid(self, filepath: Path | str, grid_kwargs: dict = None,
-                       save_netcdf: bool = True, output_dir: str = None) -> Optional[xr.Dataset]:
+                       save_netcdf: bool = True, output_dir: str = None) -> xr.Dataset | None:
         """Read and regrid a NEXRAD file in one call (convenience method).
         
         Combines read() and regrid() operations for simpler usage when
@@ -349,13 +349,17 @@ if __name__ == "__main__":
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
+from datetime import UTC
+from datetime import datetime as _dt
+
 import numpy as np
 import xarray as _xr
-from datetime import datetime as _dt, timezone as _tz
-from adapt.modules.base import BaseModule
-from adapt.execution.module_registry import registry
-from .contracts import assert_gridded
+
 from adapt.configuration.schemas.directories import get_netcdf_path
+from adapt.execution.module_registry import registry
+from adapt.modules.base import BaseModule
+
+from .contracts import assert_gridded
 
 
 def _check_grid_ds_2d(ds):
@@ -405,7 +409,7 @@ class LoadModule(BaseModule):
 
         radar = config.downloader.radar
         nc_filename = Path(filepath).stem
-        scan_time = _dt.now(_tz.utc)
+        scan_time = _dt.now(UTC)
         try:
             parts = nc_filename.split("_")
             dt_str = parts[0][-8:] + parts[1]

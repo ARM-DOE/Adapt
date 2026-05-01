@@ -13,8 +13,7 @@ Step 6 of the refactor. BaseModule is the target interface definition.
 """
 
 from abc import ABC, abstractmethod
-from typing import ClassVar, Dict, List, Optional
-
+from typing import ClassVar
 
 # ────────────────────────────────────────────────────────────────────────────
 # Contract Enforcement Infrastructure
@@ -101,10 +100,10 @@ class BaseModule(ABC):
     """
 
     name: ClassVar[str] = ""
-    inputs: ClassVar[List[str]] = []
-    outputs: ClassVar[List[str]] = []
-    input_contracts:  ClassVar[Dict[str, object]] = {}
-    output_contracts: ClassVar[Dict[str, object]] = {}
+    inputs: ClassVar[list[str]] = []
+    outputs: ClassVar[list[str]] = []
+    input_contracts:  ClassVar[dict[str, object]] = {}
+    output_contracts: ClassVar[dict[str, object]] = {}
 
     @abstractmethod
     def run(self, context: dict) -> dict:

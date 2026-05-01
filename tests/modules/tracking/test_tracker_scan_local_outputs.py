@@ -1,18 +1,18 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-import numpy as np
-import pandas as pd
-import xarray as xr
 import tempfile
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
+import xarray as xr
 
-from adapt.modules.tracking.module import RadarCellTracker
 from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.user import UserConfig
 from adapt.configuration.schemas.resolve import resolve_config
+from adapt.configuration.schemas.user import UserConfig
+from adapt.modules.tracking.module import RadarCellTracker
 
 
 @pytest.fixture

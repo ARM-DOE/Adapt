@@ -7,12 +7,11 @@ Tracks radar files through pipeline stages (downloaded, regridded, analyzed, plo
 Enables idempotent processing with stop/restart, progress tracking, and failure recovery.
 """
 
-import sqlite3
 import logging
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import Optional, Dict, List
+import sqlite3
 import threading
+from datetime import UTC, datetime
+from pathlib import Path
 
 __all__ = ['FileProcessingTracker']
 
@@ -160,7 +159,7 @@ class FileProcessingTracker:
             conn.commit()
 
     def register_file(self, file_id: str, radar: str, scan_time: datetime,
-                     nexrad_path: Optional[Path] = None) -> bool:
+                     nexrad_path: Path | None = None) -> bool:
         """Register a new file for tracking.
 
         Creates an initial database record for a newly discovered NEXRAD file.
@@ -213,7 +212,7 @@ class FileProcessingTracker:
                 scan_time.isoformat(),
                 str(nexrad_path) if nexrad_path else None,
                 file_size_mb,
-                datetime.now(timezone.utc).isoformat()
+                datetime.now(UTC).isoformat()
             ))
             conn.commit()
 
@@ -221,10 +220,10 @@ class FileProcessingTracker:
             return True
 
     def mark_stage_complete(self, file_id: str, stage: str,
-                          path: Optional[Path] = None,
-                          num_cells: Optional[int] = None,
-                          error: Optional[str] = None,
-                          timings: Optional[Dict[str, float]] = None):
+                          path: Path | None = None,
+                          num_cells: int | None = None,
+                          error: str | None = None,
+                          timings: dict[str, float] | None = None):
         """Mark a pipeline stage as complete or failed for a file.
 
         Called by downloader, processor, and plotter threads to record progress.
@@ -283,7 +282,7 @@ class FileProcessingTracker:
             else:
                 new_status = 'processing'
 
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
 
             # Build SET clause dynamically to include optional timing columns
             set_parts = [
@@ -324,7 +323,7 @@ class FileProcessingTracker:
 
             logger.debug("Marked %s complete: %s", stage, file_id)
 
-    def get_file_status(self, file_id: str) -> Optional[Dict]:
+    def get_file_status(self, file_id: str) -> dict | None:
         """Get complete processing status for a file.
 
         Parameters
@@ -358,9 +357,9 @@ class FileProcessingTracker:
                 return dict(row)
             return None
 
-    def get_pending_files(self, stage: Optional[str] = None,
-                         radar: Optional[str] = None,
-                         limit: Optional[int] = None) -> List[Dict]:
+    def get_pending_files(self, stage: str | None = None,
+                         radar: str | None = None,
+                         limit: int | None = None) -> list[dict]:
         """Get files awaiting processing at a specific stage.
 
         Used by downloader/processor/plotter to find files needing work.
@@ -415,7 +414,7 @@ class FileProcessingTracker:
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_statistics(self, radar: Optional[str] = None) -> Dict:
+    def get_statistics(self, radar: str | None = None) -> dict:
         """Get summary statistics for processing progress.
 
         Parameters
@@ -488,7 +487,7 @@ class FileProcessingTracker:
         timestamp_col = f"{stage}_at"
         return status.get(timestamp_col) is None
 
-    def reset_failed(self, radar: Optional[str] = None):
+    def reset_failed(self, radar: str | None = None):
         """Reset all failed files to pending for retry.
 
         Useful for recovery after fixing errors (e.g., config changes, bug fixes).
@@ -513,18 +512,18 @@ class FileProcessingTracker:
                     UPDATE radar_file_processing
                     SET status = 'pending', error_message = NULL, updated_at = ?
                     WHERE status = 'failed' AND radar = ?
-                """, (datetime.now(timezone.utc).isoformat(), radar))
+                """, (datetime.now(UTC).isoformat(), radar))
             else:
                 conn.execute("""
                     UPDATE radar_file_processing
                     SET status = 'pending', error_message = NULL, updated_at = ?
                     WHERE status = 'failed'
-                """, (datetime.now(timezone.utc).isoformat(),))
+                """, (datetime.now(UTC).isoformat(),))
             conn.commit()
 
-            logger.info(f"Reset failed files to pending")
+            logger.info("Reset failed files to pending")
 
-    def cleanup_deleted_files(self, radar: Optional[str] = None):
+    def cleanup_deleted_files(self, radar: str | None = None):
         """Remove database records for files deleted from disk.
 
         Useful after clearing output directories. On next run, these files

@@ -14,18 +14,17 @@ Author: Bhupendra Raut
 """
 
 import importlib.util
-import shutil
 import json
 import re
+import shutil
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict
-from datetime import datetime, timezone
 
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.user import UserConfig 
 from adapt.configuration.schemas.cli import CLIConfig
 from adapt.configuration.schemas.internal import InternalConfig
+from adapt.configuration.schemas.param import ParamConfig
+from adapt.configuration.schemas.resolve import resolve_config
+from adapt.configuration.schemas.user import UserConfig
 from adapt.persistence import DataRepository
 from adapt.persistence.registry import RepositoryRegistry
 
@@ -69,7 +68,7 @@ def _load_user_config_dict(config_path: str) -> dict:
     raise ValueError(f"No CONFIG dict found in {path}")
 
 
-def _setup_output_directories(base_dir: str) -> Dict[str, Path]:
+def _setup_output_directories(base_dir: str) -> dict[str, Path]:
     """Setup output directory structure.
     
     Creates the standard Adapt directory layout under base_dir.
@@ -116,7 +115,7 @@ def _handle_rerun_cleanup(base_dir: str, radar: str, rerun: bool) -> None:
     print("Radar output cleaned")
 
 
-def _persist_runtime_config(config: InternalConfig, run_id: str, output_dirs: Dict[str, Path]) -> None:
+def _persist_runtime_config(config: InternalConfig, run_id: str, output_dirs: dict[str, Path]) -> None:
     """Persist final runtime configuration to output directory with run ID.
     
     Saves the complete resolved configuration for reproducibility and debugging.
@@ -130,7 +129,7 @@ def _persist_runtime_config(config: InternalConfig, run_id: str, output_dirs: Di
     # Add run_id to config dict for persistence
     config_dict = config.model_dump()
     config_dict["run_id"] = run_id
-    config_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+    config_dict["created_at"] = datetime.now(UTC).isoformat()
     
     with open(config_file, 'w') as f:
         json.dump(config_dict, f, indent=2, default=str)

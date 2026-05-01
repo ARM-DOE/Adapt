@@ -7,6 +7,7 @@ Tracks radar files through pipeline stages (downloaded, regridded, analyzed, plo
 Enables idempotent processing with stop/restart, progress tracking, and failure recovery.
 """
 
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -134,9 +135,18 @@ class FileProcessingTracker:
                 )
             """)
 
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_radar_file_processing_radar_id ON radar_file_processing(radar)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_radar_file_processing_status ON radar_file_processing(status)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_radar_file_processing_scan_time ON radar_file_processing(scan_time)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_radar_file_processing_radar_id "
+                "ON radar_file_processing(radar)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_radar_file_processing_status "
+                "ON radar_file_processing(status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_radar_file_processing_scan_time "
+                "ON radar_file_processing(scan_time)"
+            )
 
             conn.commit()
 
@@ -152,10 +162,8 @@ class FileProcessingTracker:
         conn = self._get_connection()
         with self._lock:
             for col_def in timing_cols:
-                try:
+                with contextlib.suppress(sqlite3.OperationalError):
                     conn.execute(f"ALTER TABLE radar_file_processing ADD COLUMN {col_def}")
-                except sqlite3.OperationalError:
-                    pass  # column already exists
             conn.commit()
 
     def register_file(self, file_id: str, radar: str, scan_time: datetime,
@@ -193,7 +201,9 @@ class FileProcessingTracker:
 
         with self._lock:
             # Check if already exists
-            cursor = conn.execute("SELECT file_id FROM radar_file_processing WHERE file_id = ?", (file_id,))
+            cursor = conn.execute(
+                "SELECT file_id FROM radar_file_processing WHERE file_id = ?", (file_id,)
+            )
             if cursor.fetchone():
                 return False
 

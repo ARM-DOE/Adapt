@@ -39,6 +39,7 @@ Example usage::
         print(f"Got {len(batch)} new rows")
 """
 
+import contextlib
 import logging
 import time
 from datetime import UTC, datetime
@@ -905,7 +906,9 @@ class DataClient:
         catalog = self._get_radar_catalog(radar)
 
         bundle: dict[str, Any] = {
-            'scan_time': scan_time_dt.isoformat() if isinstance(scan_time_dt, datetime) else scan_time,
+            'scan_time': (
+                scan_time_dt.isoformat() if isinstance(scan_time_dt, datetime) else scan_time
+            ),
             'radar': radar,
             'segmentation2d': None,
             'cells': None,
@@ -915,11 +918,8 @@ class DataClient:
 
         # Try to get scan from scans table, fall back to items if table doesn't exist
         scan = None
-        try:
+        with contextlib.suppress(Exception):
             scan = catalog.get_scan(scan_time_dt)
-        except Exception:
-            # scans table doesn't exist - use fallback
-            pass
 
         # If no scan record, fall back to item-based lookup
         if not scan:
@@ -1006,7 +1006,10 @@ class DataClient:
 
                 # Extract cell tracking info from cells DataFrame
                 if 'cell_uid' in bundle['cells'].columns:
-                    for uid in sorted(bundle['cells']['cell_uid'].dropna().astype(str).unique().tolist()):
+                    uids = sorted(
+                        bundle['cells']['cell_uid'].dropna().astype(str).unique().tolist()
+                    )
+                    for uid in uids:
                         bundle['tracks'].append({'cell_uid': uid})
 
         return bundle

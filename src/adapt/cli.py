@@ -351,7 +351,10 @@ def main() -> None:
     """Top-level CLI dispatcher."""
     parser = argparse.ArgumentParser(
         prog='adapt',
-        description='Adapt - Real-Time data processing for informed adaptive scanning of ARM weather radars.',
+        description=(
+            'Adapt - Real-Time data processing for informed adaptive scanning '
+            'of ARM weather radars.'
+        ),
     )
     subparsers = parser.add_subparsers(dest='command', metavar='COMMAND')
     subparsers.required = True

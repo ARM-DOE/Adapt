@@ -14,6 +14,7 @@ a stable cell_uid.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -135,10 +136,13 @@ class TrackStore:
             cell_uids = tracked_cells_df[uid_col].astype(str).unique().tolist()
             placeholders = ",".join("?" * len(cell_uids))
             first_seen_rows = conn.execute(
-                f"SELECT cell_uid, first_seen_time FROM cell_tracks WHERE run_id=? AND cell_uid IN ({placeholders})",
+                "SELECT cell_uid, first_seen_time FROM cell_tracks "
+                f"WHERE run_id=? AND cell_uid IN ({placeholders})",
                 [run_id] + cell_uids,
             ).fetchall()
-            first_seen_map: dict[str, str] = {r["cell_uid"]: r["first_seen_time"] for r in first_seen_rows}
+            first_seen_map: dict[str, str] = {
+                r["cell_uid"]: r["first_seen_time"] for r in first_seen_rows
+            }
 
             adjacency = self._build_uid_adjacency_summary(
                 tracked_cells_df=tracked_cells_df,
@@ -206,7 +210,8 @@ class TrackStore:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM cell_events WHERE run_id=? AND (source_cell_uid=? OR target_cell_uid=?) ORDER BY event_id",
+                    "SELECT * FROM cell_events WHERE run_id=? "
+                    "AND (source_cell_uid=? OR target_cell_uid=?) ORDER BY event_id",
                     (run_id, cell_uid, cell_uid),
                 ).fetchall()
         return pd.DataFrame([dict(r) for r in rows])
@@ -302,7 +307,9 @@ class TrackStore:
             lbl = int(r["cell_label"])
             uid = str(r["cell_uid"])
             if lbl in label_to_uid and label_to_uid[lbl] != uid:
-                raise ValueError(f"Non-unique mapping for cell_label={lbl}: {label_to_uid[lbl]} vs {uid}")
+                raise ValueError(
+                    f"Non-unique mapping for cell_label={lbl}: {label_to_uid[lbl]} vs {uid}"
+                )
             label_to_uid[lbl] = uid
 
         neighbors: dict[str, set[str]] = {uid: set() for uid in label_to_uid.values()}
@@ -330,11 +337,9 @@ class TrackStore:
             if col in _SKIP_FROM_CELL_STATS or col in _FIXED_CBS_COLS or col in existing:
                 continue
             sql_type = _infer_sql_type(col)
-            try:
+            with contextlib.suppress(sqlite3.OperationalError):
                 conn.execute(f"ALTER TABLE cells_by_scan ADD COLUMN {col} {sql_type}")
-                #logger.info("cells_by_scan: added column %s %s", col, sql_type)
-            except sqlite3.OperationalError:
-                pass  # race — column added concurrently
+                # logger.info("cells_by_scan: added column %s %s", col, sql_type)
 
     def _build_cells_rows(
         self,
@@ -379,9 +384,12 @@ class TrackStore:
 
             # Compute age_seconds from first_seen_time (0 for new initiations)
             age_seconds = 0.0
-            if scan_dt is not None and cl not in initiated and first_seen_map and tid in first_seen_map:
+            if (scan_dt is not None and cl not in initiated
+                    and first_seen_map and tid in first_seen_map):
                 try:
-                    first_dt = _dt.strptime(first_seen_map[tid], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+                    first_dt = _dt.strptime(
+                        first_seen_map[tid], "%Y-%m-%dT%H:%M:%SZ"
+                    ).replace(tzinfo=UTC)
                     age_seconds = max(0.0, (scan_dt - first_dt).total_seconds())
                 except ValueError:
                     pass
@@ -416,7 +424,9 @@ class TrackStore:
         cols = list(rows[0].keys())
         placeholders = ", ".join("?" * len(cols))
         col_list = ", ".join(cols)
-        update_set = ", ".join(f"{c}=excluded.{c}" for c in cols if c not in ("run_id", "scan_time", "cell_uid"))
+        update_set = ", ".join(
+            f"{c}=excluded.{c}" for c in cols if c not in ("run_id", "scan_time", "cell_uid")
+        )
         sql = (
             f"INSERT INTO cells_by_scan ({col_list}) VALUES ({placeholders}) "
             f"ON CONFLICT(run_id, scan_time, cell_uid) DO UPDATE SET {update_set}"
@@ -454,7 +464,8 @@ class TrackStore:
         def _update(flag: str, cell_uids: set) -> None:
             for tid in cell_uids:
                 conn.execute(
-                    f"UPDATE cells_by_scan SET {flag}=1 WHERE run_id=? AND scan_time=? AND cell_uid=?",
+                    f"UPDATE cells_by_scan SET {flag}=1 "
+                    "WHERE run_id=? AND scan_time=? AND cell_uid=?",
                     (run_id, prev_iso, tid),
                 )
 
@@ -548,7 +559,8 @@ class TrackStore:
         existing = {
             r["cell_uid"]: dict(r)
             for r in conn.execute(
-                "SELECT cell_uid, n_scans, max_area_sqkm, max_reflectivity FROM cell_tracks WHERE run_id=?",
+                "SELECT cell_uid, n_scans, max_area_sqkm, max_reflectivity "
+                "FROM cell_tracks WHERE run_id=?",
                 (run_id,),
             ).fetchall()
         }
@@ -592,8 +604,12 @@ class TrackStore:
                     ON CONFLICT(run_id, cell_uid) DO UPDATE SET
                         last_seen_time=excluded.last_seen_time,
                         n_scans=cell_tracks.n_scans+1,
-                        max_area_sqkm=MAX(COALESCE(cell_tracks.max_area_sqkm,0), excluded.max_area_sqkm),
-                        max_reflectivity=MAX(COALESCE(cell_tracks.max_reflectivity,0), excluded.max_reflectivity)""",
+                        max_area_sqkm=MAX(
+                            COALESCE(cell_tracks.max_area_sqkm,0), excluded.max_area_sqkm
+                        ),
+                        max_reflectivity=MAX(
+                            COALESCE(cell_tracks.max_reflectivity,0), excluded.max_reflectivity
+                        )""",
                     (run_id, tid, scan_iso, scan_iso,
                      origin_type, origin_grp, origin_n, origin_parent,
                      info["area"], info["refl"]),
@@ -631,7 +647,10 @@ def _to_iso(dt: datetime) -> str:
 
 def _infer_sql_type(col: str) -> str:
     col_l = col.lower()
-    if any(col_l.endswith(s) for s in ("_lat", "_lon", "_mean", "_max", "_min", "_sqkm", "_km2", "_std", "_p25", "_p75")):
+    _real_suffixes = (
+        "_lat", "_lon", "_mean", "_max", "_min", "_sqkm", "_km2", "_std", "_p25", "_p75"
+    )
+    if any(col_l.endswith(s) for s in _real_suffixes):
         return "REAL"
     if any(col_l.endswith(s) for s in ("_x", "_y", "_count", "_pixels", "_index")):
         return "INTEGER"

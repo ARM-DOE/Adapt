@@ -87,7 +87,10 @@ class RadarCatalog:
     
     def _init_database(self) -> None:
         """Initialize database schema from SQL file."""
-        schema_path = Path(__file__).resolve().parents[1] / "configuration" / "schemas" / "radar_catalog_schema.sql"
+        schema_path = (
+            Path(__file__).resolve().parents[1] / "configuration" / "schemas"
+            / "radar_catalog_schema.sql"
+        )
         
         if not schema_path.exists():
             # Fallback to embedded schema
@@ -134,7 +137,9 @@ class RadarCatalog:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_run ON items(run_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_scan_time ON items(scan_time DESC)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_type_time ON items(item_type, scan_time DESC)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_items_type_time ON items(item_type, scan_time DESC)"
+            )
             
             # Progress table
             conn.execute("""

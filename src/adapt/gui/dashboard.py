@@ -63,12 +63,12 @@ except Exception:
     pass
 
 # ── Tkinter ───────────────────────────────────────────────────────────────────
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+import tkinter as tk  # noqa: E402
+from tkinter import filedialog, messagebox, scrolledtext, ttk  # noqa: E402
 
 # ── Optional deps ─────────────────────────────────────────────────────────────
 try:
-    from PIL import Image, ImageTk
+    import PIL  # noqa: F401
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
@@ -76,7 +76,7 @@ except ImportError:
 try:
     import matplotlib
     matplotlib.use('TkAgg')
-    import cmweather.cm  # registers ChaseSpectral and other radar colormaps — must follow use()
+    import cmweather  # noqa: F401 — registers ChaseSpectral and other radar colormaps — must follow use()
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -1538,7 +1538,8 @@ class AdaptDashboard(tk.Tk):
                 cell_uid = str(track_df['cell_uid'].dropna().iloc[0])
         else:
             cell_uid = self._selected_cell_uid
-            if not cell_uid or self._current_cell_df is None or 'cell_uid' not in self._current_cell_df.columns:
+            if (not cell_uid or self._current_cell_df is None
+                    or 'cell_uid' not in self._current_cell_df.columns):
                 return
             track_df = (
                 self._current_cell_df[self._current_cell_df['cell_uid'] == str(cell_uid)]
@@ -1597,8 +1598,11 @@ class AdaptDashboard(tk.Tk):
     def _clear_time_series(self) -> None:
         if self._ts_axes is None:
             return
-        for ax, (ylabel, title) in zip(self._ts_axes,
-                                        [('km²', 'Area'), ('dBZ', 'Reflectivity'), ('dB', 'ZDR')], strict=False):
+        for ax, (ylabel, title) in zip(
+            self._ts_axes,
+            [('km²', 'Area'), ('dBZ', 'Reflectivity'), ('dB', 'ZDR')],
+            strict=False,
+        ):
             ax.cla()
             self._style_ts_ax(ax, ylabel, title)
             ax.text(0.5, 0.5, 'click a cell', transform=ax.transAxes,
@@ -1863,7 +1867,8 @@ class AdaptDashboard(tk.Tk):
                 'time_label': 65, 'cell_uid': 160, 'cell_label': 55,
                 'cell_area_sqkm': 70, 'area_40dbz_km2': 70,
                 'radar_reflectivity_max': 75, 'radar_reflectivity_mean': 75,
-                'radar_differential_reflectivity_max': 75, 'radar_differential_reflectivity_mean': 75,
+                'radar_differential_reflectivity_max': 75,
+                'radar_differential_reflectivity_mean': 75,
                 'cell_centroid_mass_lat': 80, 'cell_centroid_mass_lon': 80,
                 'n_adjacent_cells': 65,
             }

@@ -65,10 +65,8 @@ class CLIConfig(AdaptBaseModel):
         the mode should automatically be historical. Runtime code should not
         make this decision.
         """
-        if self.mode is None:
-            # Check if either start_time or end_time are provided
-            if self.start_time or self.end_time:
-                self.mode = "historical"
+        if self.mode is None and (self.start_time or self.end_time):
+            self.mode = "historical"
         
         return self
     

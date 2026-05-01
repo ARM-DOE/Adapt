@@ -159,7 +159,9 @@ class RepositoryRegistry:
                     last_updated TEXT NOT NULL
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_radars_updated ON radars(last_updated DESC)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_radars_updated ON radars(last_updated DESC)"
+            )
             
             # Item types table
             conn.execute("""
@@ -219,11 +221,15 @@ class RepositoryRegistry:
         
         conn = self._get_connection()
         with self._lock:
-            conn.execute("""
-                INSERT OR REPLACE INTO radars 
-                (radar, catalog_path, data_path, location_lat, location_lon, created_at, last_updated)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO radars
+                (radar, catalog_path, data_path,
+                 location_lat, location_lon, created_at, last_updated)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (radar, catalog_path, data_path, lat, lon, now, now))
+                """,
+                (radar, catalog_path, data_path, lat, lon, now, now),
+            )
             conn.commit()
         
         logger.debug("Radar registered: %s at %s", radar, data_path)
@@ -273,7 +279,8 @@ class RepositoryRegistry:
                 return
 
             conn.execute(
-                "UPDATE radars SET location_lat = ?, location_lon = ?, last_updated = ? WHERE radar = ?",
+                "UPDATE radars SET location_lat = ?, location_lon = ?, "
+                "last_updated = ? WHERE radar = ?",
                 (lat_f, lon_f, now, radar),
             )
             conn.commit()
@@ -346,11 +353,15 @@ class RepositoryRegistry:
         
         conn = self._get_connection()
         with self._lock:
-            conn.execute("""
-                INSERT OR IGNORE INTO runs 
-                (run_id, radar, start_time, status, mode, config_path, repository_version, created_at)
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO runs
+                (run_id, radar, start_time, status, mode,
+                 config_path, repository_version, created_at)
                 VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
-            """, (run_id, radar, now, mode, config_path, repository_version, now))
+                """,
+                (run_id, radar, now, mode, config_path, repository_version, now),
+            )
             conn.commit()
         
         logger.debug("Run registered: %s for radar %s", run_id, radar)

@@ -446,7 +446,8 @@ class RadarProcessor(threading.Thread):
         Saves:
         - projected_ds as NetCDF artifact
         - cell_stats, cell_adjacency as Parquet artifacts
-        - tracked_cells, cell_events as SQLite via TrackStore (label→uid adjacency mapping in TrackStore)
+        - tracked_cells, cell_events as SQLite via TrackStore
+          (label→uid adjacency mapping in TrackStore)
         """
         if scan_time is not None and scan_time.tzinfo is None:
             scan_time = scan_time.replace(tzinfo=UTC)

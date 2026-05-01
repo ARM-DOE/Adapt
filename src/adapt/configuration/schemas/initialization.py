@@ -42,10 +42,10 @@ def _load_user_config_dict(config_path: str) -> dict:
     if path.suffix in ('.yaml', '.yml'):
         try:
             import yaml
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "PyYAML is required for YAML config files: pip install pyyaml"
-            )
+            ) from err
         with open(path) as f:
             data = yaml.safe_load(f)
         return data or {}
@@ -115,7 +115,9 @@ def _handle_rerun_cleanup(base_dir: str, radar: str, rerun: bool) -> None:
     print("Radar output cleaned")
 
 
-def _persist_runtime_config(config: InternalConfig, run_id: str, output_dirs: dict[str, Path]) -> None:
+def _persist_runtime_config(
+    config: InternalConfig, run_id: str, output_dirs: dict[str, Path]
+) -> None:
     """Persist final runtime configuration to output directory with run ID.
     
     Saves the complete resolved configuration for reproducibility and debugging.
@@ -242,7 +244,10 @@ def init_runtime_config(args) -> InternalConfig:
 
         if _run_id_exists(base_dir_arg, normalized_run_id):
             print(f"Continuing existing run ID: {normalized_run_id}")
-            print("Ignoring user config file and CLI config overrides; reusing saved runtime config for this run.")
+            print(
+                "Ignoring user config file and CLI config overrides; "
+                "reusing saved runtime config for this run."
+            )
             return _load_saved_runtime_config(base_dir_arg, normalized_run_id)
 
     # 1. Load and resolve configuration from all sources
@@ -277,7 +282,9 @@ def init_runtime_config(args) -> InternalConfig:
     
     # 2. Handle --rerun cleanup BEFORE directory setup
     rerun = getattr(args, 'rerun', False)
-    _handle_rerun_cleanup(internal_config_dict["base_dir"], internal_config_dict["downloader"]["radar"], rerun)
+    _handle_rerun_cleanup(
+        internal_config_dict["base_dir"], internal_config_dict["downloader"]["radar"], rerun
+    )
     
     # 3. Setup output directories  
     output_dirs = _setup_output_directories(internal_config_dict["base_dir"])

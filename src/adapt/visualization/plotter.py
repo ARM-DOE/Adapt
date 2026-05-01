@@ -26,7 +26,6 @@ import matplotlib.pyplot as plt
 
 try:
     import contextily as ctx
-    from pyproj import Transformer
     CONTEXTILY_AVAILABLE = True
 except ImportError:
     CONTEXTILY_AVAILABLE = False
@@ -154,14 +153,13 @@ class RadarPlotter:
     def _get_coord_name(self, coord_key: str, default: str) -> str:
         """Get coordinate name from config."""
         if self.config:
-            if coord_key == "x":
-                return self.config.global_.coord_names.x
-            elif coord_key == "y":
-                return self.config.global_.coord_names.y
-            elif coord_key == "z":
-                return self.config.global_.coord_names.z
-            elif coord_key == "time":
-                return self.config.global_.coord_names.time
+            coord_map = {
+                "x": self.config.global_.coord_names.x,
+                "y": self.config.global_.coord_names.y,
+                "z": self.config.global_.coord_names.z,
+                "time": self.config.global_.coord_names.time,
+            }
+            return coord_map.get(coord_key, default)
         return default
     
     def _extract_timestamp(self, ds: xr.Dataset) -> datetime:
@@ -246,7 +244,9 @@ class RadarPlotter:
 
         return lat, lon
     
-    def _add_basemap(self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray) -> None:
+    def _add_basemap(
+        self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray
+    ) -> None:
         """Add OpenStreetMap basemap to axis."""
         if not self.use_basemap or not CONTEXTILY_AVAILABLE:
             return
@@ -255,7 +255,10 @@ class RadarPlotter:
             radar_lat, radar_lon = self._get_radar_location(ds)
             
             # Set CRS for azimuthal equidistant (km units)
-            crs_str = f"+proj=aeqd +lat_0={radar_lat} +lon_0={radar_lon} +x_0=0 +y_0=0 +datum=WGS84 +units=km"
+            crs_str = (
+                f"+proj=aeqd +lat_0={radar_lat} +lon_0={radar_lon} "
+                "+x_0=0 +y_0=0 +datum=WGS84 +units=km"
+            )
             
             ax.set_xlim(x_coords.min(), x_coords.max())
             ax.set_ylim(y_coords.min(), y_coords.max())
@@ -339,7 +342,10 @@ class RadarPlotter:
             zorder=45
         )
         
-        logger.info(f"Plotted optical flow field ({len(y_indices)}x{len(x_indices)} vectors, scale={self.flow_scale})")
+        logger.info(
+            f"Plotted optical flow field ({len(y_indices)}x{len(x_indices)} vectors, "
+            f"scale={self.flow_scale})"
+        )
         return True
     
     def _plot_segmentation_contours(
@@ -599,7 +605,9 @@ class RadarPlotter:
         plt.tight_layout()
         
         if output_path is None:
-            output_path = Path(f"/tmp/radar_plot_{timestamp.strftime('%Y%m%d_%H%M%S')}.{self.output_format}")
+            output_path = Path(
+                f"/tmp/radar_plot_{timestamp.strftime('%Y%m%d_%H%M%S')}.{self.output_format}"
+            )
         
         return self._save_figure(fig, Path(output_path))
     
@@ -821,7 +829,10 @@ class PlotterThread(threading.Thread):
             
             tracker = self.file_tracker
             if tracker:
-                file_id = Path(item.get('segmentation_nc', '')).stem.replace('_analysis', '').replace('_segmentation', '')
+                file_id = (
+                    Path(item.get('segmentation_nc', '')).stem
+                    .replace('_analysis', '').replace('_segmentation', '')
+                )
                 if file_id:
                     tracker.mark_stage_complete(file_id, "plotted", error=str(e))
     
@@ -1093,7 +1104,9 @@ class PlotConsumer(threading.Thread):
 
                 if cols_available:
                     display_df = recent[cols_available].copy()
-                    display_df.columns = ['Label', 'Area (km2)', 'Mean dBZ', 'Max dBZ'][:len(cols_available)]
+                    display_df.columns = (
+                        ['Label', 'Area (km2)', 'Mean dBZ', 'Max dBZ'][:len(cols_available)]
+                    )
                     print(display_df.to_string(index=False))
 
                 print("=" * 60 + "\n")

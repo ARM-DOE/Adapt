@@ -51,7 +51,8 @@ def assert_projected(ds: xr.Dataset, max_steps: int = 5) -> None:
         projections = ds["cell_projections"]
         require(
             projections.ndim == 3,
-            f"Projection contract violated: 'cell_projections' has {projections.ndim} dims, expected 3 (step, y, x)"
+            f"Projection contract violated: 'cell_projections' has {projections.ndim} dims, "
+            "expected 3 (step, y, x)",
         )
 
         # Use stored config value if available (self-describing data pattern)
@@ -62,5 +63,6 @@ def assert_projected(ds: xr.Dataset, max_steps: int = 5) -> None:
         expected_steps = max_steps_actual + 1  # 1 registration + N future
         require(
             num_steps == expected_steps,
-            f"Projection contract violated: found {num_steps} steps, expected {expected_steps} (1 registration + {max_steps_actual} projections from config)"
+            f"Projection contract violated: found {num_steps} steps, expected {expected_steps} "
+            f"(1 registration + {max_steps_actual} projections from config)"
         )

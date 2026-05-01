@@ -699,7 +699,10 @@ class DataRepository:
                 combined_df = pd.concat([existing_df, df], ignore_index=True)
 
                 # Ensure datetime columns are properly typed (fix concat type coercion)
-                datetime_cols = ['time', 'scan_time', 'start_time', 'end_time', 'time_volume_start', 'time_volume_end']
+                datetime_cols = [
+                    'time', 'scan_time', 'start_time', 'end_time',
+                    'time_volume_start', 'time_volume_end',
+                ]
                 for col in datetime_cols:
                     if col in combined_df.columns:
                         combined_df[col] = pd.to_datetime(
@@ -709,7 +712,9 @@ class DataRepository:
                         ).dt.tz_convert(None)
 
                 table = pa.Table.from_pandas(combined_df)
-                logger.debug(f"Appended {len(df)} rows to {parquet_path} (schema evolution handled)")
+                logger.debug(
+                    f"Appended {len(df)} rows to {parquet_path} (schema evolution handled)"
+                )
 
             # Write or overwrite parquet file
             pq.write_table(table, parquet_path)

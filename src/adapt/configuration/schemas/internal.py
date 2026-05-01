@@ -159,7 +159,8 @@ class InternalProcessorConfig(AdaptBaseModel):
     """Runtime processor configuration."""
     max_history: int = Field(default=2, ge=2, le=10)  # Frame history for optical flow
     min_file_size: int = Field(default=5000, ge=1000)  # Minimum file size in bytes
-    db_filename_pattern: str = Field(default="{radar}_cells_statistics.db")  # Database filename pattern
+    # Database filename pattern
+    db_filename_pattern: str = Field(default="{radar}_cells_statistics.db")
 
 
 # =============================================================================
@@ -193,8 +194,12 @@ class InternalConfig(AdaptBaseModel):
     
     mode: Literal["realtime", "historical"]
     base_dir: str
-    run_id: str | None = Field(default=None, description="Unique run identifier generated during initialization")
-    output_dirs: dict[str, str] | None = Field(default=None, description="Output directory paths from initialization")
+    run_id: str | None = Field(
+        default=None, description="Unique run identifier generated during initialization"
+    )
+    output_dirs: dict[str, str] | None = Field(
+        default=None, description="Output directory paths from initialization"
+    )
     reader: InternalReaderConfig
     downloader: InternalDownloaderConfig
     regridder: InternalRegridderConfig

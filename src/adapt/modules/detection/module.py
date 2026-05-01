@@ -295,13 +295,17 @@ class RadarCellSegmenter:
         # we attach labels to original dataset
         ds_out = ds.copy()
         ds_out[self.labels_name] = labels_da
-        logger.debug(f"Labels attached: var={self.labels_name}, shape={labels.shape}, max={labels.max()}")
+        logger.debug(
+            f"Labels attached: var={self.labels_name}, shape={labels.shape}, max={labels.max()}"
+        )
 
         return ds_out
 
-    def _binary_to_labels(self, binary_mask: np.ndarray, field: np.ndarray,
-                          kernel_size: tuple, filter_by_size: bool,
-                          min_gridpoints: int, max_gridpoints: int) -> np.ndarray:
+    def _binary_to_labels(
+        self, binary_mask: np.ndarray, field: np.ndarray,
+        kernel_size: tuple, filter_by_size: bool,
+        min_gridpoints: int, max_gridpoints: int,
+    ) -> np.ndarray:
         """Morphology, detect cells, filter."""
         from skimage.morphology import closing, footprint_rectangle
 
@@ -311,7 +315,9 @@ class RadarCellSegmenter:
 
         # if there are any cells, filter and/or renumber
         if labels.max() > 0:
-            labels = self._filter_and_relabel(labels, filter_by_size, min_gridpoints, max_gridpoints)
+            labels = self._filter_and_relabel(
+                labels, filter_by_size, min_gridpoints, max_gridpoints
+            )
 
         return labels.astype(np.int32)
 
@@ -344,7 +350,9 @@ class RadarCellSegmenter:
 
         return labels_renumbered
 
-    def _relabel_by_size(self, labels: np.ndarray, labels_to_keep: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    def _relabel_by_size(
+        self, labels: np.ndarray, labels_to_keep: np.ndarray, counts: np.ndarray
+    ) -> np.ndarray:
         """Renumber: largest=1."""
         keep_indices = np.isin(np.arange(len(counts)), labels_to_keep)
         keep_counts = counts[keep_indices]
@@ -362,11 +370,11 @@ class RadarCellSegmenter:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
-from adapt.execution.module_registry import registry
-from adapt.modules.base import BaseModule
-from adapt.modules.ingest.contracts import assert_gridded
+from adapt.execution.module_registry import registry  # noqa: E402
+from adapt.modules.base import BaseModule  # noqa: E402
+from adapt.modules.ingest.contracts import assert_gridded  # noqa: E402
 
-from .contracts import assert_segmented
+from .contracts import assert_segmented  # noqa: E402
 
 
 def _check_grid_ds_2d(ds):

@@ -349,17 +349,17 @@ if __name__ == "__main__":
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
-from datetime import UTC
-from datetime import datetime as _dt
+from datetime import UTC  # noqa: E402
+from datetime import datetime as _dt  # noqa: E402
 
-import numpy as np
-import xarray as _xr
+import numpy as np  # noqa: E402
+import xarray as _xr  # noqa: E402
 
-from adapt.configuration.schemas.directories import get_netcdf_path
-from adapt.execution.module_registry import registry
-from adapt.modules.base import BaseModule
+from adapt.configuration.schemas.directories import get_netcdf_path  # noqa: E402
+from adapt.execution.module_registry import registry  # noqa: E402
+from adapt.modules.base import BaseModule  # noqa: E402
 
-from .contracts import assert_gridded
+from .contracts import assert_gridded  # noqa: E402
 
 
 def _check_grid_ds_2d(ds):

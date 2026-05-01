@@ -124,7 +124,9 @@ class RadarCellProjector:
     >>> projector = RadarCellProjector(config)
     >>> ds_with_motion = projector.project([ds_t1, ds_t0])
     >>> num_projections = ds_with_motion["cell_projections"].shape[0]
-    >>> print(f"Generated {num_projections} projections (1 registration + {num_projections-1} future)")
+    >>> print(
+    ...     f"Generated {num_projections} projections (1 registration + {num_projections-1} future)"
+    ... )
     """
 
     def __init__(self, config: "InternalConfig"):
@@ -253,8 +255,12 @@ class RadarCellProjector:
 
         # Get reflectivity from ds (already at correct z-level from processor)
         # Reflectivity is always 2D at the configured z-level
-        refl1 = np.nan_to_num(ds_list[0][self.refl_var].values, nan=self.nan_fill).astype(np.float32)
-        refl2 = np.nan_to_num(ds_list[1][self.refl_var].values, nan=self.nan_fill).astype(np.float32)
+        refl1 = (
+            np.nan_to_num(ds_list[0][self.refl_var].values, nan=self.nan_fill).astype(np.float32)
+        )
+        refl2 = (
+            np.nan_to_num(ds_list[1][self.refl_var].values, nan=self.nan_fill).astype(np.float32)
+        )
 
         refl1_norm, refl2_norm = self._normalize(refl1, refl2)
         flow = cv2.calcOpticalFlowFarneback(refl1_norm, refl2_norm, None, **self.flow_params)
@@ -268,7 +274,8 @@ class RadarCellProjector:
 
         # Generate projections:
         # - First projection (offset=0) is registration: t-1 → t0 (uses labels from t-1)
-        # - Subsequent projections (offset=1,2,...) are future: t0→t1, t1→t2, etc. (uses labels from t0)
+        # - Subsequent projections (offset=1,2,...) are future: t0→t1, t1→t2, etc.
+        #   (uses labels from t0)
         # So total projections = max_proj_steps + 1 (1 for registration + N for future)
 
         labels_proj_list = []
@@ -279,8 +286,8 @@ class RadarCellProjector:
         
         # Future projections - project current labels (t0) forward (n steps)
         # Each pixel carries its original flow value and uses accumulated displacement.
-        # @TODO I have removed more complecated  logic of using flow at new positions for each step, 
-        # because some cells did not move in noisy radar data during the test. I will test it again later.
+        # @TODO I have removed more complecated logic of using flow at new positions for each step,
+        # because some cells did not move in noisy radar data during the test.
         future_projections = self._project_frames(labels_curr, flow, n_steps=self.max_proj_steps)
         for i in range(self.max_proj_steps):
             labels_proj_list.append(future_projections[i])
@@ -432,8 +439,8 @@ class RadarCellProjector:
         # Note: Processor already validated time gap, so we just warn if large
         if abs(time_diff_minutes) > max_interval_minutes:
             logger.warning(
-                f"Time interval {time_diff_minutes:.1f} min exceeds max {max_interval_minutes} min. "
-                "Processor should have filtered this pair."
+                f"Time interval {time_diff_minutes:.1f} min exceeds max "
+                f"{max_interval_minutes} min. Processor should have filtered this pair."
             )
 
         return time_diff_minutes
@@ -562,9 +569,9 @@ class RadarCellProjector:
 # BaseModule wrapper — Step 6
 # ---------------------------------------------------------------------------
 
-from adapt.execution.module_registry import registry
-from adapt.modules.base import BaseModule
-from adapt.modules.detection.contracts import assert_segmented
+from adapt.execution.module_registry import registry  # noqa: E402
+from adapt.modules.base import BaseModule  # noqa: E402
+from adapt.modules.detection.contracts import assert_segmented  # noqa: E402
 
 
 def _check_segmented_ds(ds):
@@ -629,7 +636,8 @@ class ProjectionModule(BaseModule):
         # Must have 2 frames (guaranteed by processor orchestration, but double-check)
         if len(self._dataset_history) < 2:
             raise ValueError(
-                f"ProjectionModule requires 2 frames, but only {len(self._dataset_history)} available. "
+                f"ProjectionModule requires 2 frames, but only "
+                f"{len(self._dataset_history)} available. "
                 "Processor should orchestrate frame pairing before calling projection."
             )
 

@@ -88,7 +88,9 @@ def test_birth_and_continue_events(tracker):
     labels1 = np.zeros((6, 6), dtype=np.int32)
     labels1[2:4, 2:4] = 1
     ds1 = _synthetic_ds(t1, labels1)
-    stats1 = _cell_stats(t1, [{"id": 1, "area": 4.0, "cx": 2.5, "cy": 2.5, "mean_refl": 40.0, "max_refl": 45.0}])
+    stats1 = _cell_stats(
+        t1, [{"id": 1, "area": 4.0, "cx": 2.5, "cy": 2.5, "mean_refl": 40.0, "max_refl": 45.0}]
+    )
 
     tracked1, events1 = tracker.track(ds1, stats1)
     assert len(tracked1) == 1
@@ -99,7 +101,9 @@ def test_birth_and_continue_events(tracker):
 
     labels2 = labels1.copy()
     ds2 = _synthetic_ds(t2, labels2, proj_labels=labels1)
-    stats2 = _cell_stats(t2, [{"id": 1, "area": 4.0, "cx": 2.5, "cy": 2.5, "mean_refl": 40.0, "max_refl": 45.0}])
+    stats2 = _cell_stats(
+        t2, [{"id": 1, "area": 4.0, "cx": 2.5, "cy": 2.5, "mean_refl": 40.0, "max_refl": 45.0}]
+    )
 
     tracked2, events2 = tracker.track(ds2, stats2)
     assert len(tracked2) == 1
@@ -117,7 +121,9 @@ def test_split_event(tracker):
     labels1 = np.zeros((8, 8), dtype=np.int32)
     labels1[3:5, 2:6] = 1
     ds1 = _synthetic_ds(t1, labels1)
-    stats1 = _cell_stats(t1, [{"id": 1, "area": 8.0, "cx": 3.5, "cy": 3.5, "mean_refl": 40.0, "max_refl": 45.0}])
+    stats1 = _cell_stats(
+        t1, [{"id": 1, "area": 8.0, "cx": 3.5, "cy": 3.5, "mean_refl": 40.0, "max_refl": 45.0}]
+    )
     tracker.track(ds1, stats1)
 
     labels2 = np.zeros((8, 8), dtype=np.int32)
@@ -162,7 +168,9 @@ def test_merge_event_emits_death(tracker):
     proj[4:6, 2:4] = 1
     proj[4:6, 6:8] = 2
     ds2 = _synthetic_ds(t2, labels2, proj_labels=proj)
-    stats2 = _cell_stats(t2, [{"id": 1, "area": 8.0, "cx": 4.5, "cy": 4.5, "mean_refl": 45.0, "max_refl": 50.0}])
+    stats2 = _cell_stats(
+        t2, [{"id": 1, "area": 8.0, "cx": 4.5, "cy": 4.5, "mean_refl": 45.0, "max_refl": 50.0}]
+    )
 
     tracked2, events2 = tracker.track(ds2, stats2)
     assert len(tracked2) == 1

@@ -530,7 +530,7 @@ class AwsNexradDownloader(threading.Thread):
         """Check if valid file exists."""
         try:
             return path.exists() and path.stat().st_size >= self._min_file_size
-        except:
+        except Exception:
             return False
 
     def _download_scan(self, scan, local_path: Path) -> bool:
@@ -573,7 +573,9 @@ class AwsNexradDownloader(threading.Thread):
             file_id = path.stem
             if tracker:
                 tracker.register_file(file_id, self.radar, scan_time, path)
-                timings = {"download_seconds": download_seconds} if download_seconds is not None else None
+                timings = (
+                    {"download_seconds": download_seconds} if download_seconds is not None else None
+                )
                 tracker.mark_stage_complete(file_id, "downloaded", path=path, timings=timings)
 
             self.result_queue.put(

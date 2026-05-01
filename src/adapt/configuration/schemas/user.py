@@ -143,7 +143,9 @@ class UserConfig(AdaptBaseModel):
 
     # Grid settings (flat aliases)
     grid_shape: tuple[int, int, int] | None = Field(None, alias="GRID_SHAPE")
-    grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None = Field(None, alias="GRID_LIMITS")
+    grid_limits: tuple[
+        tuple[float, float], tuple[float, float], tuple[float, float]
+    ] | None = Field(None, alias="GRID_LIMITS")
 
     # Segmentation settings (flat aliases)
     z_level: float | None = Field(None, alias="Z_LEVEL")
@@ -180,10 +182,11 @@ class UserConfig(AdaptBaseModel):
         This is a schema responsibility: if user config indicates a time range,
         the mode should automatically be historical.
         """
-        if self.mode is None:
-            # Check top-level times
-            if self.start_time and self.end_time or self.downloader and (self.downloader.start_time and self.downloader.end_time):
-                self.mode = "historical"
+        if self.mode is None and (
+            (self.start_time and self.end_time)
+            or (self.downloader and (self.downloader.start_time and self.downloader.end_time))
+        ):
+            self.mode = "historical"
 
         return self
 

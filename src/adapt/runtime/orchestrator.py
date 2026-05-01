@@ -294,7 +294,9 @@ class PipelineOrchestrator:
 
             # 2. Check for thread failures or self-stops (e.g. ContractViolation)
             if self.processor.stopped():
-                logger.critical("Processor has stopped (likely due to contract violation). Exiting.")
+                logger.critical(
+                    "Processor has stopped (likely due to contract violation). Exiting."
+                )
                 break
 
             if not self.processor.is_alive():

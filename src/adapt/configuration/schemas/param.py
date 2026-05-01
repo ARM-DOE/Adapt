@@ -34,7 +34,9 @@ class DownloaderConfig(AdaptBaseModel):
     poll_interval_sec: int = Field(300, ge=1, description="Polling interval in seconds")
     start_time: str | None = None
     end_time: str | None = None
-    min_file_size: int = Field(1024, ge=1, description="Minimum file size in bytes to consider valid")
+    min_file_size: int = Field(
+        1024, ge=1, description="Minimum file size in bytes to consider valid"
+    )
 
 
 class RegridderConfig(AdaptBaseModel):
@@ -114,7 +116,9 @@ class ProjectorConfig(AdaptBaseModel):
     nan_fill_value: float = 0.0
     flow_params: FlowParamsConfig = Field(default_factory=FlowParamsConfig)
     min_motion_threshold: float = Field(0.5, ge=0)
-    max_flow_magnitude: float = Field(20.0, gt=0, description="Clip flow vectors exceeding this magnitude (pixels/frame)")
+    max_flow_magnitude: float = Field(
+        20.0, gt=0, description="Clip flow vectors exceeding this magnitude (pixels/frame)"
+    )
 
     @field_validator("method", mode="before")
     @classmethod
@@ -149,7 +153,10 @@ class AnalyzerConfig(AdaptBaseModel):
     adjacency_min_touching_boundary_pixels: int = Field(
         1,
         ge=1,
-        description="Min number of touching boundary pixels to count two labels as adjacent in the same scan",
+        description=(
+            "Min number of touching boundary pixels to count two labels "
+            "as adjacent in the same scan"
+        ),
     )
 
 
@@ -163,11 +170,28 @@ class TrackerConfig(AdaptBaseModel):
         width: int = Field(10, ge=1)
         alphabet: Literal["base36_upper"] = "base36_upper"
 
-    match_cost_threshold: float = Field(0.15, ge=0.0, description="Cost below this is forced to 0 before Hungarian (guaranteed match)")
-    keep_cost_threshold: float = Field(1.0, ge=0.0, description="Post-Hungarian: cost <= this confirms CONTINUE, else pair is rejected")
-    unmatch_cost_threshold: float = Field(2.0, ge=0.0, description="Cost above this is forced to dummy_cost before Hungarian (unlikely match)")
-    split_overlap_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Min fraction of projected hull area overlapping born/surviving cell to confirm SPLIT or MERGE")
-    core_reflectivity_threshold: float = Field(40.0, ge=0.0, description="Reflectivity threshold for core area (dBZ)")
+    match_cost_threshold: float = Field(
+        0.15, ge=0.0,
+        description="Cost below this is forced to 0 before Hungarian (guaranteed match)",
+    )
+    keep_cost_threshold: float = Field(
+        1.0, ge=0.0,
+        description="Post-Hungarian: cost <= this confirms CONTINUE, else pair is rejected",
+    )
+    unmatch_cost_threshold: float = Field(
+        2.0, ge=0.0,
+        description="Cost above this is forced to dummy_cost before Hungarian (unlikely match)",
+    )
+    split_overlap_threshold: float = Field(
+        0.8, ge=0.0, le=1.0,
+        description=(
+            "Min fraction of projected hull area overlapping born/surviving cell "
+            "to confirm SPLIT or MERGE"
+        ),
+    )
+    core_reflectivity_threshold: float = Field(
+        40.0, ge=0.0, description="Reflectivity threshold for core area (dBZ)"
+    )
     cell_uid: CellUidConfig = Field(default_factory=CellUidConfig)
 
 

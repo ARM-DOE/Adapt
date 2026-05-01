@@ -19,6 +19,7 @@ used. Any value from the config file can be overridden with CLI flags.
 """
 
 import argparse
+import contextlib
 import os
 import signal
 import sys
@@ -55,10 +56,8 @@ def _write_pid() -> None:
 
 
 def _remove_pid() -> None:
-    try:
+    with contextlib.suppress(Exception):
         _PID_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------

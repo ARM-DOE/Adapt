@@ -289,9 +289,8 @@ class PipelineOrchestrator:
                 break
 
             # 1. Historical completion check (must run before downloader death check)
-            if mode == "historical":
-                if self._check_historical_complete():
-                    break
+            if mode == "historical" and self._check_historical_complete():
+                break
 
             # 2. Check for thread failures or self-stops (e.g. ContractViolation)
             if self.processor.stopped():

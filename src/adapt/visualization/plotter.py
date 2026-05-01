@@ -20,6 +20,8 @@ import pandas as pd
 import xarray as xr
 
 matplotlib.use('Agg')
+import contextlib
+
 import matplotlib.pyplot as plt
 
 try:
@@ -290,7 +292,7 @@ class RadarPlotter:
     
     def _add_colorbar(self, ax: plt.Axes, im: matplotlib.image.AxesImage) -> None:
         """Add colorbar to axis."""
-        cbar = plt.colorbar(im, ax=ax, label='Reflectivity (dBZ)', fraction=0.046, pad=0.04)
+        plt.colorbar(im, ax=ax, label='Reflectivity (dBZ)', fraction=0.046, pad=0.04)
     
     def _plot_heading_yectors(
         self,
@@ -980,7 +982,7 @@ class PlotConsumer(threading.Thread):
     def _process_artifact(self, artifact: dict):
         """Generate plot from artifact."""
         artifact_id = artifact['artifact_id']
-        file_path = Path(artifact['file_path'])
+        Path(artifact['file_path'])
         scan_time_str = artifact.get('scan_time')
 
         try:
@@ -1015,10 +1017,8 @@ class PlotConsumer(threading.Thread):
 
                 # Show live if enabled
                 if self.show_live:
-                    try:
+                    with contextlib.suppress(Exception):
                         plt.pause(0.1)
-                    except Exception:
-                        pass
 
                 # Print table statistics
                 self._print_table_stats()

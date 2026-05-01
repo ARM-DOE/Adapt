@@ -501,10 +501,7 @@ class DataRepository:
         Resolves relative file_path to absolute, aliases item_id → artifact_id,
         and hoists producer from the metadata JSON for backward compatibility.
         """
-        if hasattr(item, 'to_dict'):
-            d = item.to_dict()
-        else:
-            d = dict(item)
+        d = item.to_dict() if hasattr(item, 'to_dict') else dict(item)
         # Resolve relative path stored in catalog to absolute
         rel = d.get("file_path", "")
         if rel and not Path(rel).is_absolute():

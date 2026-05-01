@@ -253,7 +253,7 @@ class RadarProcessor(threading.Thread):
             logger.info(
                 "Processed pair: %d cells | ingest=%.1fs detect=%.1fs project=%.1fs%s",
                 n_cells, ingest_s, detect_s, project_s,
-                " queue=%.1fs" % queue_wait_s if queue_wait_s is not None else "",
+                f" queue={queue_wait_s:.1f}s" if queue_wait_s is not None else "",
             )
 
             # Mark both files as processed

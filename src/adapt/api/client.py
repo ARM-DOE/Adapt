@@ -630,10 +630,7 @@ class DataClient:
             radar = radars[0]
 
         # Convert to string for comparison
-        if isinstance(scan_time, datetime):
-            scan_time_str = scan_time.isoformat()
-        else:
-            scan_time_str = scan_time
+        scan_time_str = scan_time.isoformat() if isinstance(scan_time, datetime) else scan_time
 
         catalog = self._get_radar_catalog(radar)
         conn = catalog._get_connection()

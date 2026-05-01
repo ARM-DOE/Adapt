@@ -166,12 +166,10 @@ if HAS_MPL:
                      lat0=0.0, lon0=0.0):
             self._ltrans = None
             if HAS_PROJ and (lat0 or lon0):
-                try:
+                with contextlib.suppress(Exception):
                     self._ltrans = Transformer.from_crs(
                         f'+proj=aeqd +lat_0={lat0} +lon_0={lon0} +units=m',
                         'EPSG:4326', always_xy=True)
-                except Exception:
-                    pass
             super().__init__(canvas, window, pack_toolbar=pack_toolbar)
 
         def set_message(self, s):
@@ -666,7 +664,7 @@ class AdaptDashboard(tk.Tk):
         self.tv = ttk.Treeview(tv_frame, columns=self._tv_cols,
                                show='headings', height=24)
         widths = [70, 60, 75, 80, 80, 85, 75, 90, 90]
-        for c, w in zip(self._tv_cols, widths):
+        for c, w in zip(self._tv_cols, widths, strict=False):
             hdr = (c.replace('radar_differential_reflectivity_mean', 'ZDR mean')
                     .replace('radar_', '').replace('cell_', '')
                     .replace('_', ' '))
@@ -836,10 +834,8 @@ class AdaptDashboard(tk.Tk):
         # "invalid command name" errors from orphaned scheduled calls.
         self._nc_loop_running = False
         for after_id in self._after_ids:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(after_id)
-            except Exception:
-                pass
         self._after_ids.clear()
 
         # Close matplotlib figures
@@ -1221,10 +1217,8 @@ class AdaptDashboard(tk.Tk):
 
         # Close previous dataset
         if self._current_nc_ds is not None and self._current_nc_ds is not ds:
-            try:
+            with contextlib.suppress(Exception):
                 self._current_nc_ds.close()
-            except Exception:
-                pass
         self._current_nc_ds = ds
         self._cell_contours = {}
         for var in self._hv.values():
@@ -1459,9 +1453,8 @@ class AdaptDashboard(tk.Tk):
 
         if history_df is None or history_df.empty:
             df = self._current_cell_df
-            if df is not None:
-                if cell_uid is not None and 'cell_uid' in df.columns:
-                    history_df = df[df['cell_uid'] == cell_uid].copy()
+            if df is not None and cell_uid is not None and 'cell_uid' in df.columns:
+                history_df = df[df['cell_uid'] == cell_uid].copy()
 
         self._clear_tracking_history()
         self._selected_cell_uid = str(cell_uid) if cell_uid is not None else None
@@ -1504,10 +1497,8 @@ class AdaptDashboard(tk.Tk):
     def _clear_tracking_history(self) -> None:
         if self._track_overlay:
             for artist in self._track_overlay:
-                try:
+                with contextlib.suppress(Exception):
                     artist.remove()
-                except Exception:
-                    pass
             self._track_overlay = None
         self._selected_cell_uid = None
 
@@ -1607,7 +1598,7 @@ class AdaptDashboard(tk.Tk):
         if self._ts_axes is None:
             return
         for ax, (ylabel, title) in zip(self._ts_axes,
-                                        [('km²', 'Area'), ('dBZ', 'Reflectivity'), ('dB', 'ZDR')]):
+                                        [('km²', 'Area'), ('dBZ', 'Reflectivity'), ('dB', 'ZDR')], strict=False):
             ax.cla()
             self._style_ts_ax(ax, ylabel, title)
             ax.text(0.5, 0.5, 'click a cell', transform=ax.transAxes,
@@ -1648,10 +1639,8 @@ class AdaptDashboard(tk.Tk):
             self._canvas_refs = None
             self._hover_canvas = None
         if self._current_nc_ds is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._current_nc_ds.close()
-            except Exception:
-                pass
             self._current_nc_ds = None
         self._cell_contours = {}
         for var in self._hv.values():
@@ -1836,10 +1825,8 @@ class AdaptDashboard(tk.Tk):
         mask = pd.Series(True, index=df.index)
         for col, (lo_v, hi_v) in self._flt.items():
             if col in df.columns:
-                try:
+                with contextlib.suppress(Exception):
                     mask &= df[col].between(float(lo_v.get()), float(hi_v.get()))
-                except Exception:
-                    pass
 
         # Cell UID prefix filter
         pid_prefix = self._cell_uid_filter.get().strip().upper() if self._cell_uid_filter else ''

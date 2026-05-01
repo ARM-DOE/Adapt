@@ -29,6 +29,7 @@ Author: Bhupendra Raut, ANL.
 References: Raut, B. A., Jackson, R., Picel, M., Collis, S. M., Bergemann, M., & Jakob, C. (2021). An adaptive tracking algorithm for convection in simulated and remote sensing data. Journal of Applied Meteorology and Climatology, 60(4), 513-526.
 """
 
+import contextlib
 import hashlib
 import logging
 import string
@@ -449,10 +450,8 @@ class RadarCellTracker:
             tv = tv.reshape(-1)[0]
 
         if hasattr(tv, "item"):
-            try:
+            with contextlib.suppress(Exception):
                 tv = tv.item()
-            except Exception:
-                pass
 
         # Handle cftime.* objects (pandas cannot convert them directly)
         if getattr(type(tv), "__module__", "").startswith("cftime"):
@@ -655,7 +654,7 @@ class RadarCellTracker:
         matched_curr: dict[int, int] = {}   # curr_idx → new curr node_id
         n_continue = 0
 
-        for r, c in zip(row_ind, col_ind):
+        for r, c in zip(row_ind, col_ind, strict=False):
             if r >= n_prev or c >= n_curr:
                 continue  # dummy slot
             if square[r, c] <= self.keep_cost:

@@ -22,6 +22,7 @@ coordinates (latitude, longitude) for flexibility in downstream analysis.
 Author: Bhupendra Raut
 """
 
+import contextlib
 import json
 import logging
 from datetime import UTC
@@ -361,10 +362,8 @@ class RadarCellAnalyzer:
         if isinstance(tv, np.ndarray):
             tv = tv.reshape(-1)[0]
         if hasattr(tv, "item"):
-            try:
+            with contextlib.suppress(Exception):
                 tv = tv.item()
-            except Exception:
-                pass
         if getattr(type(tv), "__module__", "").startswith("cftime"):
             from datetime import datetime
             tv = datetime(

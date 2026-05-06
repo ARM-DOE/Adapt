@@ -3,7 +3,8 @@
 [![CI](https://github.com/ARM-DOE/Adapt/actions/workflows/ci.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions?query=workflow%3ACI)
 [![Codecov](https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov)](https://codecov.io/gh/ARM-DOE/Adapt)
 [![Docs](https://img.shields.io/badge/docs-users-4088b8.svg)](https://arm-doe.github.io/Adapt/)
-[![Downloads](https://img.shields.io/github/downloads/ARM-DOE/Adapt/total?label=downloads)](https://github.com/ARM-DOE/Adapt/releases)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/arm-adapt.svg)](https://pypi.org/project/arm-adapt/)
+[![Conda Downloads](https://anaconda.org/conda-forge/arm-adapt/badges/downloads.svg)](https://anaconda.org/conda-forge/arm-adapt/files)
 [![ARM](https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&colorB=00539c)](https://www.arm.gov/)
 
 **Real-time processing for informed adaptive scanning of ARM weather radar operations and field campaigns.**
@@ -16,18 +17,14 @@ Currently, it ingests NEXRAD Level-II data, performs gridding/segmentation/analy
 
 ## Installation
 
-1. Go to the [releases page](https://github.com/ARM-DOE/Adapt/releases) and download the latest `Source code (tar.gz)` or `Source code (zip)`.
-
-2. Extract and create the environment:
+Create a fresh conda environment (Python 3.13) and install from PyPI:
 
 ```bash
-# extract
-tar -xzf Adapt-<version>.tar.gz
-cd Adapt-<version>
-
-# create environment and install adapt
-mamba env create -f environment.yml
-mamba activate adapt_env
+conda create -n adapt_env python=3.13 -y
+conda activate adapt_env
+python -m pip install --upgrade pip
+pip install arm-adapt
+adapt --help
 ```
 
 ## Quickstart

@@ -19,8 +19,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
           cache: "pip"
+
+      - name: Fetch all history for all tags and branches
+        run: |
+           git fetch --prune
 
       - name: Install doc dependencies
         run: |

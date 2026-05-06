@@ -10,5 +10,11 @@ Subpackages:
 
 Authors: Bhupendra Raut and Sid Gupta
 """
+import importlib.metadata as _importlib_metadata
 
-__version__ = "0.1.0"
+# Get the version
+try:
+    __version__ = _importlib_metadata.version("arm-adapt")
+except _importlib_metadata.PackageNotFoundError:
+    # package is not installed
+    __version__ = "0.0.0"

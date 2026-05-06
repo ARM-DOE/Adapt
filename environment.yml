@@ -2,7 +2,6 @@ name: adapt_env
 channels:
   - conda-forge
 dependencies:
-  - python=3.11
   - numpy
   - xarray
   - pandas
@@ -25,13 +24,12 @@ dependencies:
   - pytest-cov
   - sphinx>=7.0
   - networkx
+  - pyproj
+  - contextily
+  - pyarrow
+  - pydata-sphinx-theme
+  - pydantic
   - pip:
-      - pydantic>=2.0
       - nexradaws
-      - contextily
-      - pyproj
-      - pyarrow
       - sphinx-autodoc-typehints
       - myst-parser>=2.0
-      - pydata-sphinx-theme>=0.15
-      - -e .[dev]

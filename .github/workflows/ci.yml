@@ -4,9 +4,9 @@ on:
   schedule:
     - cron: "0 9 * * *"  # daily at 09Z
   push:
-    branches: [main, devel]
+    branches: [main]
   pull_request:
-    branches: [main, devel]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,6 +15,7 @@ concurrency:
 jobs:
   tests:
     name: ${{ matrix.os }}-py${{ matrix.python-version }}
+    if: github.repository == 'ARM-DOE/Adapt'
     runs-on: ${{ matrix.os }}-latest
     defaults:
       run:
@@ -23,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.13"]
+        python-version: ["3.12", "3.13"]
         os: [ubuntu, macOS]
 
     steps:

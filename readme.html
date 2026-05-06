@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Adapt &#8212; Adapt 0.1.0 documentation</title>
+    <title>Adapt &#8212; Adapt 0.1.1 documentation</title>
   
   
   
@@ -38,7 +38,7 @@
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb" />
 <link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb" />
 
-    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/documentation_options.js?v=a58bc63e"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'readme';</script>
@@ -116,7 +116,7 @@
   
   
   
-    <p class="title logo__title">Adapt 0.1.0 documentation</p>
+    <p class="title logo__title">Adapt 0.1.1 documentation</p>
   
 </a></div>
     
@@ -314,7 +314,8 @@
 <p><a class="reference external" href="https://github.com/ARM-DOE/Adapt/actions?query=workflow%3ACI"><img alt="CI" src="https://github.com/ARM-DOE/Adapt/actions/workflows/ci.yml/badge.svg" /></a>
 <a class="reference external" href="https://codecov.io/gh/ARM-DOE/Adapt"><img alt="Codecov" src="https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov" /></a>
 <a class="reference external" href="https://arm-doe.github.io/Adapt/"><img alt="Docs" src="https://img.shields.io/badge/docs-users-4088b8.svg" /></a>
-<a class="reference external" href="https://github.com/ARM-DOE/Adapt/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/ARM-DOE/Adapt/total?label=downloads" /></a>
+<a class="reference external" href="https://pypi.org/project/arm-adapt/"><img alt="PyPI Downloads" src="https://img.shields.io/pypi/dm/arm-adapt.svg" /></a>
+<a class="reference external" href="https://anaconda.org/conda-forge/arm-adapt/files"><img alt="Conda Downloads" src="https://anaconda.org/conda-forge/arm-adapt/badges/downloads.svg" /></a>
 <a class="reference external" href="https://www.arm.gov/"><img alt="ARM" src="https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&amp;colorB=00539c" /></a></p>
 <p><strong>Real-time processing for informed adaptive scanning of ARM weather radar operations and field campaigns.</strong></p>
 <p><code class="docutils literal notranslate"><span class="pre">Adapt</span></code> is a configuration-driven modular framework for near real-time analysis of convective systems designed to support the adaptive sampling and study of convective storms and their life cycles. The system implements a modular pipeline that ingests radar observations, performs gridding and segmentation to identify convective cells, and maintains their identity through time using tracking. It further derives cell-level properties and motion to characterize storm evolution and generate candidate targets for adaptive radar scanning.</p>
@@ -322,17 +323,12 @@
 <p>Currently, it ingests NEXRAD Level-II data, performs gridding/segmentation/analysis, and writes results for downstream visualization and scientific workflows.</p>
 <section id="installation">
 <h2>Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h2>
-<ol class="arabic simple">
-<li><p>Go to the <a class="reference external" href="https://github.com/ARM-DOE/Adapt/releases">releases page</a> and download the latest <code class="docutils literal notranslate"><span class="pre">Source</span> <span class="pre">code</span> <span class="pre">(tar.gz)</span></code> or <code class="docutils literal notranslate"><span class="pre">Source</span> <span class="pre">code</span> <span class="pre">(zip)</span></code>.</p></li>
-<li><p>Extract and create the environment:</p></li>
-</ol>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># extract</span>
-tar<span class="w"> </span>-xzf<span class="w"> </span>Adapt-&lt;version&gt;.tar.gz
-<span class="nb">cd</span><span class="w"> </span>Adapt-&lt;version&gt;
-
-<span class="c1"># create environment and install adapt</span>
-mamba<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>-f<span class="w"> </span>environment.yml
-mamba<span class="w"> </span>activate<span class="w"> </span>adapt_env
+<p>Create a fresh conda environment (Python 3.13) and install from PyPI:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_env<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
+conda<span class="w"> </span>activate<span class="w"> </span>adapt_env
+python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
+pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
+adapt<span class="w"> </span>--help
 </pre></div>
 </div>
 </section>

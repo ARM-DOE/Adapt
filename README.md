@@ -4,7 +4,6 @@
 [![Codecov](https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov)](https://codecov.io/gh/ARM-DOE/Adapt)
 [![Docs](https://img.shields.io/badge/docs-users-4088b8.svg)](https://arm-doe.github.io/Adapt/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/arm-adapt.svg)](https://pypi.org/project/arm-adapt/)
-[![Conda Downloads](https://anaconda.org/conda-forge/arm-adapt/badges/downloads.svg)](https://anaconda.org/conda-forge/arm-adapt/files)
 [![ARM](https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&colorB=00539c)](https://www.arm.gov/)
 
 **Real-time processing for informed adaptive scanning of ARM weather radar operations and field campaigns.**

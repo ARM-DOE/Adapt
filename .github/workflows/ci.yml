@@ -49,10 +49,6 @@ jobs:
       - name: Install adapt
         run: pip install -e . --no-deps --force-reinstall
 
-      - name: Show environment info
-        run: |
-          mamba list
-          
       - name: Run tests
         run: |
           pytest -m "not integration" \

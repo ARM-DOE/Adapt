@@ -110,11 +110,18 @@ class DataClient:
 
     def _get_radar_catalog(self, radar: str) -> RadarCatalog:
         """Get radar catalog instance."""
-        if radar not in self._radar_catalogs:
+        if radar in self._radar_catalogs:
+            return self._radar_catalogs[radar]
+        # Prevent re-entrance during initialization
+        self._radar_catalogs[radar] = None  # placeholder
+        try:
             radar_dir = self.root_dir / radar
             if not radar_dir.exists():
                 raise FileNotFoundError(f"Radar directory not found: {radar_dir}")
             self._radar_catalogs[radar] = RadarCatalog(radar_dir)
+        except Exception:
+            del self._radar_catalogs[radar]  # cleanup on failure
+            raise
         return self._radar_catalogs[radar]
 
     # =========================================================================

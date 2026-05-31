@@ -2,9 +2,8 @@
 ```
 
 ```{toctree}
-:maxdepth: 1
-:caption: Overview
 :hidden:
+:caption: User Guide
 
 USAGE
 cli_reference
@@ -12,11 +11,26 @@ license
 ```
 
 ```{toctree}
-:maxdepth: 2
-:caption: API Reference
 :hidden:
+:caption: API Reference
 
 api/cli
 api/dashboard
+api/client
 api/modules/index
+```
+
+```{toctree}
+:hidden:
+:caption: Developer Reference
+
+module-developer-guide
+api/internal/index
+```
+
+```{toctree}
+:hidden:
+:caption: Contributing
+
+contributing
 ```

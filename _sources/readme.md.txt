@@ -18,4 +18,5 @@ license
 
 api/cli
 api/dashboard
+api/modules/index
 ```

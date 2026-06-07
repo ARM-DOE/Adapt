@@ -27,7 +27,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
+import xarray as xr
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.contracts import ContractViolation
@@ -38,6 +40,7 @@ from adapt.execution.pipeline_builder import _ensure_modules_registered, resolve
 from adapt.persistence import DataRepository, ProductType
 from adapt.persistence.track_store import TrackStore
 from adapt.persistence.writer import RepositoryWriter
+from adapt.utils.cell_uid_lut import build_cell_uid_lut
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -282,8 +285,7 @@ class RadarProcessor(threading.Thread):
             scan_time = result.get("scan_time") or base_ctx.get("scan_time")
             # Normalize once to tz-aware UTC so persistence (artifact registration),
             # the enrich 3D-grid read, and the enrich module all use one representation.
-            if scan_time is not None and scan_time.tzinfo is None:
-                scan_time = scan_time.replace(tzinfo=UTC)
+            scan_time = self._normalize_scan_time(scan_time)
             elapsed_s = time.perf_counter() - t0
 
             # Register radar location from first scan (idempotent after that)
@@ -384,8 +386,7 @@ class RadarProcessor(threading.Thread):
         assert self.repository is not None
         # The artifact is registered with a tz-aware (UTC) scan_time; normalize the
         # query the same way so the catalog's isoformat comparison matches.
-        if scan_time is not None and scan_time.tzinfo is None:
-            scan_time = scan_time.replace(tzinfo=UTC)
+        scan_time = self._normalize_scan_time(scan_time)
         artifacts = self.repository.query(
             product_type=ProductType.GRIDDED_NC, time_range=(scan_time, scan_time)
         )
@@ -422,6 +423,13 @@ class RadarProcessor(threading.Thread):
 
     # ── Persistence helpers ───────────────────────────────────────────────────
 
+    @staticmethod
+    def _normalize_scan_time(scan_time):
+        """Return a tz-aware (UTC) scan_time so catalog isoformat comparisons match."""
+        if scan_time is not None and scan_time.tzinfo is None:
+            return scan_time.replace(tzinfo=UTC)
+        return scan_time
+
     def _save_analysis_netcdf(self, ds, filepath: str, scan_time) -> str | None:
         """Write the analysis dataset to a NetCDF artifact in the repository."""
         assert self.repository is not None
@@ -456,11 +464,36 @@ class RadarProcessor(threading.Thread):
             logger.warning("Could not save analysis NetCDF: %s", e)
             return None
 
+    @staticmethod
+    def _attach_cell_uid_lut(projected_ds: xr.Dataset, tracked_cells: pd.DataFrame) -> xr.Dataset:
+        """Add a 1D ``cell_uid`` variable mapping each cell_label index to its uid.
+
+        Indexed by ``cell_label`` (0 = background -> "NONE", 1..n = cells), so the
+        2D segmentation's local labels can be resolved to global uids from inside
+        the analysis NetCDF. Returns ``projected_ds`` unchanged when there are no
+        tracked cells.
+        """
+        if tracked_cells is None or tracked_cells.empty:
+            return projected_ds
+        max_label = int(projected_ds["cell_labels"].max())
+        label_to_uid = dict(
+            zip(tracked_cells["cell_label"].astype(int), tracked_cells["cell_uid"], strict=True)
+        )
+        lut = build_cell_uid_lut(label_to_uid, max_label)
+        projected_ds["cell_uid"] = xr.DataArray(
+            lut,
+            dims=["cell_label"],
+            coords={"cell_label": np.arange(max_label + 1)},
+            attrs={
+                "description": "cell_label index -> global cell_uid; index 0 = NONE (background)"
+            },
+        )
+        return projected_ds
+
     def _save_results(self, result: dict, scan_time):
         """Save all pipeline outputs to the repository."""
         assert self.repository is not None
-        if scan_time is not None and scan_time.tzinfo is None:
-            scan_time = scan_time.replace(tzinfo=UTC)
+        scan_time = self._normalize_scan_time(scan_time)
 
         # Register the loader-written 3D gridded NetCDF as a queryable artifact so
         # enrich modules can open it by scan_time. The loader wrote the file; the
@@ -474,17 +507,18 @@ class RadarProcessor(threading.Thread):
                 producer="ingest",
             )
 
-        projected_ds = result.get("projected_ds")
-        if projected_ds is not None:
-            filepath = self._scan_history[-1].get("nexrad_file", "") if self._scan_history else ""
-            self._save_analysis_netcdf(projected_ds, filepath, scan_time)
-
-        writer = RepositoryWriter(self.repository)
-
         cell_stats = result.get("cell_stats")
         cell_adjacency = result.get("cell_adjacency")
         tracked_cells = result.get("tracked_cells")
         cell_events = result.get("cell_events")
+
+        projected_ds = result.get("projected_ds")
+        if projected_ds is not None:
+            projected_ds = self._attach_cell_uid_lut(projected_ds, tracked_cells)
+            filepath = self._scan_history[-1].get("nexrad_file", "") if self._scan_history else ""
+            self._save_analysis_netcdf(projected_ds, filepath, scan_time)
+
+        writer = RepositoryWriter(self.repository)
 
         if cell_stats is not None and not cell_stats.empty:
             writer.write_analysis(df=cell_stats, scan_time=scan_time, producer="analysis")

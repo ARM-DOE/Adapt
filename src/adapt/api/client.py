@@ -277,7 +277,6 @@ class RepositoryClient:
                 run_id=run_id,
                 start_time=start,
                 end_time=end,
-                status="complete",
                 limit=limit,
             )
         except Exception:

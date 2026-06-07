@@ -24,7 +24,9 @@ def temp_dir():
 @pytest.fixture
 def tracker(temp_dir):
     db_path = temp_dir / "tracker.db"
-    return FileProcessingTracker(db_path)
+    t = FileProcessingTracker(db_path)
+    yield t
+    t.close()
 
 
 @pytest.fixture
@@ -69,4 +71,7 @@ def processor_queues():
 def test_repository(temp_dir):
     """DataRepository for processor tests."""
     run_id = DataRepository.generate_run_id("TEST")
-    return DataRepository(run_id=run_id, base_dir=temp_dir, radar="TEST_RADAR")
+    repo = DataRepository(run_id=run_id, base_dir=temp_dir, radar="TEST_RADAR")
+    yield repo
+    repo.close()
+    repo.registry.close()

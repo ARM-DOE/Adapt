@@ -104,7 +104,9 @@ def db_path(tmp_path):
 
 @pytest.fixture
 def store(db_path):
-    return TrackStore(db_path)
+    s = TrackStore(db_path)
+    yield s
+    s.close()
 
 
 def _t(iso: str) -> datetime:

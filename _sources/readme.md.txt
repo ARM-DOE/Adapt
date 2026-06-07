@@ -5,6 +5,7 @@
 :hidden:
 :caption: User Guide
 
+installation
 USAGE
 cli_reference
 license

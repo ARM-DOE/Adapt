@@ -1,0 +1,978 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Adapt Dashboard — Reference &#8212; Adapt 0.1.3 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=0790524f97105ba85085" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=0790524f97105ba85085" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="_static/scripts/fontawesome.js?digest=0790524f97105ba85085"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=0790524f97105ba85085" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=0790524f97105ba85085" />
+
+    <script src="_static/documentation_options.js?v=360bc84d"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'dashboard_reference';</script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  
+    
+    <script src="_static/searchtools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <script src="searchindex.js"></script>
+  
+  </head>
+  <body data-default-mode="">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="readme.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">Adapt 0.1.3 documentation</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="installation.html">
+    Installation
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="USAGE.html">
+    User Guide
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="cli_reference.html">
+    CLI Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="license.html">
+    License
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api/cli.html">
+    Command-Line Interface
+  </a>
+</li>
+
+            <li class="nav-item dropdown">
+                <button class="btn dropdown-toggle nav-item" type="button"
+                data-bs-toggle="dropdown" aria-expanded="false"
+                aria-controls="pst-nav-more-links">
+                    More
+                </button>
+                <ul id="pst-nav-more-links" class="dropdown-menu">
+                    
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="api/dashboard.html">
+    Dashboard (GUI)
+  </a>
+</li>
+
+
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="api/client.html">
+    Repository Client API
+  </a>
+</li>
+
+
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="api/modules/index.html">
+    Processing Modules
+  </a>
+</li>
+
+
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="api/internal/index.html">
+    Internal API Reference
+  </a>
+</li>
+
+
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="contributing.html">
+    Contributing
+  </a>
+</li>
+
+                </ul>
+            </li>
+            
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar hide-on-wide">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="installation.html">
+    Installation
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="USAGE.html">
+    User Guide
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="cli_reference.html">
+    CLI Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="license.html">
+    License
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api/cli.html">
+    Command-Line Interface
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api/dashboard.html">
+    Dashboard (GUI)
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api/client.html">
+    Repository Client API
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api/modules/index.html">
+    Processing Modules
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api/internal/index.html">
+    Internal API Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="contributing.html">
+    Contributing
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
+        
+      </div>
+    
+  </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="readme.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Adapt Dashboard — Reference</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="adapt-dashboard-reference">
+<h1>Adapt Dashboard — Reference<a class="headerlink" href="#adapt-dashboard-reference" title="Link to this heading">#</a></h1>
+<hr class="docutils" />
+<section id="getting-started-first-time-user">
+<h2>Getting started (first-time user)<a class="headerlink" href="#getting-started-first-time-user" title="Link to this heading">#</a></h2>
+<section id="open-the-dashboard">
+<h3>1. Open the dashboard<a class="headerlink" href="#open-the-dashboard" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>dashboard
+</pre></div>
+</div>
+<p>A welcome screen appears with two options.</p>
+</section>
+<hr class="docutils" />
+<section id="a-you-already-have-data-open-an-existing-repository">
+<h3>2a. You already have data — open an existing repository<a class="headerlink" href="#a-you-already-have-data-open-an-existing-repository" title="Link to this heading">#</a></h3>
+<p>Click <strong>Open an existing repository</strong>, browse to the folder that contains
+<code class="docutils literal notranslate"><span class="pre">adapt_registry.db</span></code> (the pipeline output directory), and click <strong>Open Repository</strong>.</p>
+<p>The radar map and scan dropdowns populate automatically. Use the scan selector or
+<strong>Show Latest</strong> to display a scan. Click any cell on the map to plot its track
+history in the time-series panels on the right.</p>
+</section>
+<hr class="docutils" />
+<section id="b-you-are-starting-fresh-run-a-new-pipeline">
+<h3>2b. You are starting fresh — run a new pipeline<a class="headerlink" href="#b-you-are-starting-fresh-run-a-new-pipeline" title="Link to this heading">#</a></h3>
+<p>Click <strong>Start New Pipeline…</strong> (or Pipeline → Start New… from the menu).</p>
+<p>The launch wizard opens:</p>
+<section id="if-you-already-have-a-config-yaml">
+<h4>If you already have a <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code><a class="headerlink" href="#if-you-already-have-a-config-yaml" title="Link to this heading">#</a></h4>
+<ol class="arabic simple">
+<li><p>Select <strong>I have config file</strong>.</p></li>
+<li><p>Click <strong>Browse…</strong> and choose your <code class="docutils literal notranslate"><span class="pre">some_config.yaml</span></code>.</p></li>
+<li><p>Set <strong>Radar ID</strong> (e.g. <code class="docutils literal notranslate"><span class="pre">KLOT</span></code>) and <strong>Mode</strong> (Realtime or Historical).</p></li>
+<li><p>Click <strong>Launch Pipeline</strong>.</p></li>
+</ol>
+</section>
+<section id="if-you-need-to-create-a-config">
+<h4>If you need to create a config<a class="headerlink" href="#if-you-need-to-create-a-config" title="Link to this heading">#</a></h4>
+<ol class="arabic simple">
+<li><p>Select <strong>Create config in directory</strong>.</p></li>
+<li><p>Click <strong>Browse…</strong> and choose the output directory (this becomes the
+repository root and the <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> in the config).</p></li>
+<li><p>Click <strong>Create Config</strong> — Adapt runs <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> and writes a
+<code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> template into that directory if config.yaml already exist, it shows message that config.yaml exists. IF you want new config.yaml rename the old yaml or delet it.</p></li>
+<li><p>when config.yaml is create, a message appears: <em>“config.yaml created … Check config before running
+or click Launch Pipeline.”</em></p></li>
+<li><p>Open the file in any text editor and check all defaults.</p></li>
+<li><p>When ready, click <strong>Launch Pipeline</strong> in the wizard (it stays open).
+You can also skip editing and click <strong>Launch Pipeline</strong> immediately to
+run with the generated defaults.</p></li>
+</ol>
+</section>
+</section>
+<hr class="docutils" />
+<section id="while-the-pipeline-is-running">
+<h3>3. While the pipeline is running<a class="headerlink" href="#while-the-pipeline-is-running" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>The <strong>● Pipeline running</strong> badge appears in the toolbar.</p></li>
+<li><p>Switch to the <strong>Log</strong> tab to see live pipeline output.</p></li>
+<li><p>The radar map updates automatically as new scans arrive (checks every 10 s).</p></li>
+<li><p>The repository is loaded automatically — the radar and run dropdowns
+populate within a few seconds of the first analysis being written.</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="exploring-data">
+<h3>4. Exploring data<a class="headerlink" href="#exploring-data" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Action</p></th>
+<th class="head"><p>Result</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Click a cell on the radar map</p></td>
+<td><p>Plots that cell’s full track history in the three time-series panels</p></td>
+</tr>
+<tr class="row-odd"><td><p>Click again</p></td>
+<td><p>Deselects the cell</p></td>
+</tr>
+<tr class="row-even"><td><p>Up to 7 cells</p></td>
+<td><p>Each gets a distinct colour; the track legend shows at the bottom right</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Show Latest</strong></p></td>
+<td><p>Jumps to the most recent scan; preserves your zoom and selected cells</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Show Loop</strong></p></td>
+<td><p>Animates the last N scans; time-series panels update with each frame, vertical line marks the current scan time</p></td>
+</tr>
+<tr class="row-odd"><td><p>Left / Right arrow keys</p></td>
+<td><p>Step through scans one at a time</p></td>
+</tr>
+<tr class="row-even"><td><p>Space</p></td>
+<td><p>Jump to latest scan</p></td>
+</tr>
+<tr class="row-odd"><td><p>Scroll to zoom, drag to pan</p></td>
+<td><p>Zoom is preserved across scan changes</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<hr class="docutils" />
+<section id="stopping-the-pipeline">
+<h3>5. Stopping the pipeline<a class="headerlink" href="#stopping-the-pipeline" title="Link to this heading">#</a></h3>
+<p>Click <strong>Pipeline → Stop</strong> in the menu or <strong>■ Stop Pipeline</strong> in the Log tab.
+The badge returns to <strong>○ Idle</strong>.</p>
+<p>If you close the dashboard while the pipeline is running, a dialog asks whether
+to stop it. The pipeline can also keep running independently — reopen the
+dashboard and it will offer to reconnect to the running process.</p>
+<hr class="docutils" />
+</section>
+</section>
+<hr class="docutils" />
+<section id="repository-layout-pipeline-writes-this-dashboard-reads-it">
+<h2>Repository layout (pipeline writes this, dashboard reads it)<a class="headerlink" href="#repository-layout-pipeline-writes-this-dashboard-reads-it" title="Link to this heading">#</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>{repo}/
+├── adapt_registry.db          # SQLite: run registry (radars + run metadata)
+├── adapt_registry.db-shm      # SQLite WAL shared-memory file
+├── adapt_registry.db-wal      # SQLite WAL log
+└── {RADAR_ID}/
+    ├── catalog.db             # SQLite: per-radar item registry (WAL mode)
+    └── analysis/
+        ├── {date}/
+        │   └── *_analysis.nc  # NetCDF scan files (one per scan)
+        └── analysis2d_*.parquet  # Cell statistics (parquet, one per run)
+</pre></div>
+</div>
+<p>The dashboard treats this entire tree as read-only. It reads <code class="docutils literal notranslate"><span class="pre">adapt_registry.db</span></code>
+to populate the radar and run dropdowns, reads <code class="docutils literal notranslate"><span class="pre">catalog.db</span></code> via <code class="docutils literal notranslate"><span class="pre">TrackStore</span></code> to
+load track histories, and opens the <code class="docutils literal notranslate"><span class="pre">.nc</span></code> files directly with xarray for
+rendering.</p>
+<p><strong>The dashboard will not touch this directory unless a pipeline is launched from
+the wizard.</strong> Even then, the pipeline process is responsible for all writes — the
+dashboard only redirects the pipeline’s stdout/stderr to <code class="docutils literal notranslate"><span class="pre">~/.adapt/pipeline.log</span></code>.</p>
+</section>
+<hr class="docutils" />
+<section id="the-adapt-directory-dashboard-writes-here">
+<h2>The <code class="docutils literal notranslate"><span class="pre">~/.adapt/</span></code> directory (dashboard writes here)<a class="headerlink" href="#the-adapt-directory-dashboard-writes-here" title="Link to this heading">#</a></h2>
+<p>All dashboard-owned state lives under <code class="docutils literal notranslate"><span class="pre">~/.adapt/</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>~/.adapt/
+├── pipeline.pid        # Written by the pipeline process, deleted on clean exit
+├── pipeline.log        # Pipeline stdout+stderr; overwritten on each new launch
+└── user_dashboard.json # Dashboard preferences (see below)
+</pre></div>
+</div>
+<section id="pipeline-pid">
+<h3><code class="docutils literal notranslate"><span class="pre">pipeline.pid</span></code><a class="headerlink" href="#pipeline-pid" title="Link to this heading">#</a></h3>
+<p>Written by <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">run-nexrad</span></code> at startup via <code class="docutils literal notranslate"><span class="pre">_write_pid()</span></code> in <code class="docutils literal notranslate"><span class="pre">cli.py</span></code>.
+Deleted by the pipeline on clean exit (<code class="docutils literal notranslate"><span class="pre">atexit</span></code> / SIGTERM handler).</p>
+<p>The dashboard uses this file to detect whether a pipeline is alive without owning
+its <code class="docutils literal notranslate"><span class="pre">subprocess.Popen</span></code> handle — for example, after a GUI restart. The check is:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>file exists  →  read PID  →  os.kill(pid, 0)  →  ProcessLookupError = dead
+</pre></div>
+</div>
+<p>If <code class="docutils literal notranslate"><span class="pre">os.kill</span></code> raises <code class="docutils literal notranslate"><span class="pre">ProcessLookupError</span></code> the dashboard deletes the stale file and
+reports idle. If it raises <code class="docutils literal notranslate"><span class="pre">PermissionError</span></code> the process exists but is owned by a
+different user — reported as running.</p>
+</section>
+<section id="pipeline-log">
+<h3><code class="docutils literal notranslate"><span class="pre">pipeline.log</span></code><a class="headerlink" href="#pipeline-log" title="Link to this heading">#</a></h3>
+<p>Created (or overwritten) by the dashboard when it launches a pipeline. The file
+is opened in line-buffered mode and passed directly as the subprocess <code class="docutils literal notranslate"><span class="pre">stdout</span></code>
+handle, so all pipeline output (including stderr, which is redirected to stdout)
+lands here in real time.</p>
+<p>A daemon thread (<code class="docutils literal notranslate"><span class="pre">LogTail</span></code>) tails this file while the pipeline is running.
+On reconnect after a GUI restart the last 200 lines are replayed into the Log tab.
+The log is not rotated — it is always overwritten at the start of each new run.</p>
+</section>
+<section id="user-dashboard-json">
+<h3><code class="docutils literal notranslate"><span class="pre">user_dashboard.json</span></code><a class="headerlink" href="#user-dashboard-json" title="Link to this heading">#</a></h3>
+<p>Single JSON file that stores two independent sections:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;recent_repos&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;/path/to/most-recent-repo&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;/path/to/older-repo&quot;</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;configs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;my_plot_setup&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;another_preset&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><strong><code class="docutils literal notranslate"><span class="pre">recent_repos</span></code></strong> — up to 5 most recently opened repository paths, most recent
+first. Updated whenever the user opens a repository via File &gt; Open or through
+the wizard. Loaded on startup so the dashboard auto-connects to the last-used
+repository without prompting.</p>
+<p><strong><code class="docutils literal notranslate"><span class="pre">configs</span></code></strong> — named snapshots of the plot configuration (see below). Saved via
+Config &gt; Save Config As…. Loaded via Config &gt; Load Config.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="two-separate-config-concerns">
+<h2>Two separate config concerns<a class="headerlink" href="#two-separate-config-concerns" title="Link to this heading">#</a></h2>
+<p>These are completely different files with completely different purposes. Keep them
+mentally separate.</p>
+<section id="pipeline-config-config-yaml-in-the-workspace">
+<h3>1. Pipeline config — <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> (in the workspace)<a class="headerlink" href="#pipeline-config-config-yaml-in-the-workspace" title="Link to this heading">#</a></h3>
+<p>Owned and interpreted by <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">run-nexrad</span></code>. The dashboard <strong>never creates or
+modifies it directly</strong>. Its location is inside the workspace (repository
+directory), alongside the pipeline output.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># Typical config.yaml keys</span>
+<span class="nt">radar</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KLOT</span>
+<span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">realtime</span>
+<span class="nt">base_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/radar_output</span>
+<span class="nt">grid_shape</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">41</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">301</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">301</span><span class="p p-Indicator">]</span>
+<span class="nt">threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40</span>
+<span class="nn">...</span>
+</pre></div>
+</div>
+<p>To create a template: <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span> <span class="pre">/path/to/workspace/config.yaml</span></code></p>
+<p>The wizard checks whether <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> is present before launching. If it is
+absent it runs <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> to generate a template there, shows the path, and
+<strong>stops</strong>. The user must open the file, set <code class="docutils literal notranslate"><span class="pre">radar</span></code> and <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> at minimum,
+then click Launch again. The dashboard never auto-launches with an unreviewed
+config.</p>
+</section>
+<section id="dashboard-visualization-config-in-adapt-user-dashboard-json">
+<h3>2. Dashboard visualization config (in <code class="docutils literal notranslate"><span class="pre">~/.adapt/user_dashboard.json</span></code>)<a class="headerlink" href="#dashboard-visualization-config-in-adapt-user-dashboard-json" title="Link to this heading">#</a></h3>
+<p>Owned entirely by the dashboard. Has nothing to do with the pipeline.</p>
+<p>The bundled defaults live in the source tree at:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">src</span><span class="o">/</span><span class="n">adapt</span><span class="o">/</span><span class="n">consumers</span><span class="o">/</span><span class="n">live</span><span class="o">/</span><span class="n">dashboard_default_config</span><span class="o">.</span><span class="n">json</span>
+</pre></div>
+</div>
+<p>This file is read at startup and never modified. It defines:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Key</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">colors</span></code></p></td>
+<td><p>7 hex colors for multi-cell track selection</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">plot_groups</span></code></p></td>
+<td><p>Variable → axis mapping for the three time-series panels</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">plot_assignments</span></code></p></td>
+<td><p>Which three groups are shown (<code class="docutils literal notranslate"><span class="pre">[&quot;Area&quot;,</span> <span class="pre">&quot;Reflectivity&quot;,</span> <span class="pre">&quot;ZDR&quot;]</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">overflow_action</span></code></p></td>
+<td><p>What to do when more than 7 cells are selected</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">plot_groups</span></code> structure:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="nt">&quot;Area&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;variables&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;cell_area_sqkm&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;area_40dbz_km2&quot;</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;styles&quot;</span><span class="p">:</span><span class="w">    </span><span class="p">[</span><span class="s2">&quot;solid&quot;</span><span class="p">,</span><span class="w">          </span><span class="s2">&quot;dashed&quot;</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w">    </span><span class="p">[</span><span class="s2">&quot;Cell area (km²)&quot;</span><span class="p">,</span><span class="s2">&quot;Core area (km²)&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The axis title is built as a compact single line:
+<code class="docutils literal notranslate"><span class="pre">&quot;Area</span>&#160;&#160; <span class="pre">─</span> <span class="pre">Cell</span> <span class="pre">area</span> <span class="pre">(km²)</span>&#160;&#160; <span class="pre">--</span> <span class="pre">Core</span> <span class="pre">area</span> <span class="pre">(km²)&quot;</span></code></p>
+<p>Named snapshots of this config can be saved via Config &gt; Save Config As… and
+are stored in <code class="docutils literal notranslate"><span class="pre">~/.adapt/user_dashboard.json</span></code> under the <code class="docutils literal notranslate"><span class="pre">configs</span></code> key. Loading
+a snapshot replaces the in-memory state; the bundled defaults are unaffected.</p>
+<p><strong>Hard-coded constants</strong> (not in either config file):</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Setting</p></th>
+<th class="head"><p>Value</p></th>
+<th class="head"><p>Location</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Auto-refresh interval</p></td>
+<td><p>10 s</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">POLL_MS</span></code> in <code class="docutils literal notranslate"><span class="pre">dashboard.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Log buffer (max lines)</p></td>
+<td><p>500</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">LOG_MAX</span></code> in <code class="docutils literal notranslate"><span class="pre">dashboard.py</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>PID file path</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">~/.adapt/pipeline.pid</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">_utils.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Log file path</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">~/.adapt/pipeline.log</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dashboard.py</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>User config path</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">~/.adapt/user_dashboard.json</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">_config.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Max recent repos</p></td>
+<td><p>5</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">_config.py</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="pipeline-health-monitoring">
+<h2>Pipeline health monitoring<a class="headerlink" href="#pipeline-health-monitoring" title="Link to this heading">#</a></h2>
+<p>The dashboard tracks pipeline state through three independent mechanisms, active
+simultaneously:</p>
+<section id="subprocess-popen-handle-self-proc">
+<h3>1. <code class="docutils literal notranslate"><span class="pre">subprocess.Popen</span></code> handle (<code class="docutils literal notranslate"><span class="pre">self._proc</span></code>)<a class="headerlink" href="#subprocess-popen-handle-self-proc" title="Link to this heading">#</a></h3>
+<p>When the dashboard launches the pipeline itself it holds a <code class="docutils literal notranslate"><span class="pre">Popen</span></code> object.
+A dedicated daemon thread (<code class="docutils literal notranslate"><span class="pre">ProcWatcher</span></code>) calls <code class="docutils literal notranslate"><span class="pre">proc.wait()</span></code>, which blocks
+until the process exits. When it unblocks it fires <code class="docutils literal notranslate"><span class="pre">_on_proc_ended()</span></code> on the
+main thread via <code class="docutils literal notranslate"><span class="pre">self.after(0,</span> <span class="pre">...)</span></code>. This gives near-instant death detection
+(typically &lt; 1 s) with no polling.</p>
+</section>
+<section id="pid-file-polling-external-reconnect-case">
+<h3>2. PID file polling (external / reconnect case)<a class="headerlink" href="#pid-file-polling-external-reconnect-case" title="Link to this heading">#</a></h3>
+<p>When the dashboard restarts and finds <code class="docutils literal notranslate"><span class="pre">pipeline.pid</span></code> pointing to a live process
+it has no <code class="docutils literal notranslate"><span class="pre">Popen</span></code> handle. After the user accepts the reconnect offer the dashboard
+polls <code class="docutils literal notranslate"><span class="pre">_pipeline_running()</span></code> every 2 s via <code class="docutils literal notranslate"><span class="pre">_poll_external_pid()</span></code>. This is slower
+than the watcher thread but sufficient for the reconnect scenario.</p>
+</section>
+<section id="pipeline-running-guard">
+<h3>3. <code class="docutils literal notranslate"><span class="pre">_pipeline_running()</span></code> guard<a class="headerlink" href="#pipeline-running-guard" title="Link to this heading">#</a></h3>
+<p>Every auto-refresh cycle (<code class="docutils literal notranslate"><span class="pre">_refresh_all</span></code>, every 10 s) calls <code class="docutils literal notranslate"><span class="pre">_pipeline_running()</span></code>
+to update the status bar and badge. This acts as a fallback for any state that
+slipped through mechanisms 1 or 2.</p>
+</section>
+<section id="badge-states">
+<h3>Badge states<a class="headerlink" href="#badge-states" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Badge text</p></th>
+<th class="head"><p>Colour</p></th>
+<th class="head"><p>Meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">●</span> <span class="pre">Pipeline</span> <span class="pre">running</span></code></p></td>
+<td><p>Green</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Popen</span></code> alive or PID file points to live process</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">○</span> <span class="pre">Idle</span></code></p></td>
+<td><p>Gray</p></td>
+<td><p>No live process found</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="what-happens-on-clean-pipeline-exit">
+<h3>What happens on clean pipeline exit<a class="headerlink" href="#what-happens-on-clean-pipeline-exit" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Pipeline deletes <code class="docutils literal notranslate"><span class="pre">pipeline.pid</span></code> and exits (return code 0)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ProcWatcher</span></code> thread unblocks from <code class="docutils literal notranslate"><span class="pre">proc.wait()</span></code></p></li>
+<li><p>Log file handle is closed</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_on_proc_ended()</span></code> is called on the main thread</p></li>
+<li><p>Badge → <code class="docutils literal notranslate"><span class="pre">○</span> <span class="pre">Idle</span></code>, status bar shows exit code</p></li>
+</ol>
+</section>
+<section id="what-happens-on-crash-sigkill">
+<h3>What happens on crash / SIGKILL<a class="headerlink" href="#what-happens-on-crash-sigkill" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Process dies; <code class="docutils literal notranslate"><span class="pre">pipeline.pid</span></code> is not deleted (atexit handler did not run)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ProcWatcher</span></code> unblocks from <code class="docutils literal notranslate"><span class="pre">proc.wait()</span></code> (same as clean exit)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_on_proc_ended()</span></code> fires; badge → <code class="docutils literal notranslate"><span class="pre">○</span> <span class="pre">Idle</span></code></p></li>
+<li><p>Stale <code class="docutils literal notranslate"><span class="pre">pipeline.pid</span></code> remains; next <code class="docutils literal notranslate"><span class="pre">_pipeline_running()</span></code> call detects
+<code class="docutils literal notranslate"><span class="pre">ProcessLookupError</span></code> and deletes it automatically</p></li>
+</ol>
+</section>
+</section>
+<hr class="docutils" />
+<section id="auto-refresh-and-data-loading">
+<h2>Auto-refresh and data loading<a class="headerlink" href="#auto-refresh-and-data-loading" title="Link to this heading">#</a></h2>
+<p>The dashboard auto-refreshes every 10 s (<code class="docutils literal notranslate"><span class="pre">POLL_MS</span></code>). Each cycle:</p>
+<ol class="arabic simple">
+<li><p>Calls <code class="docutils literal notranslate"><span class="pre">_get_nc_files(repo,</span> <span class="pre">radar)</span></code> — filesystem glob for <code class="docutils literal notranslate"><span class="pre">*_analysis.nc</span></code></p></li>
+<li><p>Updates the scan selector dropdown</p></li>
+<li><p>If a new NC file appeared since the last render → re-renders in place
+(reuses the existing canvas, preserves zoom and cell selection)</p></li>
+<li><p>Updates the status bar: scan count, pipeline state</p></li>
+<li><p>Flushes the Log tab if it is visible</p></li>
+</ol>
+<p>Data is never pre-fetched. Each scan is opened with <code class="docutils literal notranslate"><span class="pre">xr.open_dataset()</span></code> on
+demand. Cell statistics are loaded once per run via <code class="docutils literal notranslate"><span class="pre">_load_cells_data()</span></code> and
+cached in <code class="docutils literal notranslate"><span class="pre">self._current_cell_df</span></code>.</p>
+</section>
+<hr class="docutils" />
+<section id="module-layout">
+<h2>Module layout<a class="headerlink" href="#module-layout" title="Link to this heading">#</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>src/adapt/consumers/live/
+├── dashboard.py                  # Main Tk window; all UI logic
+├── _config.py                    # ~/.adapt/user_dashboard.json I/O only
+├── _utils.py                     # Pure helpers; PID file logic; no Tk
+├── _widgets.py                   # Custom Tk widgets (_CompactToolbar, _RangeSlider)
+├── _timeseries.py                # matplotlib time-series helpers; no Tk
+├── _renderer.py                  # RenderConfig dataclass; add_basemap()
+└── dashboard_default_config.json # Bundled default plot configuration
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">dashboard.py</span></code> is the only file that imports Tk. All other modules are pure
+functions or dataclasses and are unit-tested without a display.</p>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#getting-started-first-time-user">Getting started (first-time user)</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#open-the-dashboard">1. Open the dashboard</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#a-you-already-have-data-open-an-existing-repository">2a. You already have data — open an existing repository</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#b-you-are-starting-fresh-run-a-new-pipeline">2b. You are starting fresh — run a new pipeline</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#if-you-already-have-a-config-yaml">If you already have a <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#if-you-need-to-create-a-config">If you need to create a config</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#while-the-pipeline-is-running">3. While the pipeline is running</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#exploring-data">4. Exploring data</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#stopping-the-pipeline">5. Stopping the pipeline</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#repository-layout-pipeline-writes-this-dashboard-reads-it">Repository layout (pipeline writes this, dashboard reads it)</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-adapt-directory-dashboard-writes-here">The <code class="docutils literal notranslate"><span class="pre">~/.adapt/</span></code> directory (dashboard writes here)</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline-pid"><code class="docutils literal notranslate"><span class="pre">pipeline.pid</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline-log"><code class="docutils literal notranslate"><span class="pre">pipeline.log</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#user-dashboard-json"><code class="docutils literal notranslate"><span class="pre">user_dashboard.json</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#two-separate-config-concerns">Two separate config concerns</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline-config-config-yaml-in-the-workspace">1. Pipeline config — <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> (in the workspace)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dashboard-visualization-config-in-adapt-user-dashboard-json">2. Dashboard visualization config (in <code class="docutils literal notranslate"><span class="pre">~/.adapt/user_dashboard.json</span></code>)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline-health-monitoring">Pipeline health monitoring</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#subprocess-popen-handle-self-proc">1. <code class="docutils literal notranslate"><span class="pre">subprocess.Popen</span></code> handle (<code class="docutils literal notranslate"><span class="pre">self._proc</span></code>)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pid-file-polling-external-reconnect-case">2. PID file polling (external / reconnect case)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline-running-guard">3. <code class="docutils literal notranslate"><span class="pre">_pipeline_running()</span></code> guard</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#badge-states">Badge states</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-happens-on-clean-pipeline-exit">What happens on clean pipeline exit</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-happens-on-crash-sigkill">What happens on crash / SIGKILL</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#auto-refresh-and-data-loading">Auto-refresh and data loading</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-layout">Module layout</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="_sources/dashboard_reference.md.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=0790524f97105ba85085"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=0790524f97105ba85085"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2026, UChicago Argonne, LLC.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.18.0.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>

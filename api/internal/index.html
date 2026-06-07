@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Analysis &#8212; Adapt 0.1.3 documentation</title>
+    <title>Internal API Reference &#8212; Adapt 0.1.3 documentation</title>
   
   
   
@@ -41,12 +41,12 @@
     <script src="../../_static/documentation_options.js?v=360bc84d"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/modules/analysis';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/internal/index';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="Tracking" href="tracking.html" />
-    <link rel="prev" title="Projection" href="projection.html" />
+    <link rel="next" title="Runtime" href="runtime.html" />
+    <link rel="prev" title="Tracking" href="../modules/tracking.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -187,15 +187,15 @@
 </li>
 
 
-<li class=" current active">
-  <a class="nav-link dropdown-item nav-internal" href="index.html">
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="../modules/index.html">
     Processing Modules
   </a>
 </li>
 
 
-<li class=" ">
-  <a class="nav-link dropdown-item nav-internal" href="../internal/index.html">
+<li class=" current active">
+  <a class="nav-link dropdown-item nav-internal" href="#">
     Internal API Reference
   </a>
 </li>
@@ -339,15 +339,15 @@
 </li>
 
 
-<li class="nav-item current active">
-  <a class="nav-link nav-internal" href="index.html">
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../modules/index.html">
     Processing Modules
   </a>
 </li>
 
 
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="../internal/index.html">
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#">
     Internal API Reference
   </a>
 </li>
@@ -400,13 +400,14 @@
 <nav class="bd-docs-nav bd-links"
      aria-label="Section Navigation">
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
-  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="acquisition.html">Acquisition</a></li>
-<li class="toctree-l1"><a class="reference internal" href="ingest.html">Ingest</a></li>
-<li class="toctree-l1"><a class="reference internal" href="detection.html">Detection</a></li>
-<li class="toctree-l1"><a class="reference internal" href="projection.html">Projection</a></li>
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">Analysis</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tracking.html">Tracking</a></li>
+  <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="runtime.html">Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="persistence.html">Persistence</a></li>
+<li class="toctree-l1"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contracts.html">Contracts</a></li>
+<li class="toctree-l1"><a class="reference internal" href="execution.html">Execution Graph</a></li>
+<li class="toctree-l1"><a class="reference internal" href="utils.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visualization.html">Visualization</a></li>
 </ul>
 </div>
 </nav></div>
@@ -447,10 +448,7 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    
-    <li class="breadcrumb-item"><a href="index.html" class="nav-link">Processing Modules</a></li>
-    
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Analysis</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Internal API Reference</span></li>
   </ul>
 </nav>
 </div>
@@ -467,10 +465,21 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="analysis">
-<h1>Analysis<a class="headerlink" href="#analysis" title="Link to this heading">#</a></h1>
-<p>Computes a complete physical description for every detected cell: geometry,
-radar statistics, motion vectors, and projected future positions.</p>
+  <section id="internal-api-reference">
+<h1>Internal API Reference<a class="headerlink" href="#internal-api-reference" title="Link to this heading">#</a></h1>
+<p>Internal subsystems used by the pipeline runtime. Not required for pipeline
+users; essential for contributors and module authors.</p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="runtime.html">Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="persistence.html">Persistence</a></li>
+<li class="toctree-l1"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contracts.html">Contracts</a></li>
+<li class="toctree-l1"><a class="reference internal" href="execution.html">Execution Graph</a></li>
+<li class="toctree-l1"><a class="reference internal" href="utils.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visualization.html">Visualization</a></li>
+</ul>
+</div>
 </section>
 
 
@@ -484,20 +493,20 @@ radar statistics, motion vectors, and projected future positions.</p>
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="projection.html"
+       href="../modules/tracking.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Projection</p>
+        <p class="prev-next-title">Tracking</p>
       </div>
     </a>
     <a class="right-next"
-       href="tracking.html"
+       href="runtime.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Tracking</p>
+        <p class="prev-next-title">Runtime</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -515,7 +524,7 @@ radar statistics, motion vectors, and projected future positions.</p>
   <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
-    <a href="../../_sources/api/modules/analysis.rst.txt">
+    <a href="../../_sources/api/internal/index.rst.txt">
       <i class="fa-solid fa-file-lines"></i> Show Source
     </a>
   </div>

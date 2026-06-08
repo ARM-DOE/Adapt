@@ -1,0 +1,11 @@
+# Default post-process (repository enrichment) module sequence.
+# Each entry is a Python module path. Importing it triggers registry.register()
+# for the BaseModule subclass it contains (pipeline_phase = POSTPROCESS_PHASE).
+#
+# These modules are run ONLY by the PostProcessor (`adapt postprocess`), never by
+# the live pipeline. To add a post-process module: write the module class and add
+# its dotted import path here — no CLI or framework code changes required.
+#
+postprocess:
+  modules:
+    - adapt.execution.nodes.lma

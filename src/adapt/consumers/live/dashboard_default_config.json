@@ -33,6 +33,11 @@
       "variables": ["cell_top_m", "cell_eth20_top_max"],
       "styles": ["solid", "dashed"],
       "labels": ["Echo top (m)", "20 dBZ top (m)"]
+    },
+    "Lightning": {
+      "variables": ["flash_count", "source_count"],
+      "styles": ["solid", "dashed"],
+      "labels": ["Flashes/min", "Sources/min"]
     }
   },
   "plot_assignments": ["Area", "Reflectivity", "ZDR"],

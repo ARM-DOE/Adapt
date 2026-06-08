@@ -361,6 +361,35 @@ class TestTrackEvents:
         assert isinstance(df, pd.DataFrame)
 
 
+class TestTrackLightning:
+    def _add_lma_table(self, repo_root):
+        catalog_path = repo_root / _RADAR / "catalog.db"
+        conn = sqlite3.connect(str(catalog_path))
+        conn.execute(
+            "CREATE TABLE lma_cell_stats (run_id TEXT, cell_uid TEXT, time_bin TEXT, "
+            "flash_count INTEGER, source_count INTEGER, PRIMARY KEY (cell_uid, time_bin))"
+        )
+        conn.execute(
+            "INSERT INTO lma_cell_stats VALUES (?,?,?,?,?)",
+            (_RUN_ID, _UID_A, "2024-01-01T12:00:00Z", 5, 50),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_track_lightning_returns_rows(self, repo_root):
+        self._add_lma_table(repo_root)
+        client = RepositoryClient(repo_root)
+        try:
+            df = client.track_lightning(_RUN_ID, _UID_A, radar=_RADAR)
+        finally:
+            client.close()
+        assert list(df["flash_count"]) == [5]
+
+    def test_track_lightning_empty_without_table(self, client):
+        df = client.track_lightning(_RUN_ID, _UID_A, radar=_RADAR)
+        assert df.empty
+
+
 # ---------------------------------------------------------------------------
 # Tests: annotate() and annotations()
 # ---------------------------------------------------------------------------

@@ -200,6 +200,15 @@ class RepositoryClient:
         radar = self._resolve_radar(radar)
         return self._track_store(radar).get_cell_events(run_id, cell_uid)
 
+    def track_lightning(self, run_id: str, cell_uid: str, radar: str | None = None) -> pd.DataFrame:
+        """Return LMA lightning stats (lma_cell_stats) for one track.
+
+        Empty DataFrame when the LMA post-processor has not run for this
+        repository (the extension table is absent).
+        """
+        radar = self._resolve_radar(radar)
+        return self._track_store(radar).get_track_lightning(run_id, cell_uid)
+
     # =========================================================================
     # Selection
     # =========================================================================

@@ -138,6 +138,10 @@ _VAR_LABELS = {
 # enrichment table — empty unless that opt-in module ran (see _volume_stats).
 _VOLUME_STATS_PREFIXES = ("cell_top", "cell_base", "cell_depth", "cell_volume", "cell_eth", "vol_")
 
+# Plot-group variables with these prefixes come from the lma_cell_stats extension
+# table — empty unless `adapt postprocess --module lma` ran (see _lightning).
+_LIGHTNING_PREFIXES = ("flash_", "source_")
+
 
 from adapt.consumers.live._config import (  # noqa: E402, I001
     _list_user_configs,
@@ -148,6 +152,7 @@ from adapt.consumers.live._config import (  # noqa: E402, I001
     _save_user_config,
 )
 from adapt.consumers.live._renderer import add_basemap as _add_basemap_fn  # noqa: E402
+from adapt.consumers.live._lightning import merge_lightning as _merge_lightning_fn  # noqa: E402
 from adapt.consumers.live._volume_stats import (  # noqa: E402
     load_track_volume_stats as _load_track_volume_stats_fn,
     merge_volume_stats as _merge_volume_stats_fn,
@@ -2406,6 +2411,16 @@ class AdaptDashboard(tk.Tk):
             else None
         )
 
+        # Lightning columns come from the lma_cell_stats extension table, read
+        # only through the public API (RepositoryClient). Build the client once
+        # per refresh and only when a selected group needs lightning.
+        needs_lightning = any(
+            str(v).startswith(_LIGHTNING_PREFIXES)
+            for g in group_names
+            for v in self._cfg.get("plot_groups", {}).get(g, {}).get("variables", [])
+        )
+        lightning_client = None
+
         for uid, slot in self._selected_cells.items():
             color = self._color_slots[slot % len(self._color_slots)]
             history_df = None
@@ -2430,6 +2445,18 @@ class AdaptDashboard(tk.Tk):
             if needed_vars - set(track_df.columns) and self._current_run_id:
                 vol_df = _load_track_volume_stats_fn(db_path, self._current_run_id, uid)
                 track_df = _merge_volume_stats_fn(track_df, vol_df)
+                if needs_lightning:
+                    try:
+                        if lightning_client is None:
+                            from adapt.api.client import RepositoryClient
+
+                            lightning_client = RepositoryClient(repo)
+                        lma_df = lightning_client.track_lightning(
+                            self._current_run_id, uid, radar
+                        )
+                        track_df = _merge_lightning_fn(track_df, lma_df)
+                    except Exception:
+                        logger.exception("Failed to load lightning for %s", uid)
             t = pd.to_datetime(track_df["scan_time"], utc=True)
 
             for ax, group_name in zip(axes, group_names, strict=False):
@@ -2451,18 +2478,26 @@ class AdaptDashboard(tk.Tk):
                         label=f"{uid[:4]} {label}",
                     )
 
+        if lightning_client is not None:
+            with contextlib.suppress(Exception):
+                lightning_client.close()
+
         for ax, group_name in zip(axes, group_names, strict=False):
             group = self._cfg.get("plot_groups", {}).get(group_name, {})
             rich_title = _build_ts_title_fn(group_name, group)
             self._style_ts_ax(ax, "", rich_title)
             if not ax.get_lines():
-                needs_vol = any(
-                    v.startswith(_VOLUME_STATS_PREFIXES) for v in group.get("variables", [])
-                )
+                group_vars = group.get("variables", [])
+                if any(v.startswith(_LIGHTNING_PREFIXES) for v in group_vars):
+                    msg = "no data — run lma postprocess"
+                elif any(v.startswith(_VOLUME_STATS_PREFIXES) for v in group_vars):
+                    msg = "no data — enable cell_volume_stats"
+                else:
+                    msg = "no data"
                 ax.text(
                     0.5,
                     0.5,
-                    "no data — enable cell_volume_stats" if needs_vol else "no data",
+                    msg,
                     transform=ax.transAxes,
                     ha="center",
                     va="center",

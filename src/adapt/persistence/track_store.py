@@ -233,6 +233,26 @@ class TrackStore:
             ).fetchall()
         return pd.DataFrame([dict(r) for r in rows])
 
+    def get_track_lightning(self, run_id: str, cell_uid: str) -> pd.DataFrame:
+        """Return ``lma_cell_stats`` rows for one track, ordered by ``time_bin``.
+
+        The lma_cell_stats table is an opt-in extension written by the LMA
+        post-processor. Returns an empty DataFrame when that table is absent
+        (lma never ran), so callers degrade to "no data" rather than erroring.
+        """
+        conn = self._connect()
+        with self._lock:
+            exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='lma_cell_stats'"
+            ).fetchone()
+            if exists is None:
+                return pd.DataFrame()
+            rows = conn.execute(
+                "SELECT * FROM lma_cell_stats WHERE run_id=? AND cell_uid=? ORDER BY time_bin",
+                (run_id, cell_uid),
+            ).fetchall()
+        return pd.DataFrame([dict(r) for r in rows])
+
     def get_cell_events(self, run_id: str, cell_uid: str | None = None) -> pd.DataFrame:
         conn = self._connect()
         with self._lock:

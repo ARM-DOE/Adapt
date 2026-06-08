@@ -52,6 +52,19 @@ def test_load_default_config_plot_groups_contains_required_groups():
         assert "labels" in groups[name]
 
 
+def test_load_default_config_has_lightning_group():
+    """A selectable Lightning group must source from lma_cell_stats columns."""
+    from adapt.consumers.live._config import _load_default_config
+
+    cfg = _load_default_config()
+    groups = cfg["plot_groups"]
+
+    assert "Lightning" in groups
+    assert set(groups["Lightning"]["variables"]) == {"flash_count", "source_count"}
+    assert len(groups["Lightning"]["styles"]) == len(groups["Lightning"]["variables"])
+    assert len(groups["Lightning"]["labels"]) == len(groups["Lightning"]["variables"])
+
+
 def test_load_default_config_plot_assignments_has_three_entries():
     """plot_assignments must list exactly 3 group names (one per timeline plot slot)."""
     from adapt.consumers.live._config import _load_default_config

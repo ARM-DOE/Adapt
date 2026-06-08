@@ -14,6 +14,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, ClassVar
 
+# Pipeline phase reserved for out-of-band repository enrichment run by the
+# PostProcessor (never by the live RadarProcessor, which only knows phases 0–3).
+# A module with this phase is selected exclusively by the PostProcessor.
+POSTPROCESS_PHASE = 4
+
 
 class BaseModule(ABC):
     """Abstract base for all Adapt execution nodes.
@@ -57,6 +62,10 @@ class BaseModule(ABC):
     pipeline_phase: ClassVar[int] = 0
     config_class: ClassVar[type | None] = None
     output_table: ClassVar[Any | None] = None
+    # Multiple extension tables: maps an output context key -> OutputTableSpec.
+    # Used by modules that emit more than one table (e.g. lma). When set it
+    # supersedes ``output_table``; the single-table form remains for the common case.
+    output_tables: ClassVar[dict[str, Any]] = {}
     injected_global_fields: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod

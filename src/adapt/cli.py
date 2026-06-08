@@ -352,6 +352,79 @@ def _dashboard_cmd(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sub-command: postprocess  (repository enrichment)
+# ---------------------------------------------------------------------------
+
+
+def _build_postprocess_parser(sub: argparse.ArgumentParser) -> None:
+    sub.add_argument(
+        "--repository",
+        default=".",
+        help="Path to an existing Adapt repository (default: current directory).",
+    )
+    sub.add_argument(
+        "--module",
+        nargs="+",
+        default=None,
+        help="Post-process module name(s) to run, e.g. --module lma. Accepts a list.",
+    )
+    sub.add_argument(
+        "--input-dir",
+        dest="input_dir",
+        default=None,
+        help="Input directory for the selected module(s) (e.g. LMA ASCII files).",
+    )
+    sub.add_argument("--config", default=None, help="Optional YAML config file.")
+    sub.add_argument("-v", "--verbose", action="store_true", help="Verbose logging.")
+
+
+def _open_repository(repo_root: str, config_path: str | None):
+    """Discover the latest run in an existing repository and load its config.
+
+    Returns ``(DataRepository, InternalConfig)``. Reuses the existing root
+    registry for run/radar discovery and the single ``init_runtime_config``
+    entrypoint (continuation fast-path) to reload the saved runtime config.
+    """
+    from types import SimpleNamespace
+
+    from adapt.configuration.schemas.initialization import init_runtime_config
+    from adapt.persistence import DataRepository
+    from adapt.persistence.registry import RepositoryRegistry
+
+    root = Path(repo_root).resolve()
+    run = RepositoryRegistry.get_instance(root).get_latest_run()
+    if run is None:
+        raise ValueError(f"No runs found in repository: {root}")
+    run_id, radar = run["run_id"], run["radar"]
+
+    config = init_runtime_config(
+        SimpleNamespace(run_id=run_id, base_dir=str(root), config=config_path)
+    )
+    repository = DataRepository(run_id=run_id, base_dir=root, radar=radar, config=config)
+    return repository, config
+
+
+def _postprocess_cmd(args: argparse.Namespace) -> None:
+    """Run post-process extension modules over an existing repository."""
+    from adapt.runtime.postprocessor import PostProcessor
+
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+
+    if not args.module:
+        raise ValueError("Specify at least one module to run, e.g. --module lma.")
+
+    repository, config = _open_repository(args.repository, args.config)
+
+    if args.input_dir:
+        merged = dict(config.module_params)
+        for name in args.module:
+            merged[name] = {**merged.get(name, {}), "input_dir": args.input_dir}
+        config = config.model_copy(update={"module_params": merged})
+
+    PostProcessor(repository, config).run(modules=args.module)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -400,6 +473,14 @@ def main() -> None:
     )
     _build_dashboard_parser(dashboard_parser)
     dashboard_parser.set_defaults(func=_dashboard_cmd)
+
+    postprocess_parser = subparsers.add_parser(
+        "postprocess",
+        help="Enrich an existing repository with extension tables.",
+        description="Run post-process extension modules (e.g. lma) over a repository.",
+    )
+    _build_postprocess_parser(postprocess_parser)
+    postprocess_parser.set_defaults(func=_postprocess_cmd)
 
     args = parser.parse_args()
     args.func(args)

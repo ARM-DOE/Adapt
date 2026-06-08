@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 from pandas.api import types as pdt
 
+from adapt.persistence.tables import is_core_table
 from adapt.utils.time import to_scan_iso, to_scan_unix
 
 
@@ -52,6 +53,11 @@ class ModuleOutputWriter:
     """
 
     def __init__(self, db_path: str | Path, spec: OutputTableSpec) -> None:
+        if is_core_table(spec.name):
+            raise ValueError(
+                f"'{spec.name}' is a core table; module writers may only create "
+                "extension tables, never mutate core pipeline tables."
+            )
         self._db_path = Path(db_path)
         self._spec = spec
 

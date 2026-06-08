@@ -26,6 +26,12 @@ from adapt.contracts.cell_volume_stats import (
 )
 from adapt.contracts.grid import assert_gridded, check_grid_ds_2d
 from adapt.contracts.history import check_scan_history
+from adapt.contracts.lma import (
+    assert_lma_cell_stats,
+    assert_lma_flash_attribution,
+    check_lma_cell_stats,
+    check_lma_flash_attribution,
+)
 from adapt.contracts.pipeline import ContractViolation, require
 from adapt.contracts.projection import assert_projected, check_projected_ds
 from adapt.contracts.segmentation import assert_segmented, check_segmented_ds
@@ -50,6 +56,8 @@ __all__ = [
     "assert_tracked_cells",
     "assert_cell_events",
     "assert_time_normalized",
+    "assert_lma_cell_stats",
+    "assert_lma_flash_attribution",
     # bound checks — register these in input_contracts / output_contracts
     "check_grid_ds_2d",
     "check_scan_history",
@@ -61,4 +69,6 @@ __all__ = [
     "check_tracked_cells",
     "check_cell_events",
     "check_time_normalized",
+    "check_lma_cell_stats",
+    "check_lma_flash_attribution",
 ]

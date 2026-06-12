@@ -30,6 +30,6 @@ def test_pipeline_and_postprocess_discovery_sources_are_disjoint():
     live = _module_paths(Path(_DEFAULTS_YAML))
     post = _module_paths(pp._POSTPROCESS_DEFAULTS_YAML)
 
-    assert "adapt.execution.nodes.lma" in post
-    assert "adapt.execution.nodes.lma" not in live
+    assert "adapt.execution.nodes.xlma_stat" in post
+    assert "adapt.execution.nodes.xlma_stat" not in live
     assert live.isdisjoint(post)

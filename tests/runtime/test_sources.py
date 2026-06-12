@@ -38,6 +38,31 @@ class TestSourceRegistry:
         with pytest.raises(KeyError, match="unknown_source"):
             source_registry.get("unknown_source")
 
+    def test_duplicate_registration_raises(self):
+        from adapt.runtime.sources import SourceRegistry
+
+        reg = SourceRegistry()
+        reg.register("dup", object)
+        with pytest.raises(RuntimeError, match="dup"):
+            reg.register("dup", object)
+
+    def test_names_lists_builtin_sources(self):
+        from adapt.runtime.sources import source_registry
+
+        assert {"aws_nexrad", "local_directory"} <= set(source_registry.names())
+
+    def test_every_registered_source_satisfies_scan_source_protocol(self):
+        """The orchestrator drives sources only through the ScanSource interface."""
+        from adapt.contracts.source import ScanSource
+        from adapt.runtime.sources import source_registry
+
+        for name in source_registry.names():
+            cls = source_registry.get(name)
+            assert issubclass(cls, ScanSource), (
+                f"Source '{name}' ({cls.__name__}) does not satisfy the ScanSource "
+                "protocol — the orchestrator cannot drive it. See contracts/source.py."
+            )
+
 
 class TestLocalDirectorySource:
     def test_queues_files_in_chronological_order(self, tmp_path):

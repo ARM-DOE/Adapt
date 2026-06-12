@@ -48,9 +48,7 @@ def test_repository_defaults_to_cwd():
     assert args.repository == "."
 
 
-def test_postprocess_cmd_runs_module_and_writes_table(
-    monkeypatch, internal_config, temp_dir
-):
+def test_postprocess_cmd_runs_module_and_writes_table(monkeypatch, internal_config, temp_dir):
     repo = DataRepository(run_id="CLITEST1", base_dir=temp_dir, radar="TEST_RADAR")
     monkeypatch.setattr(
         cli, "_open_repository", lambda repo_root, config_path: (repo, internal_config)

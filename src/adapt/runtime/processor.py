@@ -151,6 +151,9 @@ class RadarProcessor(threading.Thread):
         self._max_history = config.processor.max_history
         self._max_time_gap_minutes = config.projector.max_time_interval_minutes
         self._last_skipped = False
+        # Previous scan's tracked cells: maps the prev-scan labels carried by
+        # registration_minutes to global uids when persisting the next scan.
+        self._last_tracked_cells: pd.DataFrame | None = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -490,6 +493,41 @@ class RadarProcessor(threading.Thread):
         )
         return projected_ds
 
+    @staticmethod
+    def _attach_registration_uid_lut(
+        projected_ds: xr.Dataset, prev_tracked_cells: pd.DataFrame | None
+    ) -> xr.Dataset:
+        """Add a 1D ``registration_cell_uid`` variable for previous-scan labels.
+
+        ``registration_minutes`` (and ``cell_projections[0]``) carry the
+        *previous* scan's labels, so resolving them to global uids needs the
+        previous scan's label→uid mapping. Returns ``projected_ds`` unchanged
+        when no previous tracking exists (first scan pair of a run).
+        """
+        if prev_tracked_cells is None or prev_tracked_cells.empty:
+            return projected_ds
+        label_to_uid = dict(
+            zip(
+                prev_tracked_cells["cell_label"].astype(int),
+                prev_tracked_cells["cell_uid"],
+                strict=True,
+            )
+        )
+        max_label = max(label_to_uid)
+        lut = build_cell_uid_lut(label_to_uid, max_label)
+        projected_ds["registration_cell_uid"] = xr.DataArray(
+            lut,
+            dims=["registration_cell_label"],
+            coords={"registration_cell_label": np.arange(max_label + 1)},
+            attrs={
+                "description": (
+                    "previous-scan cell_label index -> global cell_uid for the "
+                    "registration_minutes masks; index 0 = NONE (background)"
+                )
+            },
+        )
+        return projected_ds
+
     def _save_results(self, result: dict, scan_time):
         """Save all pipeline outputs to the repository."""
         assert self.repository is not None
@@ -515,8 +553,11 @@ class RadarProcessor(threading.Thread):
         projected_ds = result.get("projected_ds")
         if projected_ds is not None:
             projected_ds = self._attach_cell_uid_lut(projected_ds, tracked_cells)
+            projected_ds = self._attach_registration_uid_lut(projected_ds, self._last_tracked_cells)
             filepath = self._scan_history[-1].get("nexrad_file", "") if self._scan_history else ""
             self._save_analysis_netcdf(projected_ds, filepath, scan_time)
+        if tracked_cells is not None and not tracked_cells.empty:
+            self._last_tracked_cells = tracked_cells
 
         writer = RepositoryWriter(self.repository)
 

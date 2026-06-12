@@ -366,13 +366,13 @@ def _build_postprocess_parser(sub: argparse.ArgumentParser) -> None:
         "--module",
         nargs="+",
         default=None,
-        help="Post-process module name(s) to run, e.g. --module lma. Accepts a list.",
+        help="Post-process module name(s) to run, e.g. --module xlma_stat. Accepts a list.",
     )
     sub.add_argument(
         "--input-dir",
         dest="input_dir",
         default=None,
-        help="Input directory for the selected module(s) (e.g. LMA ASCII files).",
+        help="Input directory for the selected module(s) (e.g. xLMA flash-sorted NetCDF).",
     )
     sub.add_argument("--config", default=None, help="Optional YAML config file.")
     sub.add_argument("-v", "--verbose", action="store_true", help="Verbose logging.")
@@ -411,7 +411,7 @@ def _postprocess_cmd(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
 
     if not args.module:
-        raise ValueError("Specify at least one module to run, e.g. --module lma.")
+        raise ValueError("Specify at least one module to run, e.g. --module xlma_stat.")
 
     repository, config = _open_repository(args.repository, args.config)
 
@@ -477,7 +477,7 @@ def main() -> None:
     postprocess_parser = subparsers.add_parser(
         "postprocess",
         help="Enrich an existing repository with extension tables.",
-        description="Run post-process extension modules (e.g. lma) over a repository.",
+        description="Run post-process extension modules (e.g. xlma_stat) over a repository.",
     )
     _build_postprocess_parser(postprocess_parser)
     postprocess_parser.set_defaults(func=_postprocess_cmd)

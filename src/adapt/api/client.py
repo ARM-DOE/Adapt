@@ -201,7 +201,7 @@ class RepositoryClient:
         return self._track_store(radar).get_cell_events(run_id, cell_uid)
 
     def track_lightning(self, run_id: str, cell_uid: str, radar: str | None = None) -> pd.DataFrame:
-        """Return LMA lightning stats (lma_cell_stats) for one track.
+        """Return xLMA lightning stats (xlma_stat_minutes) for one track.
 
         Empty DataFrame when the LMA post-processor has not run for this
         repository (the extension table is absent).
@@ -359,9 +359,9 @@ class RepositoryClient:
             scan_time=scan_time,
             radar_id=radar,
             run_id=str(scan_record.get("run_id", "")),
-            n_cells=int(scan_record.get("num_cells", 0)),
-            max_reflectivity=float(scan_record.get("max_reflectivity", 0.0)),
-            has_tracks=bool(scan_record.get("has_tracks", False)),
+            n_cells=int(scan_record.get("num_cells") or 0),
+            max_reflectivity=float(scan_record.get("max_reflectivity") or 0.0),
+            has_tracks=bool(scan_record.get("has_tracks") or False),
         )
         seg = self._load_item_file(radar, scan_record.get("segmentation2d_item_id"))
         cells = self._load_item_file(radar, scan_record.get("analysis2d_item_id"))

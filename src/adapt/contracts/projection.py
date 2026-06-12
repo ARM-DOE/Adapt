@@ -52,6 +52,39 @@ def assert_projected(ds: xr.Dataset, max_steps: int = 5) -> None:
             f"Projection contract violated: found {num_steps} steps, expected {expected_steps} "
             f"(1 registration + {max_steps_actual} projections from config)",
         )
+        _assert_registration_minutes(ds)
+
+
+def _assert_registration_minutes(ds: xr.Dataset) -> None:
+    """Minute-resolution registration masks must accompany cell_projections."""
+    require(
+        "registration_minutes" in ds.data_vars,
+        "Projection contract violated: missing 'registration_minutes' — the "
+        "minute-resolution registration masks must be produced with the projections",
+    )
+    masks = ds["registration_minutes"]
+    require(
+        masks.dims == ("minute", "y", "x"),
+        f"Projection contract violated: 'registration_minutes' dims {masks.dims}, "
+        "expected ('minute', 'y', 'x')",
+    )
+    require(
+        "interpolation_fraction" in ds.coords,
+        "Projection contract violated: missing 'interpolation_fraction' coordinate "
+        "on the minute dimension",
+    )
+    if masks.sizes["minute"] == 0:
+        return
+    fractions = ds["interpolation_fraction"].values
+    require(
+        bool((fractions > 0).all() and (fractions <= 1).all()),
+        "Projection contract violated: interpolation_fraction values must lie in (0, 1]",
+    )
+    minutes = ds["minute"].values
+    require(
+        bool((minutes[1:] > minutes[:-1]).all()),
+        "Projection contract violated: 'minute' coordinate must be strictly increasing",
+    )
 
 
 def check_projected_ds(ds: xr.Dataset) -> None:

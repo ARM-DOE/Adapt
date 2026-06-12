@@ -25,9 +25,11 @@ Output enables cell tracking and motion-based warnings in operational systems.
 """
 
 import logging
+from datetime import datetime
 
 import cv2
 import numpy as np
+import pandas as pd
 import xarray as xr
 from scipy.ndimage import binary_dilation
 from scipy.spatial import Delaunay
@@ -164,6 +166,7 @@ class RadarCellProjector:
         }
         self.min_motion_threshold = config.min_motion_threshold
         self.max_flow_magnitude = config.max_flow_magnitude
+        self.registration_step_minutes = config.registration_step_minutes
         self.refl_var = config.reflectivity_var
 
     def project(self, ds_list):
@@ -333,6 +336,31 @@ class RadarCellProjector:
 
             logger.info(f"Added cell_projections with {len(labels_proj_list)} projection steps")
 
+        # Minute-resolution registration: previous labels advected at each whole
+        # minute in (t_prev, t_curr] using the same flow, fractionally scaled.
+        # This is the geometry product downstream association modules consume.
+        t_prev = self._frame_time(ds_list[0])
+        t_curr = self._frame_time(ds_list[1])
+        minutes = self._registration_minute_times(t_prev, t_curr)
+        fractions = ((minutes - t_prev) / (t_curr - t_prev)).to_numpy().astype(np.float32)
+        minute_frames = self._project_fractions(labels_prev, flow, list(fractions))
+
+        ds_out["registration_minutes"] = xr.DataArray(
+            minute_frames,
+            dims=["minute", "y", "x"],
+            coords={"minute": minutes.values, "y": ds_out.y, "x": ds_out.x},
+            attrs={
+                "description": (
+                    "Previous scan's cell labels advected to each whole minute "
+                    "between the scan pair (label space: previous scan)"
+                )
+            },
+        )
+        ds_out = ds_out.assign_coords(interpolation_fraction=("minute", fractions))
+        ds_out["interpolation_fraction"].attrs["description"] = (
+            "Minutes elapsed since the previous scan divided by the scan-pair gap"
+        )
+
         # Store projection metadata for contract validation
         # This enables self-describing datasets: validators can read runtime config
         # from dataset attributes without needing context access
@@ -341,28 +369,71 @@ class RadarCellProjector:
                 "max_projection_steps": self.max_proj_steps,
                 "num_projection_steps": (len(labels_proj_list) if labels_proj_list else 0),
                 "projection_method": "adapt_default",
+                "registration_source_scan_time": pd.Timestamp(t_prev).isoformat(),
+                "registration_target_scan_time": pd.Timestamp(t_curr).isoformat(),
             }
         )
 
         return ds_out
 
+    @staticmethod
+    def _frame_time(ds: xr.Dataset) -> pd.Timestamp:
+        """Return a frame's scan time, whatever shape the time coord arrives in.
+
+        Production grids carry time as a plain scalar, a length-1 array, a 0-d
+        ndarray (object or non-nanosecond datetime64), or a cftime calendar
+        object (xarray's decoding of pyart grid NetCDFs). pd.Timestamp rejects
+        0-d ndarrays and cftime directly, so normalize before converting.
+        """
+        value = ds.time.values
+        if np.ndim(value) > 0:
+            value = value[0]
+        if isinstance(value, np.ndarray):  # 0-d ndarray: unwrap to its scalar
+            value = value.item()
+        if not isinstance(value, (str, datetime, np.datetime64)) and hasattr(
+            value, "isoformat"
+        ):  # cftime calendar datetimes are not datetime subclasses
+            value = value.isoformat()
+        return pd.Timestamp(value)
+
+    def _registration_minute_times(
+        self, t_prev: pd.Timestamp, t_curr: pd.Timestamp
+    ) -> pd.DatetimeIndex:
+        """Whole-minute grid points m with t_prev < m <= t_curr.
+
+        The grid is epoch-aligned (multiples of the step since epoch), so the
+        minute timestamps stay continuous across consecutive scan pairs instead
+        of drifting with each scan's start time.
+        """
+        step = pd.Timedelta(minutes=self.registration_step_minutes)
+        first = t_prev.floor(f"{self.registration_step_minutes}min") + step
+        return pd.date_range(first, t_curr, freq=step)
+
     def _project_frames(self, labels_src, flow, n_steps=1):
-        """Project labels for multiple steps, carrying flow with each pixel.
+        """Project labels for whole flow steps (1, 2, ..., n_steps)."""
+        return self._project_fractions(labels_src, flow, [float(s) for s in range(1, n_steps + 1)])
+
+    def _project_fractions(self, labels_src, flow, fractions):
+        """Project labels by fractional multiples of the flow field.
 
         Key concept: Flow is computed at original pixel positions (t-1→t0).
-        Each pixel carries its original flow value and uses it for all projection steps.
-        This is correct because flow represents the motion vector AT that pixel's location.
+        Each pixel carries its original flow value and uses it for every
+        projected frame; frame i displaces by ``flow * fractions[i]``.
+        A whole step is fraction 1.0; minute interpolation uses 0 < f < 1.
 
         Args:
             labels_src: Source labels (H, W) at time t
             flow: Optical flow field (H, W, 2) in pixels/frame
-            n_steps: Number of projection steps to compute
+            fractions: Flow multiples, one output frame per entry
 
         Returns:
-            projections: (n_steps, H, W) array with projected labels
+            projections: (len(fractions), H, W) array with projected labels
         """
         H, W = labels_src.shape
+        n_steps = len(fractions)
         projections = np.full((n_steps, H, W), fill_value=0, dtype=np.int32)
+        if n_steps == 0:
+            return projections
 
         unique_labels = np.unique(labels_src[labels_src > 0])
 
@@ -394,14 +465,14 @@ class RadarCellProjector:
 
                 cell_pixels.append((y, x, fx, fy))
 
-            # Project this cell for all steps using SAME flow values
+            # Project this cell for all frames using SAME flow values
             for step_idx in range(n_steps):
-                step = step_idx + 1  # Steps are 1-indexed (1, 2, 3, ...)
+                fraction = fractions[step_idx]
 
                 for y, x, fx, fy in cell_pixels:
-                    # Accumulated displacement: original_pos + flow * step
-                    new_x = x + fx * step
-                    new_y = y + fy * step
+                    # Accumulated displacement: original_pos + flow * fraction
+                    new_x = x + fx * fraction
+                    new_y = y + fy * fraction
 
                     new_x_int = int(np.round(new_x))
                     new_y_int = int(np.round(new_y))

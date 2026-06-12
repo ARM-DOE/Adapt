@@ -138,8 +138,8 @@ _VAR_LABELS = {
 # enrichment table — empty unless that opt-in module ran (see _volume_stats).
 _VOLUME_STATS_PREFIXES = ("cell_top", "cell_base", "cell_depth", "cell_volume", "cell_eth", "vol_")
 
-# Plot-group variables with these prefixes come from the lma_cell_stats extension
-# table — empty unless `adapt postprocess --module lma` ran (see _lightning).
+# Plot-group variables with these prefixes come from the xlma_stat_minutes extension
+# table — empty unless `adapt postprocess --module xlma_stat` ran (see _lightning).
 _LIGHTNING_PREFIXES = ("flash_", "source_")
 
 
@@ -776,7 +776,7 @@ class AdaptDashboard(tk.Tk):
         docs = ttk.Label(
             win,
             text="More settings in config.yaml — see Adapt config docs",
-            foreground="blue",
+            foreground="#4a9fd4",
             cursor="hand2",
         )
         docs.grid(row=5, column=0, columnspan=3, padx=8, pady=4)
@@ -789,7 +789,7 @@ class AdaptDashboard(tk.Tk):
         info_label = ttk.Label(
             win,
             textvariable=info_var,
-            foreground="#1a6fad",
+            foreground="#e09a10",
             wraplength=400,
             justify="left",
         )
@@ -918,12 +918,25 @@ class AdaptDashboard(tk.Tk):
 
         if config_mode == "use":
             # ── User has an existing config.yaml ──────────────────────────────
-            if not p.is_file():
+            if p.is_dir():
+                # Directory given — auto-resolve to config.yaml inside it.
+                config_file = p / "config.yaml"
+                if not config_file.exists():
+                    messagebox.showerror(
+                        "No config.yaml",
+                        f"No config.yaml found in:\n{p}\n\n"
+                        "Select the config.yaml file directly, or click "
+                        "'Create Config' to generate one.",
+                        parent=wizard_win,
+                    )
+                    return
+            elif p.is_file():
+                config_file = p
+            else:
                 messagebox.showerror(
-                    "Not a file", f"Expected a config.yaml file:\n{path}", parent=wizard_win
+                    "Not found", f"Path does not exist:\n{path}", parent=wizard_win
                 )
                 return
-            config_file = p
             cmd = [*_find_adapt_exe(), "run-nexrad", str(config_file)]
             if radar:
                 cmd += ["--radar", radar]
@@ -2411,7 +2424,7 @@ class AdaptDashboard(tk.Tk):
             else None
         )
 
-        # Lightning columns come from the lma_cell_stats extension table, read
+        # Lightning columns come from the xlma_stat_minutes extension table, read
         # only through the public API (RepositoryClient). Build the client once
         # per refresh and only when a selected group needs lightning.
         needs_lightning = any(
@@ -2451,9 +2464,7 @@ class AdaptDashboard(tk.Tk):
                             from adapt.api.client import RepositoryClient
 
                             lightning_client = RepositoryClient(repo)
-                        lma_df = lightning_client.track_lightning(
-                            self._current_run_id, uid, radar
-                        )
+                        lma_df = lightning_client.track_lightning(self._current_run_id, uid, radar)
                         track_df = _merge_lightning_fn(track_df, lma_df)
                     except Exception:
                         logger.exception("Failed to load lightning for %s", uid)
@@ -2489,7 +2500,7 @@ class AdaptDashboard(tk.Tk):
             if not ax.get_lines():
                 group_vars = group.get("variables", [])
                 if any(v.startswith(_LIGHTNING_PREFIXES) for v in group_vars):
-                    msg = "no data — run lma postprocess"
+                    msg = "no data — run xlma_stat postprocess"
                 elif any(v.startswith(_VOLUME_STATS_PREFIXES) for v in group_vars):
                     msg = "no data — enable cell_volume_stats"
                 else:

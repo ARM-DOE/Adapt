@@ -1,36 +1,22 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""NEXRAD pipeline assembly via ModuleRegistry + GraphBuilder.
+"""Module registration and selection for pipeline assembly.
 
-This module shows how the controller builds the full processing pipeline
-from registered modules. It is the bridge between the module system and
-the graph execution engine.
+``_ensure_modules_registered`` imports every module path declared in
+``configuration/defaults.yaml`` (plus user extensions), which triggers each
+module's ``registry.register()`` call. ``resolve_enabled_modules`` filters the
+registered set down to the enabled modules for a run.
 
-The pipeline is assembled once at startup; the graph executor runs it
-once per radar file.
-
-Usage::
-
-    pipeline = NexradPipeline(config)
-    result = pipeline.process_file(nexrad_file_path, repository=repo)
-    cells_df = result["cell_stats"]
+Both fail loudly: an unreadable module list or a module that cannot be
+imported aborts startup — there is no fallback pipeline.
 """
 
 import importlib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
 
 import yaml
-
-from adapt.execution.graph.builder import GraphBuilder
-from adapt.execution.graph.executor import GraphExecutor
-from adapt.execution.module_registry import registry
-
-if TYPE_CHECKING:
-    from adapt.configuration.schemas.internal import InternalConfig
-    from adapt.persistence.repository import DataRepository
 
 logger = logging.getLogger(__name__)
 
@@ -44,27 +30,32 @@ def _ensure_modules_registered(extensions: list[str] | None = None) -> None:
     Importing it triggers the ``registry.register()`` call at module level.
     To add a core module: add one line to defaults.yaml.
     To add an extension: pass its dotted import path via ``extensions``.
+
+    Raises
+    ------
+    RuntimeError
+        If defaults.yaml is unreadable or declares no modules.
+    ImportError
+        If any declared core module or extension fails to import.
     """
     try:
         with open(_DEFAULTS_YAML) as f:
             cfg = yaml.safe_load(f)
-        module_paths = cfg.get("pipeline", {}).get("modules", [])
-    except Exception as e:
-        logger.warning("Could not read defaults.yaml (%s); falling back to hardcoded list", e)
-        module_paths = [
-            "adapt.execution.nodes.ingest",
-            "adapt.execution.nodes.detection",
-            "adapt.execution.nodes.projection",
-            "adapt.execution.nodes.analysis",
-            "adapt.execution.nodes.tracking",
-        ]
+    except OSError as e:
+        raise RuntimeError(f"Cannot read pipeline module list '{_DEFAULTS_YAML}': {e}") from e
+
+    module_paths = (cfg or {}).get("pipeline", {}).get("modules", [])
+    if not module_paths:
+        raise RuntimeError(
+            f"No pipeline modules declared under 'pipeline.modules' in '{_DEFAULTS_YAML}'"
+        )
 
     for path in module_paths:
         try:
             importlib.import_module(path)
             logger.debug("Registered core module from: %s", path)
         except Exception as e:
-            logger.error("Failed to import core module '%s': %s", path, e)
+            raise ImportError(f"Failed to import core module '{path}': {e}") from e
 
     for path in extensions or []:
         try:
@@ -127,76 +118,3 @@ def resolve_enabled_modules(
                 )
 
     return [m for m in all_modules if m.name in enabled]
-
-
-class NexradPipeline:
-    """Graph-based NEXRAD processing pipeline.
-
-    Assembles the execution graph from the module registry and runs it
-    once per radar file. Module instances persist across files so that
-    stateful modules (e.g. ProjectionModule with frame history) work
-    correctly.
-
-    Parameters
-    ----------
-    config : InternalConfig
-        Runtime configuration forwarded to modules via the context dict.
-    output_dirs : dict, optional
-        Output directory mapping forwarded to modules via context.
-
-    Example::
-
-        pipeline = NexradPipeline(config, output_dirs=dirs)
-        result = pipeline.process_file("KLOT20240518_123456_V06", repo)
-        print(result["cell_stats"].head())
-    """
-
-    def __init__(
-        self,
-        config: "InternalConfig",
-        output_dirs: dict | None = None,
-    ) -> None:
-        self.config = config
-        self.output_dirs = output_dirs or {}
-
-        _ensure_modules_registered()
-
-        # Build a local registry with only NEXRAD pipeline modules
-        # (avoids polluting the global registry if it already has modules)
-        local_modules = registry.create_modules()
-        self._nodes = GraphBuilder(local_modules).build()
-        self._executor = GraphExecutor(self._nodes)
-        logger.info(
-            "NexradPipeline assembled: %s",
-            " → ".join(n.name for n in self._nodes),
-        )
-
-    def process_file(
-        self,
-        nexrad_file: str,
-        repository: Optional["DataRepository"] = None,
-    ) -> dict:
-        """Run the full processing graph for a single NEXRAD file.
-
-        Parameters
-        ----------
-        nexrad_file : str
-            Path to the NEXRAD Level-II file.
-        repository : DataRepository, optional
-            If provided, analysis results are persisted automatically.
-
-        Returns
-        -------
-        dict
-            Final context dict with keys: grid_ds, grid_ds_2d, segmented_ds,
-            projected_ds, cell_stats, scan_time.
-        """
-        context = {
-            "nexrad_file": nexrad_file,
-            "config": self.config,
-            "output_dirs": self.output_dirs,
-        }
-        if repository is not None:
-            context["repository"] = repository
-
-        return self._executor.run(context)

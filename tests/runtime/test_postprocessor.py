@@ -11,10 +11,8 @@ import sqlite3
 import sys
 from datetime import UTC, datetime
 
-import numpy as np
 import pandas as pd
 import pytest
-import xarray as xr
 
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
@@ -102,9 +100,7 @@ def test_module_can_write_multiple_extension_tables(pipeline_config, test_reposi
         registry.unregister("two_table_post")
 
 
-def test_runs_single_module_and_writes_extension_table(
-    pipeline_config, test_repository
-):
+def test_runs_single_module_and_writes_extension_table(pipeline_config, test_repository):
     _register(_FakePostModule)
     try:
         pp = PostProcessor(test_repository, pipeline_config)
@@ -136,31 +132,38 @@ def test_cannot_write_core_table(pipeline_config, test_repository):
 class _NeedsMasksModule(BaseModule):
     name = "needs_masks_post"
     pipeline_phase = POSTPROCESS_PHASE
-    inputs = ["scan_masks", "radar_origin"]
+    inputs = ["minute_masks", "radar_origin"]
     outputs = ["probe_rows"]
     output_table = OutputTableSpec(name="probe_ext", primary_key=("n",))
     captured: dict = {}
 
     def run(self, context: dict) -> dict:
         _NeedsMasksModule.captured = {
-            "n_masks": len(context["scan_masks"]),
+            "n_masks": len(context["minute_masks"]),
             "radar_origin": context["radar_origin"],
         }
-        return {"probe_rows": pd.DataFrame([{"n": len(context["scan_masks"]), "ok": 1}])}
+        return {"probe_rows": pd.DataFrame([{"n": len(context["minute_masks"]), "ok": 1}])}
 
 
-def test_injects_scan_masks_and_radar_origin(pipeline_config, test_repository):
-    ds = xr.Dataset(
-        {
-            "cell_labels": (("y", "x"), np.zeros((3, 3), dtype=np.int32)),
-            "cell_uid": ("cell_label", np.array(["NONE"], dtype=np.str_)),
+def test_injects_minute_masks_and_radar_origin(pipeline_config, test_repository):
+    from tests.helpers.analysis_nc import cell_block, make_analysis_ds
+
+    ds = make_analysis_ds(
+        "2024-05-18T12:03:00",
+        "2024-05-18T12:00:00",
+        cell_labels=cell_block(col=6),
+        cell_uids=["uid-A"],
+        minute_labels={
+            "2024-05-18T12:01:00": cell_block(col=4),
+            "2024-05-18T12:02:00": cell_block(col=5),
+            "2024-05-18T12:03:00": cell_block(col=6),
         },
-        coords={"x": [0.0, 200.0, 400.0], "y": [0.0, 200.0, 400.0], "cell_label": [0]},
+        registration_uids=["uid-A"],
     )
     test_repository.write_netcdf(
         ds=ds,
         product_type=ProductType.ANALYSIS_NC,
-        scan_time=datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC),
+        scan_time=datetime(2024, 5, 18, 12, 3, 0, tzinfo=UTC),
         producer="test",
     )
     test_repository.registry.ensure_radar_location("TEST_RADAR", 40.0, -88.0)
@@ -168,7 +171,8 @@ def test_injects_scan_masks_and_radar_origin(pipeline_config, test_repository):
     _register(_NeedsMasksModule)
     try:
         PostProcessor(test_repository, pipeline_config).run(modules=["needs_masks_post"])
-        assert _NeedsMasksModule.captured["n_masks"] == 1
+        # 12:01, 12:02 advected + 12:03 real segmentation (replaces fraction-1 frame)
+        assert _NeedsMasksModule.captured["n_masks"] == 3
         assert _NeedsMasksModule.captured["radar_origin"] == (40.0, -88.0)
     finally:
         registry.unregister("needs_masks_post")

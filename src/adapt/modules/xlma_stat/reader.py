@@ -1,35 +1,88 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""The single PyXLMA boundary: read LMA files, cluster flashes, compute stats.
+"""The LMA input boundary: xLMA flash-sorted NetCDF, read with plain xarray.
 
-All ``pyxlma`` calls live here. Flash clustering is global and flash-first
-(``cluster_flashes`` — pyXLMA's DBSCAN), never reimplemented and never restricted
-to cell boundaries. Outputs are plain pandas DataFrames consumed by the pure
-science layer (attribution, binning, aggregation), keeping the third-party
-dependency isolated and the rest of the module testable without it.
+Adapt consumes only flash-sorted NetCDF (xLMA/pyXLMA's own output format, e.g.
+``LYLOUT_*_map*.nc``): standard variable names, flashes already clustered, and
+the event→flash relation included. Raw LYLOUT ASCII sources must be converted
+to flash-sorted NetCDF in xLMA first — ``pyxlma`` is not on conda and is not a
+dependency of Adapt; clustering happens in the user's xLMA workflow, never here.
+
+Outputs are plain pandas DataFrames consumed by the pure science layer
+(attribution, binning, aggregation).
 """
 
 import numpy as np
 import pandas as pd
-from pyxlma.lmalib.flash.cluster import cluster_flashes
-from pyxlma.lmalib.flash.properties import flash_stats
-from pyxlma.lmalib.io import read as lma_read
+import xarray as xr
 
 _FILL = np.iinfo(np.uint64).max
 
+# Everything flashes_to_frame / events_to_frame read. A flash-sorted NetCDF
+# missing any of these is rejected loudly, not partially ingested.
+_FLASH_SORTED_REQUIRED = (
+    "flash_id",
+    "flash_event_count",
+    "flash_duration",
+    "flash_time_start",
+    "flash_init_latitude",
+    "flash_init_longitude",
+    "flash_init_altitude",
+    "flash_center_latitude",
+    "flash_center_longitude",
+    "flash_area",
+    "flash_energy",
+    "event_parent_flash_id",
+    "event_altitude",
+    "event_power",
+    "event_chi2",
+    "event_stations",
+)
 
-def read_event_dataset(filenames: list[str]):
-    """Read one or more LMA ASCII files into a pyXLMA event (source) dataset."""
+
+def read_flash_sorted_frames(filenames: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read xLMA flash-sorted NetCDF files into ``(flashes, sources)`` frames.
+
+    Each file already carries clustered flashes (``flash_*`` variables) and the
+    event→flash relation (``event_parent_flash_id``), so this path uses xarray
+    only. Flash ids are unique within one file but restart between files; each
+    file's ids are offset so ``flash_id`` stays a unique key across the combined
+    frames (it is part of the primary key of ``lma_flash_attribution``).
+    """
     if not filenames:
-        raise ValueError("No LMA input files provided.")
-    return lma_read.dataset(filenames)
+        raise ValueError("No LMA flash-sorted NetCDF files provided.")
 
+    flash_parts: list[pd.DataFrame] = []
+    source_parts: list[pd.DataFrame] = []
+    next_id = np.uint64(0)
+    for path in filenames:
+        with xr.open_dataset(path, decode_timedelta=True) as ds:
+            missing = [v for v in _FLASH_SORTED_REQUIRED if v not in ds.variables]
+            if missing:
+                raise ValueError(
+                    f"'{path}' is not a flash-sorted LMA NetCDF: missing variables "
+                    f"{missing}. Provide xLMA flash-sorted output (*.nc) — convert "
+                    "raw LYLOUT ASCII sources in xLMA/pyxlma first."
+                )
+            flashes = flashes_to_frame(ds)
+            sources = events_to_frame(ds)
 
-def cluster_flashes_with_stats(events_ds, distance_m: float, time_s: float):
-    """Cluster sources into flashes and attach flash-level statistics."""
-    clustered = cluster_flashes(events_ds, distance=distance_m, time=time_s)
-    return flash_stats(clustered)
+        # NetCDF fill decoding turns unassigned parent flash ids into NaN floats;
+        # drop those noise events and restore the integer key so the
+        # source ↔ flash join holds.
+        sources = sources[sources["flash_id"].notna()].copy()
+        sources["flash_id"] = sources["flash_id"].astype(np.uint64) + next_id
+        flashes["flash_id"] = flashes["flash_id"].astype(np.uint64) + next_id
+        if len(flashes):
+            next_id = np.uint64(int(flashes["flash_id"].max()) + 1)
+        flash_parts.append(flashes)
+        source_parts.append(sources)
+
+    return (
+        pd.concat(flash_parts, ignore_index=True),
+        pd.concat(source_parts, ignore_index=True),
+    )
 
 
 def flashes_to_frame(flashes_ds) -> pd.DataFrame:

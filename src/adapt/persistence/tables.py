@@ -5,7 +5,7 @@
 
 Core tables are produced by the main pipeline (scans, tracks, cells, lineage)
 and the catalog itself. Extension tables are produced by post-processors
-(e.g. ``lma_cell_stats``). Post-processors may only create extension tables;
+(e.g. ``xlma_stat_minutes``). Post-processors may only create extension tables;
 the persistence layer refuses to let any module writer target a core table, so
 reruns can never corrupt the authoritative pipeline output.
 """

@@ -3,7 +3,7 @@
 
 """Unit tests for _lightning.merge_lightning — join lma_cell_stats onto a track.
 
-Lightning is keyed by 1-minute time_bin; the track timeline by scan_time. The
+Lightning is keyed by 1-minute time; the track timeline by scan_time. The
 merge aligns them by flooring scan_time to the minute. No IO.
 """
 
@@ -27,7 +27,7 @@ def _track_df():
 def _lma_df():
     return pd.DataFrame(
         {
-            "time_bin": ["2024-05-18T12:00:00Z", "2024-05-18T12:01:00Z"],
+            "time": ["2024-05-18T12:00:00Z", "2024-05-18T12:01:00Z"],
             "flash_count": [3, 7],
             "source_count": [30, 70],
         }
@@ -43,9 +43,7 @@ def test_joins_lightning_by_minute():
 
 
 def test_scans_in_same_minute_get_same_bin():
-    track = pd.DataFrame(
-        {"scan_time": ["2024-05-18T12:00:05Z", "2024-05-18T12:00:50Z"]}
-    )
+    track = pd.DataFrame({"scan_time": ["2024-05-18T12:00:05Z", "2024-05-18T12:00:50Z"]})
     out = merge_lightning(track, _lma_df())
     assert list(out["flash_count"]) == [3, 3]
 

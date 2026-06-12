@@ -107,8 +107,9 @@ class PostProcessor:
 
         Repository-backed inputs are injected only when a selected module declares
         them (the same on-demand pattern the live processor uses for
-        ``grid_ds_3d``): ``scan_masks`` (per-scan cell masks read from the
-        analysis NetCDFs) and ``radar_origin`` (the radar lat/lon for projection).
+        ``grid_ds_3d``): ``minute_masks`` (minute-resolution registration masks —
+        the geometry product every external-association module consumes) and
+        ``radar_origin`` (the radar lat/lon for projection).
         """
         context = {
             "run_id": self.repository.run_id,
@@ -118,10 +119,10 @@ class PostProcessor:
         context.update(resolve_module_configs(self.config))
 
         declared = {key for module in selected for key in module.inputs}
-        if "scan_masks" in declared:
-            from adapt.persistence.scan_mask_reader import read_scan_masks
+        if "minute_masks" in declared:
+            from adapt.persistence.scan_mask_reader import read_minute_masks
 
-            context["scan_masks"] = read_scan_masks(self.repository)
+            context["minute_masks"] = read_minute_masks(self.repository)
         if "radar_origin" in declared:
             lat, lon = self.repository.registry.get_radar_location(self.repository.radar)
             context["radar_origin"] = (lat, lon)

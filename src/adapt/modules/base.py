@@ -63,7 +63,7 @@ class BaseModule(ABC):
     config_class: ClassVar[type | None] = None
     output_table: ClassVar[Any | None] = None
     # Multiple extension tables: maps an output context key -> OutputTableSpec.
-    # Used by modules that emit more than one table (e.g. lma). When set it
+    # Used by modules that emit more than one table (e.g. xlma_stat). When set it
     # supersedes ``output_table``; the single-table form remains for the common case.
     output_tables: ClassVar[dict[str, Any]] = {}
     injected_global_fields: ClassVar[frozenset[str]] = frozenset()

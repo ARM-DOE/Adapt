@@ -4,8 +4,12 @@ coverage:
       default:
         target: 60%
         threshold: 2%
+    patch:
+      default:
+        target: 80%
   ignore:
+    # Quarantined UI layers — plotting/Tkinter stay out of the science core
+    # (enforced by import-linter); they are not part of the coverage gate.
     - "src/adapt/gui/"
     - "src/adapt/visualization/"
-    - "src/adapt/cli.py"
-    - "src/adapt/api/"
+    - "src/adapt/consumers/"

@@ -42,7 +42,7 @@ def sample_dataset():
     return xr.Dataset(
         {
             "reflectivity": xr.DataArray(
-                np.random.randn(10, 10).astype(np.float32),
+                np.random.default_rng(0).standard_normal((10, 10)).astype(np.float32),
                 dims=["y", "x"],
                 coords={
                     "y": np.arange(10) * 1000.0,
@@ -272,7 +272,8 @@ class TestWriteOperations:
         ds = xr.Dataset(
             {
                 "reflectivity": xr.DataArray(
-                    np.random.randn(5, 5).astype(np.float32), dims=["y", "x"]
+                    np.random.default_rng(0).standard_normal((5, 5)).astype(np.float32),
+                    dims=["y", "x"],
                 ),
                 "cell_uid": xr.DataArray(
                     np.array(["NONE", "abc", "def"], dtype=np.str_),

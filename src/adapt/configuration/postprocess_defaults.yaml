@@ -8,4 +8,4 @@
 #
 postprocess:
   modules:
-    - adapt.execution.nodes.lma
+    - adapt.execution.nodes.xlma_stat

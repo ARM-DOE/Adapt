@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS cell_tracks (
     termination_type              TEXT NOT NULL DEFAULT 'ACTIVE_AT_END',
     termination_event_group_id    TEXT,
     terminated_into_cell_uid      TEXT,
+    duration_seconds              REAL NOT NULL DEFAULT 0,
     max_area_sqkm                 REAL,
     max_reflectivity              REAL,
     PRIMARY KEY (run_id, cell_uid)
@@ -702,12 +703,12 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
 def _create_lma_table(db_path):
     conn = sqlite3.connect(str(db_path))
     conn.execute(
-        "CREATE TABLE lma_cell_stats ("
-        "run_id TEXT, cell_uid TEXT, time_bin TEXT, flash_count INTEGER, "
-        "source_count INTEGER, PRIMARY KEY (cell_uid, time_bin))"
+        "CREATE TABLE xlma_stat_minutes ("
+        "run_id TEXT, cell_uid TEXT, time TEXT, flash_count INTEGER, "
+        "lightning_source_count INTEGER, PRIMARY KEY (cell_uid, time))"
     )
     conn.executemany(
-        "INSERT INTO lma_cell_stats VALUES (?,?,?,?,?)",
+        "INSERT INTO xlma_stat_minutes VALUES (?,?,?,?,?)",
         [
             ("r1", "UID1", "2024-01-01T12:01:00Z", 3, 30),
             ("r1", "UID1", "2024-01-01T12:00:00Z", 1, 10),
@@ -718,7 +719,7 @@ def _create_lma_table(db_path):
     conn.close()
 
 
-def test_get_track_lightning_returns_rows_ordered_by_time_bin(db_path):
+def test_get_track_lightning_returns_rows_ordered_by_time(db_path):
     _create_lma_table(db_path)
     store = TrackStore(db_path)
     try:
@@ -726,10 +727,56 @@ def test_get_track_lightning_returns_rows_ordered_by_time_bin(db_path):
     finally:
         store.close()
 
-    assert list(df["time_bin"]) == ["2024-01-01T12:00:00Z", "2024-01-01T12:01:00Z"]
+    assert list(df["time"]) == ["2024-01-01T12:00:00Z", "2024-01-01T12:01:00Z"]
     assert list(df["flash_count"]) == [1, 3]
 
 
 def test_get_track_lightning_empty_when_table_absent(store):
     df = store.get_track_lightning("r1", "UID1")
     assert df.empty
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle duration
+# ---------------------------------------------------------------------------
+
+
+def test_duration_seconds_is_zero_at_first_sight(store):
+    t = _t("2024-01-01T12:00:00")
+    store.write_scan(
+        "r1",
+        t,
+        _cell_stats(1),
+        _tracked_cells(1, "DUR1"),
+        _initiation_event(t, "DUR1", 1),
+        _empty_cell_adjacency(),
+    )
+
+    tracks = store.get_cell_tracks("r1")
+    assert tracks.iloc[0]["duration_seconds"] == 0.0
+
+
+def test_duration_seconds_spans_first_to_last_seen(store):
+    t1 = _t("2024-01-01T12:00:00")
+    t2 = _t("2024-01-01T12:05:00")
+    t3 = _t("2024-01-01T12:11:00")
+    store.write_scan(
+        "r1",
+        t1,
+        _cell_stats(1),
+        _tracked_cells(1, "DUR2"),
+        _initiation_event(t1, "DUR2", 1),
+        _empty_cell_adjacency(),
+    )
+    for t in (t2, t3):
+        store.write_scan(
+            "r1",
+            t,
+            _cell_stats(1),
+            _tracked_cells(1, "DUR2"),
+            _continue_event(t, "DUR2", 1, 1),
+            _empty_cell_adjacency(),
+        )
+
+    tracks = store.get_cell_tracks("r1")
+    assert tracks.iloc[0]["duration_seconds"] == pytest.approx(11 * 60.0)

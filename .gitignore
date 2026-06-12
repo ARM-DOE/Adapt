@@ -110,3 +110,4 @@ data/
 !.gitignore
 !.importlinter
 __pycache__/
+*.md

@@ -234,21 +234,22 @@ class TrackStore:
         return pd.DataFrame([dict(r) for r in rows])
 
     def get_track_lightning(self, run_id: str, cell_uid: str) -> pd.DataFrame:
-        """Return ``lma_cell_stats`` rows for one track, ordered by ``time_bin``.
+        """Return ``xlma_stat_minutes`` rows for one track, ordered by ``time``.
 
-        The lma_cell_stats table is an opt-in extension written by the LMA
-        post-processor. Returns an empty DataFrame when that table is absent
-        (lma never ran), so callers degrade to "no data" rather than erroring.
+        The xlma_stat_minutes table is an opt-in extension written by the
+        xlma_stat post-processor. Returns an empty DataFrame when that table is
+        absent (xlma_stat never ran), so callers degrade to "no data" rather
+        than erroring.
         """
         conn = self._connect()
         with self._lock:
             exists = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='lma_cell_stats'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='xlma_stat_minutes'"
             ).fetchone()
             if exists is None:
                 return pd.DataFrame()
             rows = conn.execute(
-                "SELECT * FROM lma_cell_stats WHERE run_id=? AND cell_uid=? ORDER BY time_bin",
+                "SELECT * FROM xlma_stat_minutes WHERE run_id=? AND cell_uid=? ORDER BY time",
                 (run_id, cell_uid),
             ).fetchall()
         return pd.DataFrame([dict(r) for r in rows])
@@ -640,10 +641,11 @@ class TrackStore:
                     """UPDATE cell_tracks SET
                         last_seen_time=?,
                         n_scans=n_scans+1,
+                        duration_seconds=(julianday(?)-julianday(first_seen_time))*86400.0,
                         max_area_sqkm=MAX(COALESCE(max_area_sqkm,0), ?),
                         max_reflectivity=MAX(COALESCE(max_reflectivity,0), ?)
                     WHERE run_id=? AND cell_uid=?""",
-                    (scan_iso, info["area"], info["refl"], run_id, tid),
+                    (scan_iso, scan_iso, info["area"], info["refl"], run_id, tid),
                 )
             else:
                 # Determine origin
@@ -673,6 +675,10 @@ class TrackStore:
                     ON CONFLICT(run_id, cell_uid) DO UPDATE SET
                         last_seen_time=excluded.last_seen_time,
                         n_scans=cell_tracks.n_scans+1,
+                        duration_seconds=(
+                            julianday(excluded.last_seen_time)
+                            - julianday(cell_tracks.first_seen_time)
+                        )*86400.0,
                         max_area_sqkm=MAX(
                             COALESCE(cell_tracks.max_area_sqkm,0), excluded.max_area_sqkm
                         ),

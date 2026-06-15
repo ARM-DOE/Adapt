@@ -3,7 +3,7 @@
 
 """Tests for the generic module output writer.
 
-A module declares an OutputTableSpec; the writer creates and upserts into a
+A module declares a SqliteTable spec; the writer creates and upserts into a
 per-module SQLite table from a returned DataFrame. Columns are inferred from
 the DataFrame; a JSON schema snapshot is registered for API discovery.
 """
@@ -17,15 +17,14 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from adapt.persistence.module_output import (  # noqa: E402
-    ModuleOutputWriter,
-    OutputTableSpec,
-)
+from adapt.contracts import SqliteTable  # noqa: E402
+from adapt.persistence.module_output import ModuleOutputWriter  # noqa: E402
 
 
-def _spec() -> OutputTableSpec:
-    return OutputTableSpec(
-        name="analysis_probe",
+def _spec() -> SqliteTable:
+    return SqliteTable(
+        key="rows",
+        table="analysis_probe",
         primary_key=("run_id", "scan_time", "cell_uid"),
         index_columns=("scan_time", "cell_uid"),
     )
@@ -40,10 +39,10 @@ def _df(value: float = 1.5) -> pd.DataFrame:
     )
 
 
-class TestOutputTableSpec:
-    def test_holds_name_pk_index(self):
+class TestSqliteTableSpec:
+    def test_holds_table_pk_index(self):
         spec = _spec()
-        assert spec.name == "analysis_probe"
+        assert spec.table == "analysis_probe"
         assert spec.primary_key == ("run_id", "scan_time", "cell_uid")
         assert spec.index_columns == ("scan_time", "cell_uid")
 
@@ -100,7 +99,7 @@ class TestDatetimeScanTimeSerialization:
     def test_scan_time_unix_not_added_when_no_scan_time(self, tmp_path):
         """Tables without a scan_time column are untouched."""
         db = tmp_path / "catalog.db"
-        spec = OutputTableSpec(name="no_time", primary_key=("run_id",))
+        spec = SqliteTable(key="rows", table="no_time", primary_key=("run_id",))
         ModuleOutputWriter(db, spec).write(pd.DataFrame([{"run_id": "R1", "v": 1.0}]))
 
         conn = sqlite3.connect(str(db))

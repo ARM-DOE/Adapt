@@ -579,87 +579,41 @@ class DataRepository:
         df: pd.DataFrame,
         product_type: str,
         scan_time: datetime,
-        producer: str,
-        parent_ids: list[str] | None = None,
-        metadata: dict | None = None,
-        filename_stem: str | None = None,
-    ) -> str:
-        """Write DataFrame to Parquet and register artifact.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            DataFrame to write
-        product_type : str
-            Must be CELLS_PARQUET
-        scan_time : datetime
-            Scan timestamp
-        producer : str
-            Component name
-        parent_ids : list of str, optional
-            Parent artifact IDs
-        metadata : dict, optional
-            Additional metadata
-        filename_stem : str, optional
-            Base filename
-
-        Returns
-        -------
-        str
-            Registered artifact ID
-        """
-        # Generate output path
-        output_path = self._generate_parquet_path(scan_time=scan_time, filename_stem=filename_stem)
-
-        # Atomic write
-        self._atomic_write_parquet(df, output_path)
-
-        # Update metadata with row count
-        metadata = metadata or {}
-        metadata["row_count"] = len(df)
-
-        # Register artifact
-        return self.register_artifact(
-            product_type=product_type,
-            file_path=output_path,
-            scan_time=scan_time,
-            producer=producer,
-            parent_ids=parent_ids,
-            metadata=metadata,
-        )
-
-    def write_analysis2d_parquet(
-        self,
-        df: pd.DataFrame,
-        scan_time: datetime,
         producer: str = "processor",
         parent_ids: list[str] | None = None,
         metadata: dict | None = None,
     ) -> str:
-        """Write analysis DataFrame to Parquet file (one per run_id).
+        """Append a DataFrame to the run's Parquet store for ``product_type``.
 
-        This replaces the old write_sqlite_table for cells data. Data is appended
-        to a single Parquet file per run at RADAR_ID/analysis/analysis2d_{run_id}.parquet.
+        Storage-oriented: one Parquet file per (product_type, run_id) at
+        ``RADAR_ID/analysis/{product_type}_{run_id}.parquet``. What the data
+        represents is described by ``product_type`` and ``metadata``, not by
+        this method.
 
         Parameters
         ----------
         df : pd.DataFrame
-            Analysis data (cells) to write
+            Rows to append.
+        product_type : str
+            Catalog item type (e.g. "analysis2d").
         scan_time : datetime
-            Scan timestamp
+            Scan timestamp.
         producer : str
-            Component name (default: "processor")
+            Component name (default: "processor").
         parent_ids : list of str, optional
-            Parent artifact IDs (e.g., gridded3d items)
+            Parent artifact IDs.
         metadata : dict, optional
-            Additional metadata
+            Additional metadata.
 
         Returns
         -------
         str
-            Registered item ID from RadarCatalog
+            Registered item ID from RadarCatalog.
         """
-        # Ensure required columns
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        df = df.copy()
         if "radar" not in df.columns:
             df["radar"] = self.radar
         if "run_id" not in df.columns:
@@ -667,68 +621,43 @@ class DataRepository:
         if "scan_time" not in df.columns:
             df["scan_time"] = scan_time
 
-        # Generate parquet file path - one file per run_id
-        analysis_dir = self.catalog.radar_dir / "analysis"
-        analysis_dir.mkdir(parents=True, exist_ok=True)
-        parquet_path = analysis_dir / f"analysis2d_{self.run_id}.parquet"
+        parquet_dir = self.catalog.radar_dir / "analysis"
+        parquet_dir.mkdir(parents=True, exist_ok=True)
+        parquet_path = parquet_dir / f"{product_type}_{self.run_id}.parquet"
 
-        # Append to or create parquet file
-        try:
-            import pyarrow as pa
-            import pyarrow.parquet as pq
+        table = pa.Table.from_pandas(df)
+        if parquet_path.exists():
+            # pandas concat handles schema evolution (new columns fill as NaN)
+            existing_df = pq.read_table(parquet_path).to_pandas()
+            combined_df = pd.concat([existing_df, df], ignore_index=True)
 
-            # Convert to PyArrow table
-            table = pa.Table.from_pandas(df)
+            # Re-normalize datetime columns after concat type coercion
+            datetime_cols = [
+                "time",
+                "scan_time",
+                "start_time",
+                "end_time",
+                "time_volume_start",
+                "time_volume_end",
+            ]
+            for col in datetime_cols:
+                if col in combined_df.columns:
+                    combined_df[col] = pd.to_datetime(
+                        combined_df[col],
+                        errors="coerce",
+                        utc=True,
+                    ).dt.tz_convert(None)
 
-            # If file exists, read and append; otherwise create new
-            if parquet_path.exists():
-                # Use pandas concat to handle schema evolution (new columns fill as NaN)
-                existing_df = pq.read_table(parquet_path).to_pandas()
-                combined_df = pd.concat([existing_df, df], ignore_index=True)
+            table = pa.Table.from_pandas(combined_df)
 
-                # Ensure datetime columns are properly typed (fix concat type coercion)
-                datetime_cols = [
-                    "time",
-                    "scan_time",
-                    "start_time",
-                    "end_time",
-                    "time_volume_start",
-                    "time_volume_end",
-                ]
-                for col in datetime_cols:
-                    if col in combined_df.columns:
-                        combined_df[col] = pd.to_datetime(
-                            combined_df[col],
-                            errors="coerce",
-                            utc=True,
-                        ).dt.tz_convert(None)
+        pq.write_table(table, parquet_path)
+        logger.debug("Wrote %d total rows to %s", len(table), parquet_path)
 
-                table = pa.Table.from_pandas(combined_df)
-                logger.debug(
-                    f"Appended {len(df)} rows to {parquet_path} (schema evolution handled)"
-                )
-
-            # Write or overwrite parquet file
-            pq.write_table(table, parquet_path)
-            logger.debug(f"Wrote {len(table)} total rows to {parquet_path}")
-
-        except ImportError:
-            # Fallback to pandas (less efficient but works)
-            if parquet_path.exists():
-                existing_df = pd.read_parquet(parquet_path)
-                df = pd.concat([existing_df, df], ignore_index=True)
-                logger.debug(f"Appended {len(df)} rows to {parquet_path}")
-
-            df.to_parquet(parquet_path, engine="pyarrow", index=False)
-            logger.debug(f"Wrote {len(df)} total rows to {parquet_path}")
-
-        # Register in new catalog system
         item_metadata = metadata or {}
         item_metadata["row_count"] = len(df)
         item_metadata["num_cells"] = len(df)
-        item_metadata["producer"] = producer  # Store producer in metadata
+        item_metadata["producer"] = producer
 
-        # Generate unique item ID
         import uuid
 
         item_id = str(uuid.uuid4())[:16]
@@ -736,10 +665,10 @@ class DataRepository:
         self.catalog.register_item(
             item_id=item_id,
             run_id=self.run_id,
-            item_type="analysis2d",
+            item_type=product_type,
             scan_time=scan_time.isoformat(),
             file_path=str(parquet_path.relative_to(self.catalog.radar_dir)),
-            processing_stage="analysis",
+            processing_stage=producer,
             status="complete",
             parent_ids=parent_ids or [],
             metadata=item_metadata,
@@ -950,23 +879,6 @@ class DataRepository:
 
         return base_dir / filename
 
-    def _generate_parquet_path(self, scan_time: datetime, filename_stem: str | None = None) -> Path:
-        """Generate Parquet output path with run_id suffix.
-
-        Pattern: root_dir/RADAR_ID/analysis/YYYYMMDD/filename_{run_id}_cells.parquet
-        """
-        date_str = scan_time.strftime("%Y%m%d")
-
-        base_dir = self.output_dirs["analysis"] / date_str
-        base_dir.mkdir(parents=True, exist_ok=True)
-
-        if filename_stem is None:
-            filename = f"{self.radar}_{self.run_id}_cells.parquet"
-        else:
-            filename = f"{filename_stem}_{self.run_id}.parquet"
-
-        return base_dir / filename
-
     def _generate_sqlite_path(self, scan_time: datetime) -> Path:
         """Generate SQLite database path with run_id suffix.
 
@@ -1013,30 +925,6 @@ class DataRepository:
             # Atomic rename
             shutil.move(temp_path, output_path)
             logger.debug(f"Wrote NetCDF: {output_path}")
-
-        except Exception:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            raise
-
-    def _atomic_write_parquet(self, df: pd.DataFrame, output_path: Path) -> None:
-        """Write Parquet atomically (temp file + rename)."""
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write to temp file
-        fd, temp_path = tempfile.mkstemp(suffix=".parquet", dir=output_path.parent)
-        os.close(fd)
-
-        try:
-            compression = "snappy"
-            if self.config and hasattr(self.config, "output"):
-                compression = getattr(self.config.output, "compression", "snappy")
-
-            df.to_parquet(temp_path, engine="pyarrow", compression=compression, index=False)
-
-            # Atomic rename
-            shutil.move(temp_path, output_path)
-            logger.debug(f"Wrote Parquet: {output_path}")
 
         except Exception:
             if os.path.exists(temp_path):

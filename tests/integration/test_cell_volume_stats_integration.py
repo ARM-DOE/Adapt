@@ -77,7 +77,7 @@ def test_end_to_end_run_write_read(internal_config, tmp_path):
     assert set(df["cell_uid"]) == {"uid-1", "uid-2"}
 
     db = tmp_path / "catalog.db"
-    ModuleOutputWriter(db, CellVolumeStatsModule.output_table).write(df)
+    ModuleOutputWriter(db, CellVolumeStatsModule.persistence[0]).write(df)
 
     conn = sqlite3.connect(str(db))
     try:

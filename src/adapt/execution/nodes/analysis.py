@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from adapt.contracts import check_cell_adjacency, check_cell_stats
+from adapt.contracts import ParquetArtifact, check_cell_adjacency, check_cell_stats
 from adapt.execution.module_registry import registry
 from adapt.modules.analysis.config import AnalysisConfig
 from adapt.modules.analysis.module import RadarCellAnalyzer
@@ -13,7 +13,7 @@ class AnalysisModule(BaseModule):
 
     Extracts per-cell statistics (area, reflectivity, motion, centroids)
     from a segmented/projected 2D dataset. Pure compute — no I/O.
-    Persistence is the processor's responsibility.
+    Persistence is declared below and routed by the OutputRouter.
 
     Context inputs
     --------------
@@ -43,6 +43,10 @@ class AnalysisModule(BaseModule):
         "cell_adjacency": check_cell_adjacency,
     }
     config_class = AnalysisConfig
+    persistence = (
+        ParquetArtifact(key="cell_stats", product_type="analysis2d", producer="analysis"),
+        ParquetArtifact(key="cell_adjacency", product_type="analysis2d", producer="cell_adjacency"),
+    )
 
     @classmethod
     def build_config(cls, cfg) -> AnalysisConfig:

@@ -14,10 +14,10 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
+from adapt.contracts import SqliteTable
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
 from adapt.persistence import ProductType
-from adapt.persistence.module_output import OutputTableSpec
 from adapt.runtime.postprocessor import PostProcessor
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -41,7 +41,9 @@ class _FakePostModule(BaseModule):
     pipeline_phase = POSTPROCESS_PHASE
     inputs = ["run_id"]
     outputs = ["fake_rows"]
-    output_table = OutputTableSpec(name="fake_ext", primary_key=("run_id", "cell_uid"))
+    persistence = (
+        SqliteTable(key="fake_rows", table="fake_ext", primary_key=("run_id", "cell_uid")),
+    )
 
     def run(self, context: dict) -> dict:
         return {
@@ -56,7 +58,9 @@ class _CoreWritingModule(BaseModule):
     pipeline_phase = POSTPROCESS_PHASE
     inputs = ["run_id"]
     outputs = ["rogue_rows"]
-    output_table = OutputTableSpec(name="cells_by_scan", primary_key=("run_id", "cell_uid"))
+    persistence = (
+        SqliteTable(key="rogue_rows", table="cells_by_scan", primary_key=("run_id", "cell_uid")),
+    )
 
     def run(self, context: dict) -> dict:
         return {"rogue_rows": pd.DataFrame([{"run_id": context["run_id"], "cell_uid": "x"}])}
@@ -67,10 +71,10 @@ class _TwoTableModule(BaseModule):
     pipeline_phase = POSTPROCESS_PHASE
     inputs = ["run_id"]
     outputs = ["rows_a", "rows_b"]
-    output_tables = {
-        "rows_a": OutputTableSpec(name="ext_a", primary_key=("cell_uid",)),
-        "rows_b": OutputTableSpec(name="ext_b", primary_key=("flash_id",)),
-    }
+    persistence = (
+        SqliteTable(key="rows_a", table="ext_a", primary_key=("cell_uid",)),
+        SqliteTable(key="rows_b", table="ext_b", primary_key=("flash_id",)),
+    )
 
     def run(self, context: dict) -> dict:
         return {
@@ -134,7 +138,7 @@ class _NeedsMasksModule(BaseModule):
     pipeline_phase = POSTPROCESS_PHASE
     inputs = ["minute_masks", "radar_origin"]
     outputs = ["probe_rows"]
-    output_table = OutputTableSpec(name="probe_ext", primary_key=("n",))
+    persistence = (SqliteTable(key="probe_rows", table="probe_ext", primary_key=("n",)),)
     captured: dict = {}
 
     def run(self, context: dict) -> dict:

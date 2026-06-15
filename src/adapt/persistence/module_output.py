@@ -3,11 +3,11 @@
 
 """Generic per-module output table writer.
 
-A module declares an ``OutputTableSpec`` (table name, primary key, index
-columns). The processor passes the module's returned DataFrame to a
-``ModuleOutputWriter``, which creates the SQLite table, infers columns from the
-DataFrame, upserts on the primary key, and registers a JSON schema snapshot in
-``module_schemas`` for API discovery.
+A module declares a ``SqliteTable`` spec (table name, primary key, index
+columns — see ``adapt.contracts.persistence``). The ``OutputRouter`` passes the
+module's returned DataFrame to a ``ModuleOutputWriter``, which creates the
+SQLite table, infers columns from the DataFrame, upserts on the primary key,
+and registers a JSON schema snapshot in ``module_schemas`` for API discovery.
 
 No module-specific code lives here — the writer is fully driven by the spec and
 the DataFrame. Mirrors the SQLite patterns used by TrackStore.
@@ -15,7 +15,6 @@ the DataFrame. Mirrors the SQLite patterns used by TrackStore.
 
 import json
 import sqlite3
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,25 +22,9 @@ import numpy as np
 import pandas as pd
 from pandas.api import types as pdt
 
+from adapt.contracts import SqliteTable
 from adapt.persistence.tables import is_core_table
 from adapt.utils.time import to_scan_iso, to_scan_unix
-
-
-class OutputTableSpec:
-    """Lightweight declaration of a module's output table.
-
-    Columns are inferred from the written DataFrame — not declared here.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        primary_key: Sequence[str],
-        index_columns: Sequence[str] = (),
-    ) -> None:
-        self.name = name
-        self.primary_key = tuple(primary_key)
-        self.index_columns = tuple(index_columns)
 
 
 class ModuleOutputWriter:
@@ -52,10 +35,10 @@ class ModuleOutputWriter:
     for API discovery. No module-specific logic lives here.
     """
 
-    def __init__(self, db_path: str | Path, spec: OutputTableSpec) -> None:
-        if is_core_table(spec.name):
+    def __init__(self, db_path: str | Path, spec: SqliteTable) -> None:
+        if is_core_table(spec.table):
             raise ValueError(
-                f"'{spec.name}' is a core table; module writers may only create "
+                f"'{spec.table}' is a core table; module writers may only create "
                 "extension tables, never mutate core pipeline tables."
             )
         self._db_path = Path(db_path)
@@ -103,15 +86,15 @@ class ModuleOutputWriter:
         col_defs = ", ".join(f"{name} {_sqlite_type(df[name])}" for name in df.columns)
         pk = ", ".join(self._spec.primary_key)
         conn.execute(
-            f"CREATE TABLE IF NOT EXISTS {self._spec.name} ({col_defs}, PRIMARY KEY ({pk}))"
+            f"CREATE TABLE IF NOT EXISTS {self._spec.table} ({col_defs}, PRIMARY KEY ({pk}))"
         )
 
     def _ensure_columns(self, conn: sqlite3.Connection, df: pd.DataFrame) -> None:
-        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({self._spec.name})")}
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({self._spec.table})")}
         for col in df.columns:
             if col not in existing:
                 conn.execute(
-                    f"ALTER TABLE {self._spec.name} ADD COLUMN {col} {_sqlite_type(df[col])}"
+                    f"ALTER TABLE {self._spec.table} ADD COLUMN {col} {_sqlite_type(df[col])}"
                 )
 
     def _upsert(self, conn: sqlite3.Connection, df: pd.DataFrame) -> None:
@@ -122,7 +105,7 @@ class ModuleOutputWriter:
         update_set = ", ".join(f"{c}=excluded.{c}" for c in cols if c not in pk)
         conflict = ", ".join(self._spec.primary_key)
         sql = (
-            f"INSERT INTO {self._spec.name} ({col_list}) VALUES ({placeholders}) "
+            f"INSERT INTO {self._spec.table} ({col_list}) VALUES ({placeholders}) "
             f"ON CONFLICT ({conflict}) DO UPDATE SET {update_set}"
         )
         rows = [tuple(_to_sqlite(v) for v in row) for row in df.itertuples(index=False)]
@@ -140,7 +123,7 @@ class ModuleOutputWriter:
             "(table_name, primary_key, index_columns, columns_json, updated_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (
-                self._spec.name,
+                self._spec.table,
                 ",".join(self._spec.primary_key),
                 ",".join(self._spec.index_columns),
                 json.dumps(columns),

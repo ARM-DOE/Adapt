@@ -4,7 +4,7 @@
 """Tests for RadarProcessor post-persistence (enrich) handling.
 
 Enrich modules run only after cell_uid is committed, and their returned
-DataFrame is written generically to a per-module table via ModuleOutputWriter.
+DataFrame is written generically via the module's declared SqliteTable spec.
 """
 
 import queue
@@ -13,9 +13,9 @@ import sqlite3
 import pandas as pd
 import pytest
 
+from adapt.contracts import SqliteTable
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
-from adapt.persistence.module_output import OutputTableSpec
 from adapt.runtime.processor import RadarProcessor
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -29,10 +29,13 @@ class _ProbeEnrichModule(BaseModule):
     required_history = 1
     inputs = ["run_id", "scan_time"]
     outputs = ["enrich_probe_rows"]
-    output_table = OutputTableSpec(
-        name="enrich_probe",
-        primary_key=("run_id", "scan_time", "cell_uid"),
-        index_columns=("scan_time", "cell_uid"),
+    persistence = (
+        SqliteTable(
+            key="enrich_probe_rows",
+            table="enrich_probe",
+            primary_key=("run_id", "scan_time", "cell_uid"),
+            index_columns=("scan_time", "cell_uid"),
+        ),
     )
 
     def run(self, context: dict) -> dict:
@@ -82,9 +85,17 @@ class TestEnrichUidGuard:
 
 
 class TestEnrichWrite:
-    def test_save_enrichment_results_writes_table(self, proc_with_enrich, test_repository):
+    def test_enrich_results_routed_to_declared_table(self, proc_with_enrich, test_repository):
+        from adapt.contracts import PersistenceMeta
+
         ext_result = _ProbeEnrichModule().run({})
-        proc_with_enrich._save_enrichment_results(ext_result)
+        meta = PersistenceMeta(
+            scan_time=None,
+            run_id=test_repository.run_id,
+            source_file="",
+            dataset_id=test_repository.radar,
+        )
+        proc_with_enrich._router.persist(proc_with_enrich._post_modules, ext_result, meta)
 
         conn = sqlite3.connect(str(test_repository.catalog.db_path))
         try:

@@ -58,7 +58,7 @@ def test_processor_accepts_fake_grid(
 
     monkeypatch.setattr(proc._executors[1], "run", _fake_single)
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi_result)
-    monkeypatch.setattr(proc, "_save_results", lambda result, st: None)
+    monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
     ok1 = proc.process_file("/fake/file_1")
     ok2 = proc.process_file("/fake/file_2")

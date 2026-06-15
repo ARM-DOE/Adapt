@@ -44,6 +44,7 @@ from adapt.api.domain import Run, Scan, ScanBundle, Track
 from adapt.api.selection import FilterSpec
 from adapt.persistence.catalog import RadarCatalog
 from adapt.persistence.registry import RepositoryRegistry
+from adapt.persistence.tables import CORE_DATA_TABLES
 from adapt.persistence.track_store import TrackStore
 
 __all__ = ["RepositoryClient"]
@@ -200,14 +201,146 @@ class RepositoryClient:
         radar = self._resolve_radar(radar)
         return self._track_store(radar).get_cell_events(run_id, cell_uid)
 
-    def track_lightning(self, run_id: str, cell_uid: str, radar: str | None = None) -> pd.DataFrame:
-        """Return xLMA lightning stats (xlma_stat_minutes) for one track.
+    # =========================================================================
+    # Generic table access (catalog-driven discovery)
+    # =========================================================================
 
-        Empty DataFrame when the LMA post-processor has not run for this
-        repository (the extension table is absent).
+    def tables(self, radar: str | None = None) -> pd.DataFrame:
+        """All queryable tables: core tracking tables + registered extension tables.
+
+        Columns: ``table_name``, ``kind`` ('core' | 'extension'), ``primary_key``,
+        ``index_columns``. Discovery is catalog-driven (``module_schemas``) — a
+        new module's table appears here automatically after its first write,
+        with zero client changes.
         """
         radar = self._resolve_radar(radar)
-        return self._track_store(radar).get_track_lightning(run_id, cell_uid)
+        catalog = self._catalog(radar)
+        conn = catalog._get_connection()
+        with catalog._lock:
+            registry_exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='module_schemas'"
+            ).fetchone()
+            rows = (
+                conn.execute(
+                    "SELECT table_name, primary_key, index_columns FROM module_schemas"
+                ).fetchall()
+                if registry_exists
+                else []
+            )
+        core = pd.DataFrame(
+            {
+                "table_name": sorted(CORE_DATA_TABLES),
+                "kind": "core",
+                "primary_key": "",
+                "index_columns": "",
+            }
+        )
+        if not rows:
+            return core
+        ext = pd.DataFrame([dict(r) for r in rows])
+        ext["kind"] = "extension"
+        return pd.concat(
+            [core, ext[["table_name", "kind", "primary_key", "index_columns"]]],
+            ignore_index=True,
+        )
+
+    def table(
+        self,
+        name: str,
+        radar: str | None = None,
+        run_id: str | None = None,
+        filters: dict[str, object] | None = None,
+    ) -> pd.DataFrame:
+        """Read one table with equality filters.
+
+        ``name`` must be a discovered table (see :meth:`tables`) — anything else
+        raises ValueError naming the available tables. Identifiers are validated
+        against the discovered set / ``isidentifier``, never interpolated raw,
+        so no SQL can be injected through them.
+        """
+        radar = self._resolve_radar(radar)
+        known = set(self.tables(radar)["table_name"])
+        if name not in known:
+            raise ValueError(f"Unknown table '{name}'. Available: {sorted(known)}")
+
+        merged: dict[str, object] = dict(filters or {})
+        if run_id is not None:
+            merged["run_id"] = run_id
+        conditions, params = [], []
+        for col, val in merged.items():
+            if not str(col).isidentifier():
+                raise ValueError(f"Invalid filter column '{col}'")
+            conditions.append(f'"{col}" = ?')
+            params.append(val)
+
+        sql = f'SELECT * FROM "{name}"'
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        catalog = self._catalog(radar)
+        conn = catalog._get_connection()
+        with catalog._lock:
+            rows = conn.execute(sql, params).fetchall()
+        return pd.DataFrame([dict(r) for r in rows])
+
+    # =========================================================================
+    # Generic artifact access
+    # =========================================================================
+
+    def artifacts(
+        self,
+        product_type: str | None = None,
+        radar: str | None = None,
+        run_id: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> pd.DataFrame:
+        """Catalog ``items`` rows (file-backed artifacts), filtered. No filesystem walk."""
+        radar = self._resolve_radar(radar)
+        catalog = self._catalog(radar)
+        conn = catalog._get_connection()
+        conditions, params = [], []
+        if product_type is not None:
+            conditions.append("item_type = ?")
+            params.append(product_type)
+        if run_id is not None:
+            conditions.append("run_id = ?")
+            params.append(run_id)
+        if start is not None:
+            conditions.append("scan_time >= ?")
+            params.append(start.isoformat())
+        if end is not None:
+            conditions.append("scan_time <= ?")
+            params.append(end.isoformat())
+        sql = "SELECT * FROM items"
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY scan_time"
+        with catalog._lock:
+            rows = conn.execute(sql, params).fetchall()
+        return pd.DataFrame([dict(r) for r in rows])
+
+    def open_artifact(self, item_id: str, radar: str | None = None):
+        """Open one artifact by id: ``.parquet`` -> DataFrame, ``.nc`` -> xarray.Dataset.
+
+        Raises if the item is unknown, its cataloged file is missing, or its
+        format is unsupported — never returns None.
+        """
+        radar = self._resolve_radar(radar)
+        catalog = self._catalog(radar)
+        conn = catalog._get_connection()
+        with catalog._lock:
+            row = conn.execute("SELECT * FROM items WHERE item_id = ?", (item_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown artifact '{item_id}' in radar '{radar}'")
+        path = self.root_dir / radar / dict(row)["file_path"]
+        if not path.exists():
+            raise FileNotFoundError(f"Artifact '{item_id}' file missing: {path}")
+        if path.suffix == ".parquet":
+            return pd.read_parquet(path, engine="pyarrow")
+        if path.suffix in {".nc", ".nc4", ".netcdf"}:
+            return xr.open_dataset(path)
+        raise ValueError(f"Artifact '{item_id}' has unsupported format: {path.suffix}")
 
     # =========================================================================
     # Selection

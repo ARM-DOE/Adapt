@@ -233,27 +233,6 @@ class TrackStore:
             ).fetchall()
         return pd.DataFrame([dict(r) for r in rows])
 
-    def get_track_lightning(self, run_id: str, cell_uid: str) -> pd.DataFrame:
-        """Return ``xlma_stat_minutes`` rows for one track, ordered by ``time``.
-
-        The xlma_stat_minutes table is an opt-in extension written by the
-        xlma_stat post-processor. Returns an empty DataFrame when that table is
-        absent (xlma_stat never ran), so callers degrade to "no data" rather
-        than erroring.
-        """
-        conn = self._connect()
-        with self._lock:
-            exists = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='xlma_stat_minutes'"
-            ).fetchone()
-            if exists is None:
-                return pd.DataFrame()
-            rows = conn.execute(
-                "SELECT * FROM xlma_stat_minutes WHERE run_id=? AND cell_uid=? ORDER BY time",
-                (run_id, cell_uid),
-            ).fetchall()
-        return pd.DataFrame([dict(r) for r in rows])
-
     def get_cell_events(self, run_id: str, cell_uid: str | None = None) -> pd.DataFrame:
         conn = self._connect()
         with self._lock:

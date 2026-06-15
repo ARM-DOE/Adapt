@@ -26,6 +26,10 @@ CORE_TABLES: frozenset[str] = frozenset(
 )
 
 
+# Queryable pipeline-output tables (subset of CORE_TABLES exposed to the read API).
+CORE_DATA_TABLES: frozenset[str] = frozenset({"cells_by_scan", "cell_events", "cell_tracks"})
+
+
 def is_core_table(name: str) -> bool:
     """Return True if ``name`` is a protected core table."""
     return name in CORE_TABLES

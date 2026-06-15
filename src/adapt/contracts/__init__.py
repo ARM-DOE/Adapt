@@ -26,6 +26,15 @@ from adapt.contracts.cell_volume_stats import (
 )
 from adapt.contracts.grid import assert_gridded, check_grid_ds_2d
 from adapt.contracts.history import check_scan_history
+from adapt.contracts.persistence import (
+    NetcdfArtifact,
+    ParquetArtifact,
+    PersistenceMeta,
+    PersistenceSpec,
+    RegisterFileArtifact,
+    SqliteTable,
+    TrackTablesWrite,
+)
 from adapt.contracts.pipeline import ContractViolation, require
 from adapt.contracts.projection import assert_projected, check_projected_ds
 from adapt.contracts.segmentation import assert_segmented, check_segmented_ds
@@ -47,6 +56,14 @@ __all__ = [
     # primitives
     "ContractViolation",
     "require",
+    # persistence specs — modules declare these in their ``persistence`` ClassVar
+    "RegisterFileArtifact",
+    "NetcdfArtifact",
+    "ParquetArtifact",
+    "TrackTablesWrite",
+    "SqliteTable",
+    "PersistenceSpec",
+    "PersistenceMeta",
     "assert_gridded",
     "assert_segmented",
     "assert_projected",

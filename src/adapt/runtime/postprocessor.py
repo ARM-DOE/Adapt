@@ -10,10 +10,11 @@ live in the repository rather than coming from raw radar.
 
 It reuses — by composition, not inheritance — the same components the pipeline
 uses: the module ``registry``, ``GraphBuilder``/``GraphExecutor`` for dependency
-resolution, ``resolve_module_configs`` for config, and ``ModuleOutputWriter`` for
-persistence (which enforces that only extension tables, never core tables, are
-written). Post-process modules declare ``pipeline_phase = POSTPROCESS_PHASE`` and
-are selected exclusively here; the live pipeline never loads them.
+resolution, ``resolve_module_configs`` for config, and the ``OutputRouter`` for
+persistence (whose SqliteTable writer enforces that only extension tables, never
+core tables, are written). Post-process modules declare
+``pipeline_phase = POSTPROCESS_PHASE`` and are selected exclusively here; the
+live pipeline never loads them.
 """
 
 import importlib
@@ -24,12 +25,13 @@ from typing import TYPE_CHECKING
 import yaml
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
+from adapt.contracts import PersistenceMeta
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import resolve_enabled_modules
 from adapt.modules.base import POSTPROCESS_PHASE
-from adapt.persistence.module_output import ModuleOutputWriter
+from adapt.persistence.output_router import OutputRouter
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -129,24 +131,16 @@ class PostProcessor:
         return context
 
     def _persist(self, modules: list, result: dict) -> None:
-        """Write each module's declared extension table(s) from its returned frames."""
-        db_path = self.repository.catalog.db_path
-        for module in modules:
-            for output_key, spec in self._output_specs(module).items():
-                df = result.get(output_key)
-                if df is None or getattr(df, "empty", True):
-                    continue
-                ModuleOutputWriter(db_path, spec).write(df)
+        """Route each module's declared persistence specs through the OutputRouter.
 
-    @staticmethod
-    def _output_specs(module) -> dict:
-        """Map each output context key to its OutputTableSpec.
-
-        Supports modules with multiple tables (``output_tables``) and the common
-        single-table form (``output_table`` bound to the first output).
+        Run-level persist: there is no single scan_time (rows carry their own),
+        so ``meta.scan_time`` is None and any time-stamped artifact spec would
+        correctly raise.
         """
-        if module.output_tables:
-            return dict(module.output_tables)
-        if module.output_table is not None and module.outputs:
-            return {module.outputs[0]: module.output_table}
-        return {}
+        meta = PersistenceMeta(
+            scan_time=None,
+            run_id=self.repository.run_id,
+            source_file="",
+            dataset_id=self.repository.radar,
+        )
+        OutputRouter(self.repository).persist(modules, result, meta)

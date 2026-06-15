@@ -195,7 +195,9 @@ class TestTrackEvents:
         assert isinstance(df, pd.DataFrame)
 
 
-class TestTrackLightning:
+class TestLightningViaGenericTable:
+    """The lightning read path is the generic table API (no dedicated method)."""
+
     def _add_lma_table(self, repo_root):
         catalog_path = repo_root / _RADAR / "catalog.db"
         conn = sqlite3.connect(str(catalog_path))
@@ -207,21 +209,35 @@ class TestTrackLightning:
             "INSERT INTO xlma_stat_minutes VALUES (?,?,?,?,?)",
             (_RUN_ID, _UID_A, "2024-01-01T12:00:00Z", 5, 50),
         )
+        # Schema registration normally done by ModuleOutputWriter on first write
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS module_schemas ("
+            "table_name TEXT PRIMARY KEY, primary_key TEXT, index_columns TEXT, "
+            "columns_json TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO module_schemas VALUES (?,?,?,?,?)",
+            ("xlma_stat_minutes", "run_id,time,cell_uid", "cell_uid,time", "[]", ""),
+        )
         conn.commit()
         conn.close()
 
-    def test_track_lightning_returns_rows(self, repo_root):
+    def test_lightning_rows_readable_through_table(self, repo_root):
         self._add_lma_table(repo_root)
         client = RepositoryClient(repo_root)
         try:
-            df = client.track_lightning(_RUN_ID, _UID_A, radar=_RADAR)
+            assert "xlma_stat_minutes" in set(client.tables(_RADAR)["table_name"])
+            df = client.table(
+                "xlma_stat_minutes", radar=_RADAR, run_id=_RUN_ID, filters={"cell_uid": _UID_A}
+            )
         finally:
             client.close()
         assert list(df["flash_count"]) == [5]
 
-    def test_track_lightning_empty_without_table(self, client):
-        df = client.track_lightning(_RUN_ID, _UID_A, radar=_RADAR)
-        assert df.empty
+    def test_lightning_table_absent_means_not_discovered(self, client):
+        assert "xlma_stat_minutes" not in set(client.tables(_RADAR)["table_name"])
+        with pytest.raises(ValueError, match="Unknown table"):
+            client.table("xlma_stat_minutes", radar=_RADAR)
 
 
 # ---------------------------------------------------------------------------

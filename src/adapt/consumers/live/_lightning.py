@@ -6,7 +6,7 @@
 Lightning is accumulated in 1-minute bins (``time_bin``); a track's time-series
 is indexed by ``scan_time``. This aligns them by flooring each scan time to the
 minute and left-joining the lightning value columns. The dashboard loads the
-lightning rows through the API (RepositoryClient.track_lightning); this module
+lightning rows through the generic API (RepositoryClient.table); this module
 only does the pure, Tk/matplotlib-free join. Mirrors ``_volume_stats``.
 """
 

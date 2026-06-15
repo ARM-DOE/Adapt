@@ -16,9 +16,12 @@ def test_module_declares_postprocess_phase_and_two_tables():
     m = XlmaStatModule()
     assert m.name == "xlma_stat"
     assert m.pipeline_phase == POSTPROCESS_PHASE
-    assert set(m.output_tables) == {"xlma_stat_minutes_rows", "xlma_stat_scan_rows"}
-    assert m.output_tables["xlma_stat_minutes_rows"].name == "xlma_stat_minutes"
-    assert m.output_tables["xlma_stat_scan_rows"].name == "xlma_stat_scan"
+    assert {spec.key for spec in m.persistence} == {
+        "xlma_stat_minutes_rows",
+        "xlma_stat_scan_rows",
+    }
+    assert m.persistence[0].table == "xlma_stat_minutes"
+    assert m.persistence[1].table == "xlma_stat_scan"
 
 
 def test_module_consumes_geometry_it_never_computes():
@@ -28,12 +31,12 @@ def test_module_consumes_geometry_it_never_computes():
 
 def test_output_tables_are_keyed_by_run_and_time():
     m = XlmaStatModule()
-    assert m.output_tables["xlma_stat_minutes_rows"].primary_key == (
+    assert m.persistence[0].primary_key == (
         "run_id",
         "time",
         "cell_uid",
     )
-    assert m.output_tables["xlma_stat_scan_rows"].primary_key == (
+    assert m.persistence[1].primary_key == (
         "run_id",
         "scan_time",
         "cell_uid",

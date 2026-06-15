@@ -83,7 +83,7 @@ def test_grid_nc_path_built_under_base_dir(load_module, ingest_module_config, tm
 def test_grid_nc_path_none_without_base_dir(load_module, ingest_module_config):
     result = load_module.run(_context(ingest_module_config))
 
-    assert result["grid_nc_path"] is None
+    assert "grid_nc_path" not in result
 
 
 def test_loader_is_created_once_across_files(load_module, ingest_module_config):

@@ -696,47 +696,6 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# get_track_lightning — reads the lma_cell_stats extension table
-# ---------------------------------------------------------------------------
-
-
-def _create_lma_table(db_path):
-    conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        "CREATE TABLE xlma_stat_minutes ("
-        "run_id TEXT, cell_uid TEXT, time TEXT, flash_count INTEGER, "
-        "lightning_source_count INTEGER, PRIMARY KEY (cell_uid, time))"
-    )
-    conn.executemany(
-        "INSERT INTO xlma_stat_minutes VALUES (?,?,?,?,?)",
-        [
-            ("r1", "UID1", "2024-01-01T12:01:00Z", 3, 30),
-            ("r1", "UID1", "2024-01-01T12:00:00Z", 1, 10),
-            ("r1", "UID2", "2024-01-01T12:00:00Z", 9, 90),
-        ],
-    )
-    conn.commit()
-    conn.close()
-
-
-def test_get_track_lightning_returns_rows_ordered_by_time(db_path):
-    _create_lma_table(db_path)
-    store = TrackStore(db_path)
-    try:
-        df = store.get_track_lightning("r1", "UID1")
-    finally:
-        store.close()
-
-    assert list(df["time"]) == ["2024-01-01T12:00:00Z", "2024-01-01T12:01:00Z"]
-    assert list(df["flash_count"]) == [1, 3]
-
-
-def test_get_track_lightning_empty_when_table_absent(store):
-    df = store.get_track_lightning("r1", "UID1")
-    assert df.empty
-
-
-# ---------------------------------------------------------------------------
 # Lifecycle duration
 # ---------------------------------------------------------------------------
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import xarray as _xr
 
-from adapt.contracts import check_grid_ds_2d
+from adapt.contracts import RegisterFileArtifact, check_grid_ds_2d
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.ingest.config import IngestConfig
@@ -48,6 +48,9 @@ class LoadModule(BaseModule):
     outputs = ["grid_ds", "grid_ds_2d", "scan_time", "grid_nc_path"]
     output_contracts = {"grid_ds_2d": check_grid_ds_2d}
     config_class = IngestConfig
+    persistence = (
+        RegisterFileArtifact(key="grid_nc_path", product_type="gridded3d", producer="ingest"),
+    )
 
     @classmethod
     def build_config(cls, cfg) -> IngestConfig:
@@ -117,16 +120,17 @@ class LoadModule(BaseModule):
                 ds_2d = ds_2d.assign_coords({coord: ds[coord]})
         ds_2d.attrs.update(ds.attrs)
 
-        # The loader wrote the 3D grid to `{output_dir}/{stem}.nc` when save_netcdf.
-        # Return that path so the processor can register it as a gridded3d artifact.
-        grid_nc_path = f"{nc_path}.nc" if (config.save_netcdf and nc_path) else None
-
-        return {
+        result = {
             "grid_ds": ds,
             "grid_ds_2d": ds_2d,
             "scan_time": scan_time,
-            "grid_nc_path": grid_nc_path,
         }
+        # The loader wrote the 3D grid to `{output_dir}/{stem}.nc` when save_netcdf.
+        # The key is OMITTED when no file was written: absent key = "not produced"
+        # (the router skips it); a present key asserts the file exists.
+        if config.save_netcdf and nc_path:
+            result["grid_nc_path"] = f"{nc_path}.nc"
+        return result
 
 
 registry.register(LoadModule)

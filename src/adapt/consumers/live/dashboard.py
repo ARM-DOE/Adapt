@@ -2464,8 +2464,15 @@ class AdaptDashboard(tk.Tk):
                             from adapt.api.client import RepositoryClient
 
                             lightning_client = RepositoryClient(repo)
-                        lma_df = lightning_client.track_lightning(self._current_run_id, uid, radar)
-                        track_df = _merge_lightning_fn(track_df, lma_df)
+                        known = set(lightning_client.tables(radar)["table_name"])
+                        if "xlma_stat_minutes" in known:
+                            lma_df = lightning_client.table(
+                                "xlma_stat_minutes",
+                                radar=radar,
+                                run_id=self._current_run_id,
+                                filters={"cell_uid": uid},
+                            )
+                            track_df = _merge_lightning_fn(track_df, lma_df)
                     except Exception:
                         logger.exception("Failed to load lightning for %s", uid)
             t = pd.to_datetime(track_df["scan_time"], utc=True)

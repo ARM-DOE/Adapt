@@ -41,10 +41,10 @@ def _parquet_path(repository):
     return repository.catalog.radar_dir / "analysis" / "analysis2d_test1234.parquet"
 
 
-class TestWriteAnalysis2dParquet:
+class TestWriteParquet:
     def test_first_write_creates_file_and_registers_item(self, repository):
-        item_id = repository.write_analysis2d_parquet(
-            _cells(_T0, [1, 2]), scan_time=_T0, parent_ids=["grid-1"]
+        item_id = repository.write_parquet(
+            _cells(_T0, [1, 2]), product_type="analysis2d", scan_time=_T0, parent_ids=["grid-1"]
         )
 
         stored = pd.read_parquet(_parquet_path(repository))
@@ -60,8 +60,8 @@ class TestWriteAnalysis2dParquet:
         assert json.loads(item["metadata"])["row_count"] == 2
 
     def test_second_write_appends_rows(self, repository):
-        repository.write_analysis2d_parquet(_cells(_T0, [1]), scan_time=_T0)
-        repository.write_analysis2d_parquet(_cells(_T1, [1, 2]), scan_time=_T1)
+        repository.write_parquet(_cells(_T0, [1]), product_type="analysis2d", scan_time=_T0)
+        repository.write_parquet(_cells(_T1, [1, 2]), product_type="analysis2d", scan_time=_T1)
 
         stored = pd.read_parquet(_parquet_path(repository))
 
@@ -69,8 +69,10 @@ class TestWriteAnalysis2dParquet:
         assert pd.api.types.is_datetime64_any_dtype(stored["time"])
 
     def test_schema_evolution_fills_new_column_with_nan(self, repository):
-        repository.write_analysis2d_parquet(_cells(_T0, [1]), scan_time=_T0)
-        repository.write_analysis2d_parquet(_cells(_T1, [1], hail_score=[0.9]), scan_time=_T1)
+        repository.write_parquet(_cells(_T0, [1]), product_type="analysis2d", scan_time=_T0)
+        repository.write_parquet(
+            _cells(_T1, [1], hail_score=[0.9]), product_type="analysis2d", scan_time=_T1
+        )
 
         stored = pd.read_parquet(_parquet_path(repository))
 

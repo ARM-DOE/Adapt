@@ -10,10 +10,10 @@ import pandas as pd
 import pytest
 
 import adapt.cli as cli
+from adapt.contracts import SqliteTable
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
 from adapt.persistence import DataRepository
-from adapt.persistence.module_output import OutputTableSpec
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -23,7 +23,9 @@ class _FakePostModule(BaseModule):
     pipeline_phase = POSTPROCESS_PHASE
     inputs = ["run_id"]
     outputs = ["fake_rows"]
-    output_table = OutputTableSpec(name="fake_ext", primary_key=("run_id", "cell_uid"))
+    persistence = (
+        SqliteTable(key="fake_rows", table="fake_ext", primary_key=("run_id", "cell_uid")),
+    )
 
     def run(self, context: dict) -> dict:
         return {"fake_rows": pd.DataFrame([{"run_id": context["run_id"], "cell_uid": "z", "v": 2}])}

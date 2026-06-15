@@ -89,7 +89,7 @@ def test_processor_get_results_returns_empty_dataframe(
 def test_processor_save_results_returns_none(
     pipeline_config, pipeline_output_dirs, test_repository
 ):
-    """save_results() is a no-op; persistence is handled by RepositoryWriter."""
+    """save_results() is a no-op; persistence is handled by the OutputRouter."""
     proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
     result = proc.save_results()
     assert result is None

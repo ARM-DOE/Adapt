@@ -27,6 +27,7 @@ dependencies:
   - pyproj
   - contextily
   - pyarrow
+  - duckdb
   - pydata-sphinx-theme
   - pydantic
   - pip:

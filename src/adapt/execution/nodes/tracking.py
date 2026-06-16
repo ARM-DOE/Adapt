@@ -1,10 +1,17 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from adapt.contracts import check_cell_events, check_projected_ds, check_tracked_cells
+from adapt.contracts import (
+    NetcdfArtifact,
+    TrackTablesWrite,
+    check_cell_events,
+    check_projected_ds,
+    check_tracked_cells,
+)
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.tracking.config import TrackingConfig
+from adapt.modules.tracking.lut import attach_cell_uid_lut, attach_registration_uid_lut
 from adapt.modules.tracking.module import RadarCellTracker
 
 
@@ -31,6 +38,10 @@ class TrackingModule(BaseModule):
         Per-cell observations for the current scan with cell_uid/cell_label.
     cell_events : pd.DataFrame
         Explicit event rows for CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION.
+    analysis_ds : xr.Dataset
+        ``projected_ds`` plus the cell_uid LUTs (``cell_uid`` for this scan's
+        labels, ``registration_cell_uid`` for the previous scan's) — the dataset
+        persisted as the analysis NetCDF.
     """
 
     name = "tracking"
@@ -38,13 +49,31 @@ class TrackingModule(BaseModule):
     required_history = 2
     pipeline_phase = 0
     inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time"]
-    outputs = ["tracked_cells", "cell_events"]
+    outputs = ["tracked_cells", "cell_events", "analysis_ds"]
     input_contracts = {"projected_ds": check_projected_ds}
     output_contracts = {
         "tracked_cells": check_tracked_cells,
         "cell_events": check_cell_events,
+        "analysis_ds": check_projected_ds,
     }
     config_class = TrackingConfig
+    # DEBT: TrackTablesWrite encodes tracking science that lives in
+    # TrackStore.write_scan. Follow-up ticket: tracking emits final row
+    # DataFrames so this decomposes into plain SqliteTable specs.
+    persistence = (
+        NetcdfArtifact(
+            key="analysis_ds",
+            product_type="segmentation2d",
+            producer="processor",
+            description="Radar analysis with segmentation and projections",
+        ),
+        TrackTablesWrite(
+            tracked_key="tracked_cells",
+            events_key="cell_events",
+            stats_key="cell_stats",
+            adjacency_key="cell_adjacency",
+        ),
+    )
 
     @classmethod
     def build_config(cls, cfg) -> TrackingConfig:
@@ -66,6 +95,9 @@ class TrackingModule(BaseModule):
 
     def __init__(self) -> None:
         self._tracker: RadarCellTracker | None = None
+        # Previous scan's tracked cells: maps the prev-scan labels carried by
+        # registration_minutes to global uids on the next scan's analysis_ds.
+        self._prev_tracked_cells = None
 
     def run(self, context: dict) -> dict:
         config = context["tracking_config"]
@@ -80,9 +112,15 @@ class TrackingModule(BaseModule):
             cell_stats_df=cell_stats,
         )
 
+        analysis_ds = attach_cell_uid_lut(ds_2d, tracked_cells)
+        analysis_ds = attach_registration_uid_lut(analysis_ds, self._prev_tracked_cells)
+        if tracked_cells is not None and not tracked_cells.empty:
+            self._prev_tracked_cells = tracked_cells
+
         return {
             "tracked_cells": tracked_cells,
             "cell_events": cell_events,
+            "analysis_ds": analysis_ds,
         }
 
 

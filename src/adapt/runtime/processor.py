@@ -15,7 +15,7 @@ Responsibilities of this class (orchestration only):
 - File deduplication via FileProcessingTracker
 - Frame pairing: accumulate segmented history, validate time gap
 - Context assembly: inject dataset_history before calling multi-executor
-- NetCDF + Parquet persistence after graph run
+- Persistence handoff: route module-declared outputs through the OutputRouter
 - Stop/start lifecycle
 """
 
@@ -23,21 +23,20 @@ import logging
 import queue
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
-from adapt.contracts import ContractViolation
+from adapt.contracts import ContractViolation, PersistenceMeta
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import _ensure_modules_registered, resolve_enabled_modules
 from adapt.persistence import DataRepository, ProductType
-from adapt.persistence.track_store import TrackStore
-from adapt.persistence.writer import RepositoryWriter
+from adapt.persistence.output_router import OutputRouter
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -114,6 +113,8 @@ class RadarProcessor(threading.Thread):
 
         in_pipeline = [m for m in modules if m.pipeline_phase != 3]
         post_persist = [m for m in modules if m.pipeline_phase == 3]
+        self._pipeline_modules = in_pipeline
+        self._router = OutputRouter(self.repository)
 
         history_groups: dict[int, list] = {}
         for m in in_pipeline:
@@ -282,8 +283,7 @@ class RadarProcessor(threading.Thread):
             scan_time = result.get("scan_time") or base_ctx.get("scan_time")
             # Normalize once to tz-aware UTC so persistence (artifact registration),
             # the enrich 3D-grid read, and the enrich module all use one representation.
-            if scan_time is not None and scan_time.tzinfo is None:
-                scan_time = scan_time.replace(tzinfo=UTC)
+            scan_time = self._normalize_scan_time(scan_time)
             elapsed_s = time.perf_counter() - t0
 
             # Register radar location from first scan (idempotent after that)
@@ -302,17 +302,33 @@ class RadarProcessor(threading.Thread):
             if len(self._scan_history) > self._max_history:
                 self._scan_history.pop(0)
 
-            # ── Persist results ────────────────────────────────────────────
-            if self.repository and result:
-                self._save_results(result, scan_time)
+            # ── Persist results: every module declared its specs; the router
+            # writes them mechanically (no module names in this class).
+            if self.repository:
+                meta = PersistenceMeta(
+                    scan_time=scan_time,
+                    run_id=self.repository.run_id,
+                    source_file=str(filepath),
+                    dataset_id=self.config.downloader.radar,
+                )
+                if result:
+                    self._router.persist(self._pipeline_modules, result, meta)
 
             # ── Post-persistence enrichment (pipeline_phase=3) ─────────────
             # Enrich modules index on (scan_time, cell_uid); they only run once
             # tracking has committed cell_uid for this scan.
-            if self._post_executor is not None and self._should_run_enrichment(result):
+            if (
+                self.repository
+                and self._post_executor is not None
+                and self._should_run_enrichment(result)
+            ):
                 post_ctx = self._build_enrich_context(result, scan_time)
                 ext_result = self._post_executor.run(post_ctx)
-                self._save_enrichment_results(ext_result)
+                # Enrichment carries no scan_time (run-level aggregate)
+                enrich_meta = PersistenceMeta(
+                    scan_time=None, run_id=self.repository.run_id, source_file="", dataset_id=""
+                )
+                self._router.persist(self._post_modules, ext_result, enrich_meta)
 
             cell_stats = result.get("cell_stats")
             n_cells = len(cell_stats) if cell_stats is not None else 0
@@ -384,28 +400,13 @@ class RadarProcessor(threading.Thread):
         assert self.repository is not None
         # The artifact is registered with a tz-aware (UTC) scan_time; normalize the
         # query the same way so the catalog's isoformat comparison matches.
-        if scan_time is not None and scan_time.tzinfo is None:
-            scan_time = scan_time.replace(tzinfo=UTC)
+        scan_time = self._normalize_scan_time(scan_time)
         artifacts = self.repository.query(
             product_type=ProductType.GRIDDED_NC, time_range=(scan_time, scan_time)
         )
         if not artifacts:
             return None
         return self.repository.open_dataset(artifacts[0]["artifact_id"])
-
-    def _save_enrichment_results(self, ext_result: dict) -> None:
-        """Write each enrich module's declared output table from its returned DataFrame."""
-        from adapt.persistence.module_output import ModuleOutputWriter
-
-        assert self.repository is not None
-        for module in self._post_modules:
-            spec = module.output_table
-            if spec is None or not module.outputs:
-                continue
-            df = ext_result.get(module.outputs[0])
-            if df is None or getattr(df, "empty", True):
-                continue
-            ModuleOutputWriter(self.repository.catalog.db_path, spec).write(df)
 
     # ── Frame pairing helpers ─────────────────────────────────────────────────
 
@@ -422,88 +423,12 @@ class RadarProcessor(threading.Thread):
 
     # ── Persistence helpers ───────────────────────────────────────────────────
 
-    def _save_analysis_netcdf(self, ds, filepath: str, scan_time) -> str | None:
-        """Write the analysis dataset to a NetCDF artifact in the repository."""
-        assert self.repository is not None
-        try:
-            radar = self.config.downloader.radar
-            filename_stem = Path(filepath).stem
-            if scan_time is None:
-                scan_time = datetime.now(UTC)
-
-            ds.attrs.update(
-                {
-                    "source": str(filepath),
-                    "radar": radar,
-                    "description": "Radar analysis with segmentation and projections",
-                }
-            )
-
-            artifact_id = self.repository.write_netcdf(
-                ds=ds,
-                product_type=ProductType.ANALYSIS_NC,
-                scan_time=scan_time,
-                producer="processor",
-                parent_ids=[],
-                metadata={"components": list(ds.data_vars.keys())},
-                filename_stem=filename_stem,
-            )
-            components = list(ds.data_vars.keys())
-            logger.info("Analysis saved: %s [%s]", artifact_id, ", ".join(components))
-            return artifact_id
-
-        except Exception as e:
-            logger.warning("Could not save analysis NetCDF: %s", e)
-            return None
-
-    def _save_results(self, result: dict, scan_time):
-        """Save all pipeline outputs to the repository."""
-        assert self.repository is not None
+    @staticmethod
+    def _normalize_scan_time(scan_time):
+        """Return a tz-aware (UTC) scan_time so catalog isoformat comparisons match."""
         if scan_time is not None and scan_time.tzinfo is None:
-            scan_time = scan_time.replace(tzinfo=UTC)
-
-        # Register the loader-written 3D gridded NetCDF as a queryable artifact so
-        # enrich modules can open it by scan_time. The loader wrote the file; the
-        # processor (which owns I/O) registers it in the catalog.
-        grid_nc_path = result.get("grid_nc_path")
-        if grid_nc_path and Path(grid_nc_path).exists():
-            self.repository.register_artifact(
-                product_type=ProductType.GRIDDED_NC,
-                file_path=grid_nc_path,
-                scan_time=scan_time,
-                producer="ingest",
-            )
-
-        projected_ds = result.get("projected_ds")
-        if projected_ds is not None:
-            filepath = self._scan_history[-1].get("nexrad_file", "") if self._scan_history else ""
-            self._save_analysis_netcdf(projected_ds, filepath, scan_time)
-
-        writer = RepositoryWriter(self.repository)
-
-        cell_stats = result.get("cell_stats")
-        cell_adjacency = result.get("cell_adjacency")
-        tracked_cells = result.get("tracked_cells")
-        cell_events = result.get("cell_events")
-
-        if cell_stats is not None and not cell_stats.empty:
-            writer.write_analysis(df=cell_stats, scan_time=scan_time, producer="analysis")
-        if cell_adjacency is not None and not cell_adjacency.empty:
-            writer.write_analysis(df=cell_adjacency, scan_time=scan_time, producer="cell_adjacency")
-
-        if tracked_cells is not None and not tracked_cells.empty:
-            if cell_stats is None:
-                raise ValueError("Missing required cell_stats for TrackStore persistence")
-            if cell_adjacency is None:
-                raise ValueError("Missing required cell_adjacency for TrackStore persistence")
-            TrackStore(self.repository.catalog.db_path).write_scan(
-                run_id=self.repository.run_id,
-                scan_time=scan_time,
-                cell_stats_df=cell_stats,
-                tracked_cells_df=tracked_cells,
-                cell_events_df=(cell_events if cell_events is not None else pd.DataFrame()),
-                cell_adjacency_df=cell_adjacency,
-            )
+            return scan_time.replace(tzinfo=UTC)
+        return scan_time
 
     # ── Results API (called by orchestrator on shutdown) ──────────────────────
 

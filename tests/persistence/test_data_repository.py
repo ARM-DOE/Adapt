@@ -42,7 +42,7 @@ def sample_dataset():
     return xr.Dataset(
         {
             "reflectivity": xr.DataArray(
-                np.random.randn(10, 10).astype(np.float32),
+                np.random.default_rng(0).standard_normal((10, 10)).astype(np.float32),
                 dims=["y", "x"],
                 coords={
                     "y": np.arange(10) * 1000.0,
@@ -262,6 +262,39 @@ class TestWriteOperations:
         assert "gridnc" in str(file_path)
         assert "20260211" in str(file_path)
         assert "gridded" in file_path.name
+
+    def test_write_netcdf_with_string_variable(self, repository):
+        """A string data variable (e.g. cell_uid LUT) must survive write/read.
+
+        zlib compression cannot be applied to variable-length strings, so the
+        writer must skip compression for non-numeric variables.
+        """
+        ds = xr.Dataset(
+            {
+                "reflectivity": xr.DataArray(
+                    np.random.default_rng(0).standard_normal((5, 5)).astype(np.float32),
+                    dims=["y", "x"],
+                ),
+                "cell_uid": xr.DataArray(
+                    np.array(["NONE", "abc", "def"], dtype=np.str_),
+                    dims=["cell_label"],
+                    coords={"cell_label": np.arange(3)},
+                ),
+            }
+        )
+
+        artifact_id = repository.write_netcdf(
+            ds=ds,
+            product_type=ProductType.ANALYSIS_NC,
+            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
+            producer="test",
+        )
+
+        reopened = repository.open_dataset(artifact_id)
+        try:
+            assert list(reopened["cell_uid"].values.astype(str)) == ["NONE", "abc", "def"]
+        finally:
+            reopened.close()
 
     def test_write_parquet(self, repository, sample_dataframe):
         """Should write Parquet and register artifact."""

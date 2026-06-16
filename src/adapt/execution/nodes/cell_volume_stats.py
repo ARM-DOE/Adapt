@@ -22,12 +22,11 @@ import logging
 
 import pandas as pd
 
-from adapt.contracts import check_cell_volume_stats
+from adapt.contracts import SqliteTable, check_cell_volume_stats
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig
 from adapt.modules.cell_volume_stats.module import CellVolumeStatsAlgorithm
-from adapt.persistence.module_output import OutputTableSpec
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +53,13 @@ class CellVolumeStatsModule(BaseModule):
     ]
     outputs = ["cell_volume_stats_rows"]
     output_contracts = {"cell_volume_stats_rows": check_cell_volume_stats}
-    output_table = OutputTableSpec(
-        name="cell_volume_stats",
-        primary_key=("run_id", "scan_time", "cell_uid"),
-        index_columns=("scan_time", "cell_uid"),
+    persistence = (
+        SqliteTable(
+            key="cell_volume_stats_rows",
+            table="cell_volume_stats",
+            primary_key=("run_id", "scan_time", "cell_uid"),
+            index_columns=("scan_time", "cell_uid"),
+        ),
     )
 
     @classmethod

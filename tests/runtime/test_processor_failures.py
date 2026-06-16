@@ -121,18 +121,16 @@ def test_process_file_success_saves_netcdf_and_returns_true(
     monkeypatch.setattr(proc._executors[1], "run", _fake_single)
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_result)
 
-    saved = []
+    persisted = []
     monkeypatch.setattr(
-        proc,
-        "_save_analysis_netcdf",
-        lambda ds, fp, st: saved.append(fp) or "/tmp/out.nc",
+        proc._router, "persist", lambda modules, result, meta: persisted.append(meta)
     )
-    monkeypatch.setattr(proc, "_save_results", lambda result, st: None)
 
     ok1 = proc.process_file("/fake/path/file_1")
     ok2 = proc.process_file("/fake/path/file_2")
     assert ok1 is True
     assert ok2 is True
+    assert len(persisted) == 2  # router invoked once per processed file
 
 
 def test_process_file_skips_already_analyzed(

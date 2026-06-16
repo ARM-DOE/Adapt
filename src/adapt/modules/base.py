@@ -14,6 +14,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, ClassVar
 
+from adapt.contracts import PersistenceSpec
+
+# Pipeline phase reserved for out-of-band repository enrichment run by the
+# PostProcessor (never by the live RadarProcessor, which only knows phases 0–3).
+# A module with this phase is selected exclusively by the PostProcessor.
+POSTPROCESS_PHASE = 4
+
 
 class BaseModule(ABC):
     """Abstract base for all Adapt execution nodes.
@@ -56,7 +63,10 @@ class BaseModule(ABC):
     required_history: ClassVar[int] = 1
     pipeline_phase: ClassVar[int] = 0
     config_class: ClassVar[type | None] = None
-    output_table: ClassVar[Any | None] = None
+    # How each output is persisted (see adapt.contracts.persistence). The
+    # OutputRouter writes declared outputs mechanically; modules never touch
+    # storage. Empty tuple = this module persists nothing directly.
+    persistence: ClassVar[tuple[PersistenceSpec, ...]] = ()
     injected_global_fields: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod

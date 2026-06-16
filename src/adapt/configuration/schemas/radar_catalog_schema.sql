@@ -203,6 +203,7 @@ CREATE TABLE IF NOT EXISTS cell_tracks (
                                                     -- TERMINATION|MERGED|ACTIVE_AT_END|UNKNOWN
     termination_event_group_id      TEXT,
     terminated_into_cell_uid        TEXT,
+    duration_seconds                REAL NOT NULL DEFAULT 0,
     max_area_sqkm                   REAL,
     max_reflectivity                REAL,
 

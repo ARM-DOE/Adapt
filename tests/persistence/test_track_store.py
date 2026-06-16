@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS cell_tracks (
     termination_type              TEXT NOT NULL DEFAULT 'ACTIVE_AT_END',
     termination_event_group_id    TEXT,
     terminated_into_cell_uid      TEXT,
+    duration_seconds              REAL NOT NULL DEFAULT 0,
     max_area_sqkm                 REAL,
     max_reflectivity              REAL,
     PRIMARY KEY (run_id, cell_uid)
@@ -692,3 +693,49 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
     count = reader._connect().execute("SELECT count(*) FROM cells_by_scan").fetchone()[0]
     reader.close()
     assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle duration
+# ---------------------------------------------------------------------------
+
+
+def test_duration_seconds_is_zero_at_first_sight(store):
+    t = _t("2024-01-01T12:00:00")
+    store.write_scan(
+        "r1",
+        t,
+        _cell_stats(1),
+        _tracked_cells(1, "DUR1"),
+        _initiation_event(t, "DUR1", 1),
+        _empty_cell_adjacency(),
+    )
+
+    tracks = store.get_cell_tracks("r1")
+    assert tracks.iloc[0]["duration_seconds"] == 0.0
+
+
+def test_duration_seconds_spans_first_to_last_seen(store):
+    t1 = _t("2024-01-01T12:00:00")
+    t2 = _t("2024-01-01T12:05:00")
+    t3 = _t("2024-01-01T12:11:00")
+    store.write_scan(
+        "r1",
+        t1,
+        _cell_stats(1),
+        _tracked_cells(1, "DUR2"),
+        _initiation_event(t1, "DUR2", 1),
+        _empty_cell_adjacency(),
+    )
+    for t in (t2, t3):
+        store.write_scan(
+            "r1",
+            t,
+            _cell_stats(1),
+            _tracked_cells(1, "DUR2"),
+            _continue_event(t, "DUR2", 1, 1),
+            _empty_cell_adjacency(),
+        )
+
+    tracks = store.get_cell_tracks("r1")
+    assert tracks.iloc[0]["duration_seconds"] == pytest.approx(11 * 60.0)

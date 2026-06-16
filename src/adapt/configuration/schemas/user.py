@@ -91,6 +91,7 @@ class UserProjectorConfig(_UserSection):
     flow_params: dict[str, Any] | None = None
     min_motion_threshold: float | None = None
     max_flow_magnitude: float | None = None
+    registration_step_minutes: int | None = None
 
     @field_validator("method", mode="before")
     @classmethod

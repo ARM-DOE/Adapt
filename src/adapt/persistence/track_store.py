@@ -620,10 +620,11 @@ class TrackStore:
                     """UPDATE cell_tracks SET
                         last_seen_time=?,
                         n_scans=n_scans+1,
+                        duration_seconds=(julianday(?)-julianday(first_seen_time))*86400.0,
                         max_area_sqkm=MAX(COALESCE(max_area_sqkm,0), ?),
                         max_reflectivity=MAX(COALESCE(max_reflectivity,0), ?)
                     WHERE run_id=? AND cell_uid=?""",
-                    (scan_iso, info["area"], info["refl"], run_id, tid),
+                    (scan_iso, scan_iso, info["area"], info["refl"], run_id, tid),
                 )
             else:
                 # Determine origin
@@ -653,6 +654,10 @@ class TrackStore:
                     ON CONFLICT(run_id, cell_uid) DO UPDATE SET
                         last_seen_time=excluded.last_seen_time,
                         n_scans=cell_tracks.n_scans+1,
+                        duration_seconds=(
+                            julianday(excluded.last_seen_time)
+                            - julianday(cell_tracks.first_seen_time)
+                        )*86400.0,
                         max_area_sqkm=MAX(
                             COALESCE(cell_tracks.max_area_sqkm,0), excluded.max_area_sqkm
                         ),

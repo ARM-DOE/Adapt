@@ -27,4 +27,5 @@ class ProjectionConfig(BaseModel):
     flags: int
     min_motion_threshold: float
     max_flow_magnitude: float
+    registration_step_minutes: int
     reflectivity_var: str

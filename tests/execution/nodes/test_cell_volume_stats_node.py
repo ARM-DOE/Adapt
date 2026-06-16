@@ -105,7 +105,7 @@ class TestRunAndWriteFixC:
         check_cell_volume_stats(df)
 
         db = tmp_path / "catalog.db"
-        ModuleOutputWriter(db, CellVolumeStatsModule.output_table).write(df)
+        ModuleOutputWriter(db, CellVolumeStatsModule.persistence[0]).write(df)
         conn = sqlite3.connect(str(db))
         try:
             iso, unix = conn.execute(
@@ -123,8 +123,12 @@ class TestNodeDeclarations:
     def test_enrich_declarations(self):
         assert CellVolumeStatsModule.pipeline_phase == 3
         assert "grid_ds_3d" in CellVolumeStatsModule.inputs
-        assert CellVolumeStatsModule.output_table.name == "cell_volume_stats"
-        assert CellVolumeStatsModule.output_table.primary_key == ("run_id", "scan_time", "cell_uid")
+        assert CellVolumeStatsModule.persistence[0].table == "cell_volume_stats"
+        assert CellVolumeStatsModule.persistence[0].primary_key == (
+            "run_id",
+            "scan_time",
+            "cell_uid",
+        )
 
     def test_registered(self):
         from adapt.execution.module_registry import registry

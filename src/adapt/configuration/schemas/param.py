@@ -131,6 +131,11 @@ class ProjectorConfig(AdaptBaseModel):
         gt=0,
         description="Clip flow vectors exceeding this magnitude (pixels/frame)",
     )
+    registration_step_minutes: int = Field(
+        1,
+        ge=1,
+        description="Step of the minute-resolution registration masks between scans",
+    )
 
     @field_validator("method", mode="before")
     @classmethod

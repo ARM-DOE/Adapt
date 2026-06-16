@@ -79,7 +79,7 @@ def test_cla_builds_locator_chain():
     N = 10
     for _ in range(N):
         ax.clear()
-        im = ax.pcolormesh(np.random.rand(5, 5), vmin=0, vmax=1)
+        im = ax.pcolormesh(np.random.default_rng(0).random((5, 5)), vmin=0, vmax=1)
         cbar_ax.cla()
         fig.colorbar(im, cax=cbar_ax)
     depth = 0
@@ -97,7 +97,7 @@ def test_set_axes_locator_none_keeps_chain_depth_one():
     N = 10
     for _ in range(N):
         ax.clear()
-        im = ax.pcolormesh(np.random.rand(5, 5), vmin=0, vmax=1)
+        im = ax.pcolormesh(np.random.default_rng(0).random((5, 5)), vmin=0, vmax=1)
         cbar_ax.set_axes_locator(None)
         fig.colorbar(im, cax=cbar_ax)
     depth = 0

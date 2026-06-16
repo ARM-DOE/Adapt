@@ -110,6 +110,7 @@ class InternalProjectorConfig(AdaptBaseModel):
     flow_params: InternalFlowParamsConfig
     min_motion_threshold: float
     max_flow_magnitude: float
+    registration_step_minutes: int = Field(ge=1)
 
 
 class InternalAnalyzerConfig(AdaptBaseModel):

@@ -96,6 +96,7 @@ markers = [
     "pipeline: pipeline tests with mocks",
     "integration: tests requiring real or on-disk data",
     "slow: long-running tests",
+    "determinism: identical inputs + config must give identical outputs",
 ]
 
 [tool.coverage.run]

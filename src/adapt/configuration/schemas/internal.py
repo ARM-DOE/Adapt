@@ -140,6 +140,13 @@ class InternalTrackerConfig(AdaptBaseModel):
     core_reflectivity_threshold: float = Field(default=40.0, ge=0.0)
     max_gap_minutes: float = Field(default=10.0, gt=0.0)
     expected_speed_ms: float = Field(default=30.0, gt=0.0)
+    max_tracking_gap_minutes: float = Field(default=20.0, gt=0.0)
+    projection_horizon_minutes: float = Field(default=20.0, gt=0.0)
+    projection_interval_minutes: float = Field(default=1.0, gt=0.0)
+    max_speed_ms: float = Field(default=40.0, gt=0.0)
+    max_speed_multiplier: float = Field(default=3.0, gt=0.0)
+    overlap_match_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    heading_change_penalty_weight: float = Field(default=0.0, ge=0.0)
     cell_uid: InternalCellUidConfig
 
 

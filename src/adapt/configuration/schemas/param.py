@@ -227,6 +227,45 @@ class TrackerConfig(AdaptBaseModel):
         gt=0.0,
         description="Maximum expected cell propagation speed (m/s); scales D_pos with dt",
     )
+    max_tracking_gap_minutes: float = Field(
+        20.0,
+        gt=0.0,
+        description="Hard limit: scan gaps above this terminate all tracks and restart "
+        "(no matching attempted across the gap)",
+    )
+    projection_horizon_minutes: float = Field(
+        20.0,
+        gt=0.0,
+        description="How far ahead (minutes) registration-based projected hulls are consumed",
+    )
+    projection_interval_minutes: float = Field(
+        1.0,
+        gt=0.0,
+        description="Spacing (minutes) between registration projected hulls",
+    )
+    max_speed_ms: float = Field(
+        40.0,
+        gt=0.0,
+        description="Hard physical cap (m/s); candidate pairs above this are rejected pre-matching",
+    )
+    max_speed_multiplier: float = Field(
+        3.0,
+        gt=0.0,
+        description="Hard acceleration cap: reject if candidate speed exceeds this times the "
+        "track's previous speed",
+    )
+    overlap_match_threshold: float = Field(
+        0.3,
+        ge=0.0,
+        le=1.0,
+        description="Min projected-hull overlap for a deterministic unique-overlap direct match "
+        "(uniqueness dominates the threshold)",
+    )
+    heading_change_penalty_weight: float = Field(
+        0.0,
+        ge=0.0,
+        description="Optional cost penalty per radian of heading change (0 = diagnostic only)",
+    )
     cell_uid: CellUidConfig = Field(default_factory=CellUidConfig)  # type: ignore[arg-type]
 
 

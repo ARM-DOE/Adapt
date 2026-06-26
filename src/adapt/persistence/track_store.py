@@ -526,8 +526,21 @@ class TrackStore:
             "is_dominant",
             "event_group_id",
         ]
-        placeholders = ", ".join("?" * len(cols))
-        sql = f"INSERT INTO cell_events ({', '.join(cols)}) VALUES ({placeholders})"
+        # Per-match diagnostics carried through verbatim when the tracker emits them.
+        diagnostic_cols = [
+            "candidate_overlap",
+            "candidate_iou",
+            "candidate_centroid_distance_m",
+            "candidate_speed_ms",
+            "candidate_heading_change_deg",
+            "candidate_area_ratio",
+            "candidate_reflectivity_difference",
+            "candidate_final_cost",
+            "match_method",
+        ]
+        all_cols = cols + diagnostic_cols
+        placeholders = ", ".join("?" * len(all_cols))
+        sql = f"INSERT INTO cell_events ({', '.join(all_cols)}) VALUES ({placeholders})"
 
         def _src_time(etype: str) -> str | None:
             return None if etype == "INITIATION" else source_iso
@@ -535,11 +548,16 @@ class TrackStore:
         def _tgt_time(etype: str) -> str | None:
             return None if etype == "TERMINATION" else target_iso
 
+        def _num(ev: pd.Series, col: str) -> float | None:
+            val = ev.get(col)
+            return float(val) if pd.notna(val) else None
+
         rows = []
         for _, ev in cell_events_df.iterrows():
             etype = str(ev["event_type"])
             source_uid = _source_uid(ev)
             target_uid = _target_uid(ev)
+            method = ev.get("match_method")
             rows.append(
                 (
                     run_id,
@@ -561,6 +579,15 @@ class TrackStore:
                     float(ev["cost"]) if pd.notna(ev.get("cost")) else None,
                     int(bool(ev.get("is_dominant", False))),
                     str(ev["event_group_id"]),
+                    _num(ev, "candidate_overlap"),
+                    _num(ev, "candidate_iou"),
+                    _num(ev, "candidate_centroid_distance_m"),
+                    _num(ev, "candidate_speed_ms"),
+                    _num(ev, "candidate_heading_change_deg"),
+                    _num(ev, "candidate_area_ratio"),
+                    _num(ev, "candidate_reflectivity_difference"),
+                    _num(ev, "candidate_final_cost"),
+                    str(method) if pd.notna(method) else None,
                 )
             )
         conn.executemany(sql, rows)

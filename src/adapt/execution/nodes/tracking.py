@@ -91,6 +91,13 @@ class TrackingModule(BaseModule):
             labels_var=cfg.global_.var_names.cell_labels,
             max_gap_minutes=cfg.tracker.max_gap_minutes,
             expected_speed_ms=cfg.tracker.expected_speed_ms,
+            max_tracking_gap_minutes=cfg.tracker.max_tracking_gap_minutes,
+            projection_horizon_minutes=cfg.tracker.projection_horizon_minutes,
+            projection_interval_minutes=cfg.tracker.projection_interval_minutes,
+            max_speed_ms=cfg.tracker.max_speed_ms,
+            max_speed_multiplier=cfg.tracker.max_speed_multiplier,
+            overlap_match_threshold=cfg.tracker.overlap_match_threshold,
+            heading_change_penalty_weight=cfg.tracker.heading_change_penalty_weight,
         )
 
     def __init__(self) -> None:

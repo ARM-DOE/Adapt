@@ -2089,7 +2089,7 @@ class AdaptDashboard(tk.Tk):
                 marker="*",
                 markersize=8,
                 linestyle="None",
-                label="qurrent centroid",
+                label="Current Centroid",
             ),
         ]
 

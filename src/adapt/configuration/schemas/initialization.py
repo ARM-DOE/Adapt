@@ -63,8 +63,6 @@ def write_default_config(path: Path, extensions: list[str] | None = None) -> Non
     own params under ``module_params``. Public — called by both
     ``init_runtime_config`` (auto-bootstrap) and ``adapt config``.
     """
-    from datetime import datetime as _dt
-
     from adapt.configuration.schemas import yaml_writer
     from adapt.configuration.schemas.assemble import (
         assemble_default_config,
@@ -76,7 +74,7 @@ def write_default_config(path: Path, extensions: list[str] | None = None) -> Non
     # config.yaml` works without --base-dir; the user can edit or override it.
     data = {"base_dir": str(path.parent.resolve()), **data}
     descriptions = assemble_descriptions(extensions)
-    header = _CONFIG_HEADER.format(timestamp=_dt.now().strftime("%Y-%m-%d %H:%M:%S"))
+    header = _CONFIG_HEADER.format(timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml_writer.dump(data, descriptions, header=header))

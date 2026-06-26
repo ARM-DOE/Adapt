@@ -606,7 +606,6 @@ class RadarCellProjector:
 
             # Create output mask
             filled = np.zeros_like(label_mask, dtype=np.uint8)
-            H, W = label_mask.shape
 
             # Filter triangles by circumradius (alpha shape)
             for simplex in tri.simplices:

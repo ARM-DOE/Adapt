@@ -494,7 +494,7 @@ class RepositoryClient:
             run_id=str(scan_record.get("run_id", "")),
             n_cells=int(scan_record.get("num_cells") or 0),
             max_reflectivity=float(scan_record.get("max_reflectivity") or 0.0),
-            has_tracks=bool(scan_record.get("has_tracks") or False),
+            has_tracks=bool(scan_record.get("has_tracks")),
         )
         seg = self._load_item_file(radar, scan_record.get("segmentation2d_item_id"))
         cells = self._load_item_file(radar, scan_record.get("analysis2d_item_id"))

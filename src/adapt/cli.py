@@ -340,8 +340,6 @@ def _build_dashboard_parser(sub: argparse.ArgumentParser) -> None:
 
 def _dashboard_cmd(args: argparse.Namespace) -> None:
     """Launch the Adapt GUI dashboard."""
-    import os
-
     try:
         os.getcwd()
     except FileNotFoundError:

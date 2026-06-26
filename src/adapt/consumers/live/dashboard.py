@@ -863,6 +863,7 @@ class AdaptDashboard(tk.Tk):
                 capture_output=True,
                 text=True,
                 timeout=15,
+                check=False,
             )
             if result.returncode != 0:
                 messagebox.showerror(

@@ -16,10 +16,20 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from adapt.runtime.observability import ObsSettings, current_context
 
-__all__ = ["ContextFilter", "JsonFormatter", "ConsoleFilter", "configure_logging"]
+if TYPE_CHECKING:
+    from adapt.runtime.console_status import ConsoleStatus
+
+__all__ = [
+    "ContextFilter",
+    "JsonFormatter",
+    "ConsoleFilter",
+    "StatusAwareStreamHandler",
+    "configure_logging",
+]
 
 _CONSOLE_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # Standard LogRecord attributes to exclude when surfacing structured extras.
@@ -82,7 +92,29 @@ class ConsoleFilter(logging.Filter):
         return record.levelno >= self._level or bool(getattr(record, "console", False))
 
 
-def configure_logging(settings: ObsSettings, log_path: Path | None) -> None:
+class StatusAwareStreamHandler(logging.StreamHandler):
+    """Console handler that erases the transient status line before each record.
+
+    Holds the ConsoleStatus lock across clear + emit so the orchestrator's ticker
+    can't redraw the status line in between; the ticker repaints on its next tick.
+    """
+
+    def __init__(self, status: ConsoleStatus) -> None:
+        super().__init__(status.stream)
+        self._status = status
+
+    def emit(self, record: logging.LogRecord) -> None:
+        with self._status.lock:
+            self._status.clear()
+            super().emit(record)
+
+
+def configure_logging(
+    settings: ObsSettings,
+    log_path: Path | None,
+    *,
+    console_status: ConsoleStatus | None = None,
+) -> None:
     """Configure the root logger. The one place handlers are constructed.
 
     Fails loudly: ``json_logs`` with no ``log_path`` raises (no silent default).
@@ -107,9 +139,15 @@ def configure_logging(settings: ObsSettings, log_path: Path | None) -> None:
 
     if settings.console_logs:
         # No handler-level gate: ConsoleFilter does all gating (see its docstring), so
-        # console-tagged INFO lines survive a WARNING console threshold.
+        # console-tagged INFO lines survive a WARNING console threshold. With a
+        # console_status, use the status-aware handler so each permanent line erases
+        # the transient spinner line first.
         console_threshold = getattr(logging, settings.console_level.upper(), logging.WARNING)
-        console = logging.StreamHandler()
+        console: logging.StreamHandler = (
+            StatusAwareStreamHandler(console_status)
+            if console_status is not None
+            else logging.StreamHandler()
+        )
         console.setFormatter(logging.Formatter(_CONSOLE_FORMAT))
         console.addFilter(context_filter)
         console.addFilter(ConsoleFilter(console_threshold))

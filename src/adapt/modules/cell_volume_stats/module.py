@@ -3,7 +3,7 @@
 
 """3D cell statistics — pure scientific functions + CellVolumeStatsAlgorithm.
 
-No I/O, no ADAPT engine imports. Operates on numpy arrays extracted from the 3D
+No I/O, no Adapt engine imports. Operates on numpy arrays extracted from the 3D
 gridded volume. A cell's 3D volume is its 2D detection footprint extruded through
 all altitude levels; every per-pixel column ("profile") is analysed for echo
 structure, and aggregates are reduced over the footprint.

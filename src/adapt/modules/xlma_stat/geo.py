@@ -1,9 +1,9 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Project lightning lon/lat onto ADAPT's projected grid.
+"""Project lightning lon/lat onto Adapt's projected grid.
 
-ADAPT grids are azimuthal-equidistant in metres centred on the radar
+Adapt grids are azimuthal-equidistant in metres centred on the radar
 (``+proj=aeqd +lat_0=<radar_lat> +lon_0=<radar_lon> +units=m``), so flash
 coordinates must use the same projection to align with the cell-mask grid.
 """

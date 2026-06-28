@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Flash lon/lat -> projected x/y on ADAPT's azimuthal-equidistant (radar) grid."""
+"""Flash lon/lat -> projected x/y on Adapt's azimuthal-equidistant (radar) grid."""
 
 import numpy as np
 import pytest

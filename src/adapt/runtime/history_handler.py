@@ -38,7 +38,7 @@ class HistoryLogHandler(logging.Handler):
             exc_type = ""
             if record.exc_info and record.exc_info[0] is not None:
                 exc_type = record.exc_info[0].__name__
-            event = ErrorEvent(
+            error = ErrorEvent(
                 scan_id=ctx.scan_id,
                 module=ctx.stage,
                 exception_type=exc_type,
@@ -48,9 +48,9 @@ class HistoryLogHandler(logging.Handler):
                 timestamp=now,
             )
             with self._lock:
-                self._errors.append(event)
+                self._errors.append(error)
         elif record.levelno >= logging.WARNING:
-            event = WarningEvent(
+            warning = WarningEvent(
                 scan_id=ctx.scan_id,
                 module=ctx.stage,
                 category=getattr(record, "category", "general"),
@@ -59,7 +59,7 @@ class HistoryLogHandler(logging.Handler):
                 timestamp=now,
             )
             with self._lock:
-                self._warnings.append(event)
+                self._warnings.append(warning)
 
     def drain(self) -> tuple[list[WarningEvent], list[ErrorEvent]]:
         """Return buffered warnings + errors, then clear (called per scan / at stop)."""

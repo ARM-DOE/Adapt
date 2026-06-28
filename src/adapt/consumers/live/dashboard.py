@@ -681,7 +681,7 @@ class AdaptDashboard(tk.Tk):
         self._plot_settings_win = None
         win.destroy()
 
-    # ── Run ADAPT wizard ──────────────────────────────────────────────────────
+    # ── Run Adapt wizard ──────────────────────────────────────────────────────
 
     def _open_run_wizard(self) -> None:
         import webbrowser

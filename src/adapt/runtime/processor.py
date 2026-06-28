@@ -98,10 +98,14 @@ class RadarProcessor(threading.Thread):
         self.repository = repository
         # Telemetry provider, injected by the orchestrator. Absent -> disabled (off),
         # so the rest of this class calls it unconditionally with no `if obs` branches.
-        self._obs = observability if observability is not None else disabled_observability()
+        self._obs: Observability = (
+            observability if observability is not None else disabled_observability()
+        )
         self._root_trace_id = root_trace_id
         # Console reporter (injected). Absent -> no per-scan progress line.
         self._reporter = reporter
+        # Observational "what am I doing now" for the live status line (display only).
+        self._current_scan_id: str | None = None
         self._stop_event = threading.Event()
         self.output_lock = threading.Lock()
 
@@ -174,6 +178,11 @@ class RadarProcessor(threading.Thread):
         """True if stop() has been called or a ContractViolation forced stop."""
         return self._stop_event.is_set()
 
+    def current_activity(self) -> str | None:
+        """Short 'what am I doing now' for the live status line; None when idle."""
+        scan_id = self._current_scan_id
+        return f"processing {scan_id}" if scan_id else None
+
     def run(self):
         """Main processor loop (runs in thread).
 
@@ -184,6 +193,7 @@ class RadarProcessor(threading.Thread):
         # HDF5 error stacks are thread-local: silence libhdf5's stderr dumps on THIS
         # worker thread, where all the NetCDF/HDF5 I/O happens.
         silence_hdf5_errors()
+        assert self.repository is not None  # guaranteed by __init__
         logger.info("Processor started, waiting for files...")
         with self._obs.bind(
             trace_id=self._root_trace_id,
@@ -247,6 +257,7 @@ class RadarProcessor(threading.Thread):
         bool
             True if processed or deferred (waiting for pair), False on error.
         """
+        assert self.repository is not None  # guaranteed by __init__
         queued_at = None
         if isinstance(filepath, dict):
             queued_at = filepath.get("queued_at")
@@ -263,26 +274,31 @@ class RadarProcessor(threading.Thread):
         queue_wait_s = (time.time() - queued_at) if queued_at else None
         logger.info("Processing: %s", Path(filepath).name)
 
-        # Bind scan context and open the scan span; module spans nest under it and
-        # every log on this path carries scan_id. Disabled provider -> no-ops.
-        with self._obs.bind(scan_id=file_id):
-            with self._obs.span("scan") as scan_span:
-                ok = self._run_scan(filepath, file_id, queue_wait_s, scan_span)
-            # The scan span has closed; split this scan's drained spans into the module
-            # spans (one module_history batch) and the scan span itself (carries n_cells).
-            all_spans = self._obs.drain_spans()
-            modules = [s for s in all_spans if s.name != "scan"]
-            if modules:
-                self.repository.history.record_modules(
-                    self.repository.run_id, file_id, modules, recorded_at=datetime.now(UTC)
-                )
-            # One controlled console line per scan, built from the captured telemetry
-            # (stage timings + cell count) — never printed from inside a module.
-            if self._reporter is not None and modules:
-                scan_rec = next((s for s in all_spans if s.name == "scan"), None)
-                n_cells = int(scan_rec.metadata.get("n_cells", 0)) if scan_rec else 0
-                self._reporter.scan(file_id, modules, n_cells)
-            return ok
+        # Publish the current activity for the live status line; cleared on every exit.
+        self._current_scan_id = file_id
+        try:
+            # Bind scan context and open the scan span; module spans nest under it and
+            # every log on this path carries scan_id. Disabled provider -> no-ops.
+            with self._obs.bind(scan_id=file_id):
+                with self._obs.span("scan") as scan_span:
+                    ok = self._run_scan(filepath, file_id, queue_wait_s, scan_span)
+                # The scan span has closed; split this scan's drained spans into the module
+                # spans (one module_history batch) and the scan span itself (carries n_cells).
+                all_spans = self._obs.drain_spans()
+                modules = [s for s in all_spans if s.name != "scan"]
+                if modules:
+                    self.repository.history.record_modules(
+                        self.repository.run_id, file_id, modules, recorded_at=datetime.now(UTC)
+                    )
+                # One controlled console line per scan, built from the captured telemetry
+                # (stage timings + cell count) — never printed from inside a module.
+                if self._reporter is not None and modules:
+                    scan_rec = next((s for s in all_spans if s.name == "scan"), None)
+                    n_cells = int(scan_rec.metadata.get("n_cells", 0)) if scan_rec else 0
+                    self._reporter.scan(file_id, modules, n_cells)
+                return ok
+        finally:
+            self._current_scan_id = None
 
     def _run_scan(self, filepath, file_id, queue_wait_s, scan_span) -> bool:
         """Execute the scientific pipeline for one scan (inside the scan span)."""

@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""ADAPT Live — operational scan viewer (Tkinter dashboard).
+"""Adapt Live — operational scan viewer (Tkinter dashboard).
 
 Usage::
 

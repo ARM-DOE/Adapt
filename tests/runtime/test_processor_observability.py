@@ -178,3 +178,47 @@ def test_processor_emits_per_scan_progress_from_spans(
     scan_id, stage_names, _ = calls[0]
     assert scan_id == "file_7"
     assert stage_names  # the per-scan line carries the executed stages
+
+
+def test_processor_publishes_current_activity(
+    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+):
+    """The processor exposes a short 'what am I doing' string for the status line:
+    'processing <scan_id>' while a scan runs, None when idle.
+    """
+    obs = _obs()
+    proc = RadarProcessor(
+        queue.Queue(),
+        pipeline_config,
+        pipeline_output_dirs,
+        repository=test_repository,
+        observability=obs,
+    )
+
+    assert proc.current_activity() is None  # idle before any scan
+
+    seen_during = []
+
+    def _fake_single(context):
+        seen_during.append(proc.current_activity())  # captured mid-scan
+        return {
+            "grid_ds": _fake_ds(),
+            "grid_ds_2d": _fake_ds(),
+            "segmented_ds": _fake_ds(),
+            "scan_time": datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC),
+            "num_cells": 0,
+        }
+
+    fake_multi = {
+        "projected_ds": _fake_ds(),
+        "cell_stats": pd.DataFrame(),
+        "cell_adjacency": pd.DataFrame(),
+    }
+    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
+    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
+    monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
+
+    proc.process_file("/fake/file_3")
+
+    assert seen_during == ["processing file_3"]  # set while the scan ran
+    assert proc.current_activity() is None  # cleared afterwards

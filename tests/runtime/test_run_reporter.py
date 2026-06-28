@@ -46,6 +46,8 @@ def _summary():
         average_scan_time=1.03,
         maximum_scan_time=3.92,
         slowest_stages=(("detection", 371.0), ("tracking", 182.0)),
+        module_stats=(("detection", 842, 371.0), ("tracking", 842, 182.0)),
+        failures=2,
     )
 
 
@@ -55,8 +57,22 @@ def test_format_duration_is_human_compact():
     assert format_duration(3725.0) == "1h2m5s"
 
 
+def test_format_seconds_keeps_subsecond_resolution():
+    """Fast stages (ms) must not collapse to '0s' — keep ms under 1s."""
+    from adapt.runtime.run_reporter import format_seconds
+
+    assert format_seconds(0.012) == "12ms"
+    assert format_seconds(0.5) == "500ms"
+    assert format_seconds(0.0) == "0ms"
+    assert format_seconds(1.2) == "1.2s"
+    assert format_seconds(25.2) == "25.2s"
+    assert format_seconds(371.0) == "6m11s"
+
+
 def test_header_shows_identity_mode_version_commit_modules():
     out = format_header(_start())
+    assert "Adapt run" in out  # product name is "Adapt", never "ADAPT"
+    assert "ADAPT" not in out
     assert "2026JUN28-0206-KDIX" in out
     assert "KDIX" in out
     assert "historical" in out
@@ -73,6 +89,17 @@ def test_summary_shows_status_counts_and_slowest_stage():
     assert "18,431" in out  # thousands separator
     assert "1.03" in out and "3.92" in out
     assert "detection" in out
+
+
+def test_summary_shows_per_module_table_and_failures():
+    """The summary lists every module with calls, total, and avg, plus a failures count."""
+    out = format_summary(_summary())
+    assert "failures 2" in out
+    # per-module block: each module appears with its call count and a total duration
+    assert "detection" in out and "842" in out
+    assert "tracking" in out
+    # avg is total/calls: 371.0/842 ≈ 0.441s -> shown in ms, not collapsed to 0
+    assert "441ms" in out
 
 
 def test_reporter_emits_console_tagged_records():
@@ -121,8 +148,8 @@ def test_format_scan_shows_each_stage_with_timing_cells_and_total():
 
     assert "KOHX_180851" in line
     assert "ingest 1.2s" in line
-    assert "segmentation 0.8s" in line
-    assert "detection 0.4s" in line
+    assert "segmentation 800ms" in line  # sub-second shown in ms
+    assert "detection 400ms" in line
     assert "5 cells" in line
     assert "2.4s" in line  # total of the stage durations
 
@@ -145,3 +172,17 @@ def test_reporter_scan_emits_one_console_tagged_line():
     assert len(captured) == 1
     assert captured[0].console is True
     assert "KOHX_180851" in captured[0].getMessage()
+
+
+def test_format_banner_is_plain_name_version_and_copyright():
+    """The startup banner is plain text (printed first by the CLI, before logging is
+    configured) — no log prefix, no decorative rules.
+    """
+    from adapt.runtime.run_reporter import format_banner
+
+    out = format_banner("0.1.3")
+
+    assert out.splitlines()[0] == "ARM Adapt v0.1.3"  # first line, exact
+    assert "Copyright © 2026, UChicago Argonne, LLC" in out
+    assert "https://arm-doe.github.io/Adapt/license.html" in out
+    assert "─" not in out  # no decorative rule lines

@@ -13,6 +13,7 @@ Run: pytest tests/test_architecture.py
 import ast
 import importlib
 import pkgutil
+import re
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,20 @@ def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
         "Serialize scan_time via to_scan_iso (or let ModuleOutputWriter do it); "
         "never hardcode the format, or derived tables will not join cells_by_scan."
     )
+
+
+def test_adapt_name_is_never_all_caps() -> None:
+    """The product is 'Adapt', never 'ADAPT' — in output, prints, comments, or docstrings.
+
+    Matches the standalone token only, so 'arm_adaptive', 'ADAPTIVE', 'ADAPTER' are fine.
+    """
+    offenders = [
+        f"{py_file.relative_to(_SRC_ADAPT)}:{i}"
+        for py_file in _SRC_ADAPT.rglob("*.py")
+        for i, line in enumerate(py_file.read_text().splitlines(), 1)
+        if re.search(r"\bADAPT\b", line)
+    ]
+    assert not offenders, "Use 'Adapt', not 'ADAPT':\n" + "\n".join(offenders)
 
 
 # ── Determinism: no wall clock or global RNG in scientific modules ─────────────

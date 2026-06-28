@@ -172,6 +172,16 @@ def test_histogram_totals_by_stage_label() -> None:
     assert totals == {"detection": 3.0, "tracking": 4.0}
 
 
+def test_histogram_counts_by_stage_label() -> None:
+    """Per-label call counts (for averaging per-module timing in the run summary)."""
+    obs = _obs()
+    obs.metrics.observe("module_duration_seconds", 2.0, stage="detection")
+    obs.metrics.observe("module_duration_seconds", 1.0, stage="detection")
+    obs.metrics.observe("module_duration_seconds", 4.0, stage="tracking")
+    counts = obs.metrics.histogram_counts_by_label("module_duration_seconds", "stage")
+    assert counts == {"detection": 2, "tracking": 1}
+
+
 def test_concurrent_counter_increments_sum_correctly() -> None:
     obs = _obs()
 

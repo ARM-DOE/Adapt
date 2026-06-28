@@ -20,8 +20,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from random import Random
+from typing import Literal
 
-from adapt.contracts.observability import ObsContext, SpanRecord
+from adapt.contracts.observability import Metrics, ObsContext, SpanRecord
 
 __all__ = [
     "ObsSettings",
@@ -96,7 +97,9 @@ class Observability:
         self._rng = rng
         self._enabled = settings.enabled
         self._spans: list[SpanRecord] = []
-        self.metrics = _Meter(enabled=settings.enabled and settings.metrics)
+        # Typed as the Protocol (not _Meter) so the provider satisfies the invariant
+        # ``metrics: Metrics`` attribute of contracts.observability.Observability.
+        self.metrics: Metrics = _Meter(enabled=settings.enabled and settings.metrics)
 
     # ── context propagation ───────────────────────────────────────────────────
     def current(self) -> ObsContext:
@@ -173,7 +176,7 @@ class _Span:
         )
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type, exc, tb) -> Literal[False]:
         finish = self._obs._clock()
         if exc is not None and not self._error:
             self._error = f"{exc_type.__name__}: {exc}"
@@ -210,7 +213,7 @@ class _NullSpan:
     def __enter__(self) -> _NullSpan:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type, exc, tb) -> Literal[False]:
         return False
 
 
@@ -279,6 +282,18 @@ class _Meter:
                 if key is None:
                     continue
                 out[key] = out.get(key, 0.0) + sum(values)
+            return out
+
+    def histogram_counts_by_label(self, name: str, label: str) -> dict[str, int]:
+        with self._lock:
+            out: dict[str, int] = {}
+            for (n, lk), values in self._hist.items():
+                if n != name:
+                    continue
+                key = dict(lk).get(label)
+                if key is None:
+                    continue
+                out[key] = out.get(key, 0) + len(values)
             return out
 
 

@@ -17,20 +17,20 @@ Thread-safe for concurrent writer/reader access via SQLite WAL mode.
 
 import json
 import logging
-import sqlite3
-import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from adapt.persistence.sqlite_store import SqliteStore
+
 __all__ = ["RadarCatalog"]
 
 logger = logging.getLogger(__name__)
 
 
-class RadarCatalog:
+class RadarCatalog(SqliteStore):
     """Radar-level catalog manager.
 
     Manages catalog.db at {radar_dir}/catalog.db.
@@ -61,116 +61,8 @@ class RadarCatalog:
         """
         self.radar_dir = Path(radar_dir).resolve()
         self.radar = self.radar_dir.name
-        self.db_path = self.radar_dir / "catalog.db"
-
-        # Thread safety
-        self._lock = threading.RLock()
-        self._conn: sqlite3.Connection | None = None
-
-        # Initialize database
-        self._init_database()
-
+        super().__init__(self.radar_dir / "catalog.db", "radar_catalog_schema.sql", checkpoint=True)
         logger.info(f"RadarCatalog initialized for {self.radar} at {self.db_path}")
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get thread-safe database connection."""
-        if self._conn is None:
-            self._conn = sqlite3.connect(
-                str(self.db_path), check_same_thread=False, isolation_level="DEFERRED"
-            )
-            self._conn.row_factory = sqlite3.Row
-            # Enable WAL mode for concurrent access
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
-        return self._conn
-
-    def _init_database(self) -> None:
-        """Initialize database schema from SQL file."""
-        schema_path = (
-            Path(__file__).resolve().parents[1]
-            / "configuration"
-            / "schemas"
-            / "radar_catalog_schema.sql"
-        )
-
-        if not schema_path.exists():
-            # Fallback to embedded schema
-            self._create_schema_inline()
-            return
-
-        with open(schema_path) as f:
-            schema_sql = f.read()
-
-        conn = self._get_connection()
-        with self._lock:
-            conn.executescript(schema_sql)
-            conn.commit()
-            # Checkpoint WAL so readonly readers (immutable=1) see the schema.
-            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-
-        logger.debug(f"Radar catalog schema initialized from {schema_path}")
-
-    def _create_schema_inline(self) -> None:
-        """Create schema inline (fallback)."""
-        conn = self._get_connection()
-        with self._lock:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA foreign_keys=ON")
-
-            # Items table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS items (
-                    item_id TEXT PRIMARY KEY,
-                    run_id TEXT NOT NULL,
-                    item_type TEXT NOT NULL,
-                    scan_time TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    parent_ids TEXT,
-                    processing_stage TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    error_message TEXT,
-                    metadata TEXT,
-                    file_size_bytes INTEGER,
-                    file_hash TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_run ON items(run_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_scan_time ON items(scan_time DESC)")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_items_type_time ON items(item_type, scan_time DESC)"
-            )
-
-            # Progress table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS progress (
-                    run_id TEXT PRIMARY KEY,
-                    latest_downloaded_time TEXT,
-                    latest_gridded_time TEXT,
-                    latest_segmented_time TEXT,
-                    latest_analyzed_time TEXT,
-                    num_items_complete INTEGER DEFAULT 0,
-                    num_items_failed INTEGER DEFAULT 0,
-                    queue_depth INTEGER DEFAULT 0,
-                    last_updated TEXT NOT NULL
-                )
-            """)
-
-            # Schemas table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS schemas (
-                    item_type TEXT PRIMARY KEY,
-                    columns_json TEXT NOT NULL,
-                    schema_version INTEGER DEFAULT 1,
-                    updated_at TEXT NOT NULL
-                )
-            """)
-
-            conn.commit()
-            # Checkpoint WAL so readonly readers (immutable=1) see the schema.
-            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
 
     # =========================================================================
     # Item Management
@@ -791,11 +683,3 @@ class RadarCatalog:
                 """).fetchone()
 
         return dict(row) if row else None
-
-    def close(self) -> None:
-        """Close database connection."""
-        if self._conn:
-            with self._lock:
-                self._conn.close()
-                self._conn = None
-        logger.debug(f"Radar catalog connection closed for {self.radar}")

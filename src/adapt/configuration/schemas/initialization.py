@@ -97,7 +97,7 @@ def _load_user_config_dict(config_path: str) -> dict:
             raise ImportError(
                 "PyYAML is required for YAML config files: pip install pyyaml"
             ) from err
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return data or {}
 
@@ -185,7 +185,7 @@ def _persist_runtime_config(
     config_dict["run_id"] = run_id
     config_dict["created_at"] = datetime.now(UTC).isoformat()
 
-    with open(config_file, "w") as f:
+    with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config_dict, f, indent=2, default=str)
 
 
@@ -213,7 +213,7 @@ def _find_matching_run_id(new_config_dict: dict) -> str | None:
 
     for cfg_file in candidates:
         try:
-            with open(cfg_file) as f:
+            with open(cfg_file, encoding="utf-8") as f:
                 saved = json.load(f)
             if _config_fingerprint(saved) == target:
                 return saved.get("run_id")
@@ -236,7 +236,7 @@ def _load_saved_runtime_config(base_dir: str, run_id: str) -> InternalConfig:
     if not cfg_path.exists():
         raise FileNotFoundError(f"Saved runtime config not found for run_id '{run_id}': {cfg_path}")
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg_dict = json.load(f)
 
     # Non-schema metadata persisted for audit only.

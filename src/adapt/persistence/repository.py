@@ -177,7 +177,7 @@ class DataRepository:
             config_file = self.catalog.radar_dir / f"config_run_{self.run_id}.json"
             if not config_file.exists():
                 config_json = self.config.model_dump_json()
-                with open(config_file, "w") as f:
+                with open(config_file, "w", encoding="utf-8") as f:
                     f.write(config_json)
                 logger.debug(f"Saved runtime config: {config_file}")
             config_path = str(config_file.relative_to(self.base_dir))

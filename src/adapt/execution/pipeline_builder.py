@@ -39,7 +39,7 @@ def _ensure_modules_registered(extensions: list[str] | None = None) -> None:
         If any declared core module or extension fails to import.
     """
     try:
-        with open(_DEFAULTS_YAML) as f:
+        with open(_DEFAULTS_YAML, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
     except OSError as e:
         raise RuntimeError(f"Cannot read pipeline module list '{_DEFAULTS_YAML}': {e}") from e

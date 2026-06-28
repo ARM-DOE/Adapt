@@ -53,7 +53,7 @@ def _ensure_postprocess_modules_registered(extensions: list[str] | None = None) 
     """
     module_paths: list[str] = []
     if _POSTPROCESS_DEFAULTS_YAML.exists():
-        with open(_POSTPROCESS_DEFAULTS_YAML) as f:
+        with open(_POSTPROCESS_DEFAULTS_YAML, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         module_paths = cfg.get("postprocess", {}).get("modules", []) or []
 

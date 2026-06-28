@@ -35,6 +35,9 @@ class DownloaderConfig(AdaptBaseModel):
     latest_files: int = Field(5, ge=1, description="Number of latest files to keep")
     latest_minutes: int = Field(60, ge=1, description="Time window in minutes")
     poll_interval_sec: int = Field(300, ge=1, description="Polling interval in seconds")
+    max_fetch_retries: int = Field(
+        3, ge=1, description="AWS scan-fetch attempts before giving up for this poll"
+    )
     start_time: str | None = None
     end_time: str | None = None
     min_file_size: int = Field(
@@ -55,6 +58,9 @@ class RegridderConfig(AdaptBaseModel):
     min_radius: float = Field(1750.0, gt=0)
     weighting_function: Literal["cressman", "barnes", "nearest"] = "cressman"
     save_netcdf: bool = True
+    netcdf_save_retries: int = Field(
+        3, ge=1, description="NetCDF write attempts before raising (when save_netcdf is set)"
+    )
 
 
 class SegmenterConfig(AdaptBaseModel):

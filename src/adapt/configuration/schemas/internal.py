@@ -36,6 +36,7 @@ class InternalDownloaderConfig(AdaptBaseModel):
     latest_files: int
     latest_minutes: int
     poll_interval_sec: int
+    max_fetch_retries: int
     start_time: str | None
     end_time: str | None
     min_file_size: int
@@ -50,6 +51,7 @@ class InternalRegridderConfig(AdaptBaseModel):
     min_radius: float
     weighting_function: Literal["cressman", "barnes", "nearest"]
     save_netcdf: bool
+    netcdf_save_retries: int
 
 
 class InternalSegmenterConfig(AdaptBaseModel):

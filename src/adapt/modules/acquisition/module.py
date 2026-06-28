@@ -125,6 +125,7 @@ class AwsNexradDownloader(threading.Thread):
         # Legacy support: if output_dir provided but not output_dirs, use old behavior
         self.output_dir = Path(output_dir) if output_dir else None
         self.poll_interval_sec = config.downloader.poll_interval_sec
+        self.max_fetch_retries = config.downloader.max_fetch_retries
         self.latest_files = config.downloader.latest_files
         self.latest_minutes = config.downloader.latest_minutes
         self.start_time = config.downloader.start_time
@@ -382,19 +383,38 @@ class AwsNexradDownloader(threading.Thread):
         return start, end
 
     def _fetch_scans(self, start: datetime, end: datetime) -> list:
-        """Fetch available scans from AWS."""
-        try:
-            scans = self.conn.get_avail_scans_in_range(start, end, self.radar)
-            scans = sorted(scans, key=lambda s: s.scan_time)
+        """Fetch available scans from AWS, retrying transient failures.
 
-            # Filter out MDM files
-            scans = [s for s in scans if not s.key.endswith("_MDM")]
+        Retries up to ``max_fetch_retries`` times with linear backoff. After the
+        final attempt fails, returns ``[]`` so a transient AWS error does not
+        stop the downloader — the next poll retries from scratch.
+        """
+        for attempt in range(1, self.max_fetch_retries + 1):
+            try:
+                scans = self.conn.get_avail_scans_in_range(start, end, self.radar)
+                scans = sorted(scans, key=lambda s: s.scan_time)
 
-            logger.debug("Found %d scans for %s", len(scans), self.radar)
-            return scans
-        except Exception as e:
-            logger.error("Failed to fetch scans: %s", e)
-            return []
+                # Filter out MDM files
+                scans = [s for s in scans if not s.key.endswith("_MDM")]
+
+                logger.debug("Found %d scans for %s", len(scans), self.radar)
+                return scans
+            except Exception as e:
+                if attempt < self.max_fetch_retries:
+                    logger.warning(
+                        "Fetch scans attempt %d/%d failed: %s; retrying",
+                        attempt,
+                        self.max_fetch_retries,
+                        e,
+                    )
+                    self._sleep(attempt)
+                else:
+                    logger.error(
+                        "Failed to fetch scans after %d attempts: %s",
+                        self.max_fetch_retries,
+                        e,
+                    )
+        return []
 
     # ========================================================================
     # Radar availability helpers

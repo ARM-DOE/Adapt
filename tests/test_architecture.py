@@ -351,3 +351,26 @@ def test_module_outputs_carry_contracts() -> None:
         f"\n_UNCONTRACTED_OUTPUTS contains entries that now have contracts: "
         f"{sorted(stale)}. Remove them so the ratchet only tightens."
     )
+
+
+# ── Telemetry ids stay out of the science context dict ────────────────────────
+# Observability correlation ids (trace/span/scan/pipeline/...) travel out-of-band
+# in contextvars. If one ever appeared as a module input/output key it would couple
+# telemetry to the science data contract and could perturb determinism. Pin it.
+
+
+def test_obs_context_fields_never_in_module_io() -> None:
+    """No ObsContext field name may be a module input/output key."""
+    from adapt.contracts.observability import ObsContext
+
+    obs_fields = set(ObsContext.__dataclass_fields__)
+    leaks: list[str] = []
+    for module in _registered_default_modules():
+        for key in list(module.inputs) + list(module.outputs):
+            if key in obs_fields:
+                leaks.append(f"  {module.name}: '{key}'")
+
+    assert not leaks, (
+        "\nTelemetry correlation ids leaked into the science context dict — keep "
+        "ObsContext fields out of module inputs/outputs:\n" + "\n".join(leaks)
+    )

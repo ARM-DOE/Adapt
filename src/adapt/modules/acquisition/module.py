@@ -7,6 +7,8 @@ Monitors AWS S3 bucket for new NEXRAD radar files and downloads them locally
 in realtime or historical batches. Deduplicates files to avoid re-downloading.
 """
 
+import contextlib
+import io
 import logging
 import threading
 import time
@@ -549,7 +551,12 @@ class AwsNexradDownloader(threading.Thread):
             temp_dir = base_dir / "_temp"
             temp_dir.mkdir(exist_ok=True)
 
-            results = self.conn.download([scan], temp_dir, keep_aws_folders=False)
+            # nexradaws prints "Downloaded ..." / "n out of m files downloaded..."
+            # straight to stdout with no quiet option. Contain it to this call (we log
+            # a controlled "Downloaded: <name>" below); logging uses stderr, so this
+            # narrow stdout redirect never swallows our own output.
+            with contextlib.redirect_stdout(io.StringIO()):
+                results = self.conn.download([scan], temp_dir, keep_aws_folders=False)
             success = list(results.iter_success())
 
             if success:

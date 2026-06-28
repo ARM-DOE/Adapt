@@ -16,7 +16,9 @@ up to the caller (e.g. ``RadarProcessor``) which handles it.
 """
 
 import logging
+from contextlib import nullcontext
 
+from adapt.contracts.observability import Observability
 from adapt.contracts.pipeline import require
 from adapt.execution.graph.node import Node
 
@@ -38,8 +40,11 @@ class GraphExecutor:
         result_context = executor.run(initial_context={})
     """
 
-    def __init__(self, nodes: list[Node]) -> None:
+    def __init__(self, nodes: list[Node], observability: Observability | None = None) -> None:
         self.nodes = nodes
+        # Optional, injected by the runtime composition root. Absent -> no telemetry
+        # (the documented default for this optional subsystem); the node still runs.
+        self._obs = observability
 
     def run(self, context: dict) -> dict:
         """Execute all nodes in dependency order.
@@ -94,7 +99,18 @@ class GraphExecutor:
                     )
                     validator(context[key])
 
-                outputs = node.module.run(context)
+                # One span per node — the single auto-instrumentation seam. The span's
+                # exit captures any propagating exception and records errors_total.
+                span_cm = self._obs.span(node.name) if self._obs is not None else nullcontext()
+                with span_cm:
+                    try:
+                        outputs = node.module.run(context)
+                    except Exception as exc:
+                        # Name the failing stage on the exception so the scan-level
+                        # handler reports *which* stage broke. The span still records
+                        # the error; we re-raise unchanged (no swallowing, no wrapping).
+                        exc.add_note(f"adapt: failing stage = {node.name}")
+                        raise
 
                 # Validate outputs declared by the module
                 if outputs:

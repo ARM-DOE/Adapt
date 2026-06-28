@@ -178,9 +178,22 @@ class InternalOutputConfig(AdaptBaseModel):
 
 
 class InternalLoggingConfig(AdaptBaseModel):
-    """Runtime logging configuration."""
+    """Runtime logging + observability configuration.
+
+    ``level`` governs the full file/JSON log; ``console_level`` keeps the console
+    quiet independently. The remaining toggles enable/disable the observability
+    subsystem and its pillars; the orchestrator translates these into an
+    ``ObsSettings`` when it builds the provider.
+    """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    console_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "WARNING"
+    enabled: bool = True
+    traces: bool = True
+    metrics: bool = True
+    json_logs: bool = False
+    console_logs: bool = True
+    progress_every: float = Field(default=30.0, gt=0.0)
 
 
 class InternalProcessorConfig(AdaptBaseModel):

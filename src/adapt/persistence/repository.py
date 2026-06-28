@@ -29,6 +29,7 @@ import pandas as pd
 import xarray as xr
 
 from adapt.persistence.catalog import RadarCatalog
+from adapt.persistence.execution_history import ExecutionHistory
 from adapt.persistence.registry import RepositoryRegistry
 
 if TYPE_CHECKING:
@@ -130,6 +131,8 @@ class DataRepository:
         # Catalog system
         self.registry = RepositoryRegistry.get_instance(self.base_dir)
         self.catalog = RadarCatalog(self.base_dir / radar)
+        # Execution history (run/module/warning/error records) shares the catalog db.
+        self.history = ExecutionHistory(self.catalog.db_path)
 
         # Thread safety
         self._lock = threading.RLock()
@@ -337,7 +340,10 @@ class DataRepository:
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        return xr.open_dataset(file_path)
+        # Pin the engine: Adapt writes with netcdf4, so name it on read too. Letting
+        # xarray sniff backends makes the h5netcdf probe emit HDF5-DIAG noise to stderr
+        # ("Not an HDF5 file") for every classic-format file.
+        return xr.open_dataset(file_path, engine="netcdf4")
 
     def open_table(self, artifact_id: str, table_name: str | None = None) -> pd.DataFrame:
         """Open SQLite or Parquet artifact as DataFrame.

@@ -23,7 +23,7 @@ import logging
 import queue
 import threading
 import time
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,12 +31,15 @@ import pandas as pd
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.contracts import ContractViolation, PersistenceMeta
+from adapt.contracts.observability import Observability
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import _ensure_modules_registered, resolve_enabled_modules
 from adapt.persistence import DataRepository, ProductType
 from adapt.persistence.output_router import OutputRouter
+from adapt.runtime.diagnostics import silence_hdf5_errors
+from adapt.runtime.observability import disabled_observability
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -82,6 +85,9 @@ class RadarProcessor(threading.Thread):
         file_tracker=None,
         repository: DataRepository | None = None,
         name: str = "RadarProcessor",
+        observability: Observability | None = None,
+        root_trace_id: str = "",
+        reporter=None,
     ):
         super().__init__(daemon=True, name=name)
 
@@ -90,6 +96,12 @@ class RadarProcessor(threading.Thread):
         self.output_dirs = {k: Path(v) for k, v in output_dirs.items()}
         self.file_tracker = file_tracker
         self.repository = repository
+        # Telemetry provider, injected by the orchestrator. Absent -> disabled (off),
+        # so the rest of this class calls it unconditionally with no `if obs` branches.
+        self._obs = observability if observability is not None else disabled_observability()
+        self._root_trace_id = root_trace_id
+        # Console reporter (injected). Absent -> no per-scan progress line.
+        self._reporter = reporter
         self._stop_event = threading.Event()
         self.output_lock = threading.Lock()
 
@@ -121,13 +133,15 @@ class RadarProcessor(threading.Thread):
             history_groups.setdefault(m.required_history, []).append(m)
 
         self._executors: dict[int, GraphExecutor] = {
-            req: GraphExecutor(GraphBuilder(mods).build())
+            req: GraphExecutor(GraphBuilder(mods).build(), observability=self._obs)
             for req, mods in sorted(history_groups.items())
         }
 
         self._post_modules = post_persist
         self._post_executor: GraphExecutor | None = (
-            GraphExecutor(GraphBuilder(post_persist).build()) if post_persist else None
+            GraphExecutor(GraphBuilder(post_persist).build(), observability=self._obs)
+            if post_persist
+            else None
         )
 
         self._module_configs = resolve_module_configs(config)
@@ -161,10 +175,27 @@ class RadarProcessor(threading.Thread):
         return self._stop_event.is_set()
 
     def run(self):
-        """Main processor loop (runs in thread)."""
-        logger.info("Processor started, waiting for files...")
-        _skip_count = 0
+        """Main processor loop (runs in thread).
 
+        Binds this thread's correlation context once — contextvars do not cross
+        threads, so the root trace id is handed in from the orchestrator and
+        re-bound here so every log/span emitted on this thread shares one trace.
+        """
+        # HDF5 error stacks are thread-local: silence libhdf5's stderr dumps on THIS
+        # worker thread, where all the NetCDF/HDF5 I/O happens.
+        silence_hdf5_errors()
+        logger.info("Processor started, waiting for files...")
+        with self._obs.bind(
+            trace_id=self._root_trace_id,
+            pipeline_id=self.repository.run_id,
+            dataset_id=self.config.downloader.radar,
+            worker_id="processor",
+        ):
+            self._run_loop()
+        logger.info("Processor stopped")
+
+    def _run_loop(self):
+        _skip_count = 0
         while not self.stopped():
             try:
                 filepath = self.input_queue.get(timeout=1)
@@ -189,7 +220,6 @@ class RadarProcessor(threading.Thread):
 
         if _skip_count:
             logger.info("Skipped %d already-analyzed files", _skip_count)
-        logger.info("Processor stopped")
 
     # ── Per-file processing ───────────────────────────────────────────────────
 
@@ -233,6 +263,30 @@ class RadarProcessor(threading.Thread):
         queue_wait_s = (time.time() - queued_at) if queued_at else None
         logger.info("Processing: %s", Path(filepath).name)
 
+        # Bind scan context and open the scan span; module spans nest under it and
+        # every log on this path carries scan_id. Disabled provider -> no-ops.
+        with self._obs.bind(scan_id=file_id):
+            with self._obs.span("scan") as scan_span:
+                ok = self._run_scan(filepath, file_id, queue_wait_s, scan_span)
+            # The scan span has closed; split this scan's drained spans into the module
+            # spans (one module_history batch) and the scan span itself (carries n_cells).
+            all_spans = self._obs.drain_spans()
+            modules = [s for s in all_spans if s.name != "scan"]
+            if modules:
+                self.repository.history.record_modules(
+                    self.repository.run_id, file_id, modules, recorded_at=datetime.now(UTC)
+                )
+            # One controlled console line per scan, built from the captured telemetry
+            # (stage timings + cell count) — never printed from inside a module.
+            if self._reporter is not None and modules:
+                scan_rec = next((s for s in all_spans if s.name == "scan"), None)
+                n_cells = int(scan_rec.metadata.get("n_cells", 0)) if scan_rec else 0
+                self._reporter.scan(file_id, modules, n_cells)
+            return ok
+
+    def _run_scan(self, filepath, file_id, queue_wait_s, scan_span) -> bool:
+        """Execute the scientific pipeline for one scan (inside the scan span)."""
+        tracker = self.file_tracker
         try:
             t0 = time.perf_counter()
 
@@ -345,6 +399,14 @@ class RadarProcessor(threading.Thread):
                     timings["queue_wait_seconds"] = queue_wait_s
                 tracker.mark_stage_complete(file_id, "analyzed", num_cells=n_cells, timings=timings)
 
+            radar = self.config.downloader.radar
+            self._obs.metrics.incr("files_processed_total", dataset_id=radar)
+            self._obs.metrics.incr("cells_detected_total", value=float(n_cells))
+            self._obs.metrics.observe("scan_processing_time", elapsed_s)
+            self._obs.metrics.gauge("queue_depth", self.input_queue.qsize())
+            if queue_wait_s is not None:
+                self._obs.metrics.observe("download_latency", queue_wait_s)
+            scan_span.set(n_cells=n_cells)
             return True
 
         except ContractViolation as e:
@@ -355,7 +417,19 @@ class RadarProcessor(threading.Thread):
             return False
 
         except Exception as e:
-            logger.exception("Error processing %s", filepath)
+            # One context-rich failure line + exactly one traceback. scan_id rides the
+            # bound context; the failing stage is on the exception's notes (added by
+            # GraphExecutor). elapsed/error_type are structured for the JSON log.
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                "Scan failed | scan=%s elapsed=%.2fs %s: %s",
+                file_id,
+                elapsed,
+                type(e).__name__,
+                e,
+                exc_info=True,
+                extra={"elapsed_s": round(elapsed, 3), "error_type": type(e).__name__},
+            )
             if tracker:
                 tracker.mark_stage_complete(file_id, "analyzed", error=str(e))
             return False

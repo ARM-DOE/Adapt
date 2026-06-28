@@ -1,8 +1,39 @@
+import time
+
 import pytest
 
 from adapt.runtime.orchestrator import PipelineOrchestrator
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
+
+
+def test_orchestrator_build_run_summary_aggregates_metrics_and_history(
+    pipeline_config, test_repository
+):
+    orch = PipelineOrchestrator(pipeline_config)
+    orch._obs = orch._build_observability()
+    orch.repository = test_repository
+    orch.run_id = test_repository.run_id
+    orch._start_time = time.time() - 10
+
+    m = orch._obs.metrics
+    m.incr("files_processed_total")
+    m.incr("files_processed_total")
+    m.incr("cells_detected_total", value=18431)
+    m.observe("scan_processing_time", 1.0)
+    m.observe("scan_processing_time", 3.0)
+    m.observe("module_duration_seconds", 5.0, stage="detection")
+    m.observe("module_duration_seconds", 2.0, stage="tracking")
+
+    summary = orch._build_run_summary("success")
+    assert summary.status == "success"
+    assert summary.files_processed == 2
+    assert summary.objects_detected == 18431
+    assert summary.scans_processed == 2
+    assert summary.average_scan_time == 2.0
+    assert summary.maximum_scan_time == 3.0
+    assert summary.slowest_stages[0] == ("detection", 5.0)
+    assert summary.duration_seconds >= 10.0
 
 
 def test_orchestrator_initialization(pipeline_config):
@@ -17,6 +48,16 @@ def test_orchestrator_logging_and_tracker(pipeline_config):
     orch._setup_logging()
 
     assert orch.tracker is not None
+
+
+def test_orchestrator_builds_working_observability_from_config(pipeline_config):
+    """The provider built from config actually records spans and metrics."""
+    orch = PipelineOrchestrator(pipeline_config)
+    obs = orch._build_observability()
+    with obs.span("ingest"):
+        obs.metrics.incr("files_processed_total")
+    assert [s.name for s in obs.drain_spans()] == ["ingest"]
+    assert obs.metrics.counter_total("files_processed_total") == 1.0
 
 
 def test_orchestrator_queue_wiring(pipeline_config):

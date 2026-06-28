@@ -296,6 +296,40 @@ class TestWriteOperations:
         finally:
             reopened.close()
 
+    def test_open_dataset_uses_explicit_netcdf4_engine(
+        self, repository, sample_dataset, monkeypatch
+    ):
+        """open_dataset must pin engine='netcdf4' instead of letting xarray sniff.
+
+        Adapt writes its NetCDF with the netcdf4 engine, so reads should name it too.
+        Without an explicit engine xarray probes every backend, and the h5netcdf probe
+        makes libhdf5 splatter ``HDF5-DIAG`` blocks to stderr ("Not an HDF5 file") for
+        every classic-format file. Pinning the engine skips the probe entirely.
+        """
+        from adapt.persistence import repository as repo_module
+
+        artifact_id = repository.write_netcdf(
+            ds=sample_dataset,
+            product_type=ProductType.GRIDDED_NC,
+            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
+            producer="loader",
+        )
+
+        captured: dict = {}
+        real_open = repo_module.xr.open_dataset
+
+        def spy(path, *args, **kwargs):
+            captured["engine"] = kwargs.get("engine")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(repo_module.xr, "open_dataset", spy)
+
+        ds = repository.open_dataset(artifact_id)
+        try:
+            assert captured["engine"] == "netcdf4"
+        finally:
+            ds.close()
+
     def test_write_parquet(self, repository, sample_dataframe):
         """Should write Parquet and register artifact."""
         artifact_id = repository.write_parquet(

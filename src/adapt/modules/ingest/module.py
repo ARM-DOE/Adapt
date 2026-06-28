@@ -24,6 +24,9 @@ from typing import Any
 import pyart
 import xarray as xr
 
+# NB: the Py-ART citation banner is suppressed at the package root (adapt/__init__
+# sets PYART_QUIET) because nexradaws imports pyart before this module ever loads.
+
 __all__ = ["RadarDataLoader"]
 
 logger = logging.getLogger(__name__)

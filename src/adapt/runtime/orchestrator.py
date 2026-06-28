@@ -13,17 +13,26 @@ is not blocked by visualization and validates repository API integrity.
 
 import logging
 import queue
+import random
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from adapt.contracts.execution_history import RunStart, RunSummary
 from adapt.persistence import DataRepository
 from adapt.runtime.file_tracker import FileProcessingTracker
+from adapt.runtime.history_handler import HistoryLogHandler
+from adapt.runtime.logging_setup import configure_logging
+from adapt.runtime.observability import ObsSettings, build_observability
 from adapt.runtime.processor import RadarProcessor
+from adapt.runtime.provenance import capture_provenance, config_hash
+from adapt.runtime.run_reporter import RunReporter
 from adapt.runtime.sources import source_registry
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
+    from adapt.contracts.observability import Observability
     from adapt.contracts.source import ScanSource
 
 __all__ = ["PipelineOrchestrator"]
@@ -140,6 +149,108 @@ class PipelineOrchestrator:
         self._start_time: float | None = None
         self._max_duration: float | None = None
         self._close_repository_on_stop = close_repository_on_stop
+
+        # Telemetry (built in start()); kept here so stop() is safe before start().
+        self._obs: Observability | None = None
+        self._root_span = None
+        self._root_trace_id = ""
+        self._history_handler: HistoryLogHandler | None = None
+        self._reporter: RunReporter | None = None
+
+    def _obs_settings(self) -> ObsSettings:
+        """Translate the resolved logging/observability config into ObsSettings."""
+        lc = self.config.logging
+        return ObsSettings(
+            enabled=lc.enabled,
+            traces=lc.traces,
+            metrics=lc.metrics,
+            json_logs=lc.json_logs,
+            console_logs=lc.console_logs,
+            level=lc.level,
+            console_level=lc.console_level,
+            progress_every=lc.progress_every,
+        )
+
+    def _build_observability(self) -> "Observability":
+        """Build the telemetry provider from the resolved config.
+
+        Injects production clocks/rng here (the only place wall-clock reads are
+        legal for telemetry). Trace ids are random per run.
+        """
+        return build_observability(
+            self._obs_settings(),
+            clock=time.perf_counter,
+            wall_clock=lambda: datetime.now(UTC),
+            rng=random.Random(),
+        )
+
+    def _record_run_start(self, radar: str) -> None:
+        """Open the execution-history run record and print the console run header."""
+        prov = capture_provenance()
+        modules = tuple(m.name for m in self.processor._pipeline_modules) if self.processor else ()
+        start = RunStart(
+            run_id=self.run_id or "",
+            pipeline=self.config.source,
+            pipeline_version=prov.software_version,
+            site=radar,
+            dataset=radar,
+            instrument="NEXRAD",
+            mode=self.config.mode,
+            start_time=datetime.now(UTC),
+            configuration_hash=config_hash(self.config.model_dump_json()),
+            configuration_file=str(
+                self.repository.catalog.radar_dir / f"config_run_{self.run_id}.json"
+            )
+            if self.repository
+            else "",
+            provenance=prov,
+            enabled_modules=modules,
+        )
+        assert self.repository is not None
+        self.repository.history.start_run(start)
+        self._reporter.header(start)
+
+    def _finalize_history(self) -> None:
+        """Flush captured warnings/errors, finalize the run record, print the summary."""
+        if self._obs is None or self.repository is None:
+            return
+        if self._history_handler is not None:
+            warnings, errors = self._history_handler.drain()
+            if warnings:
+                self.repository.history.record_warnings(self.run_id, warnings)
+            if errors:
+                self.repository.history.record_errors(self.run_id, errors)
+        summary = self._build_run_summary("cancelled" if self._interrupted else "success")
+        self.repository.history.finalize_run(summary)
+        if self._reporter is not None:
+            self._reporter.summary(summary)
+
+    def _build_run_summary(self, status: str) -> RunSummary:
+        """Aggregate the end-of-run summary from telemetry metrics + history counts."""
+        m = self._obs.metrics
+        scan_times = m.histogram_values("scan_processing_time")
+        slowest = sorted(
+            m.histogram_totals_by_label("module_duration_seconds", "stage").items(),
+            key=lambda kv: kv[1],
+            reverse=True,
+        )[:3]
+        warnings = len(self.repository.history.query_warnings(run_id=self.run_id))
+        errors = len(self.repository.history.query_errors(run_id=self.run_id))
+        duration = (time.time() - self._start_time) if self._start_time else 0.0
+        return RunSummary(
+            run_id=self.run_id or "",
+            status=status,
+            end_time=datetime.now(UTC),
+            duration_seconds=duration,
+            files_processed=int(m.counter_total("files_processed_total")),
+            scans_processed=len(scan_times),
+            objects_detected=int(m.counter_total("cells_detected_total")),
+            warnings=warnings,
+            errors=errors,
+            average_scan_time=(sum(scan_times) / len(scan_times)) if scan_times else 0.0,
+            maximum_scan_time=max(scan_times) if scan_times else 0.0,
+            slowest_stages=tuple(slowest),
+        )
 
     def _setup_logging(self):
         """Configure logging and file tracking systems.
@@ -258,6 +369,23 @@ class PipelineOrchestrator:
             config=self.config,
         )
 
+        # Build telemetry and open the root pipeline span. The root trace id is handed
+        # to the processor thread (contextvars do not cross threads) so the whole run
+        # shares one trace.
+        self._obs = self._build_observability()
+        self._root_span = self._obs.span(
+            "pipeline", pipeline_id=self.run_id or "", dataset_id=radar
+        )
+        self._root_span.__enter__()
+        self._root_trace_id = self._obs.current().trace_id
+
+        # Structured logging (JSON file + quiet console) + capture warnings/errors.
+        log_path = Path(self.output_dirs["logs"]) / f"pipeline_{radar}.log"
+        configure_logging(self._obs_settings(), log_path)
+        self._history_handler = HistoryLogHandler()
+        logging.getLogger().addHandler(self._history_handler)
+        self._reporter = RunReporter()
+
         self._start_time = time.time()
         self._max_duration = max_runtime * 60 if max_runtime else None
 
@@ -279,8 +407,14 @@ class PipelineOrchestrator:
             output_dirs=self.output_dirs,
             file_tracker=self.tracker,
             repository=self.repository,
+            observability=self._obs,
+            root_trace_id=self._root_trace_id,
+            reporter=self._reporter,
         )
         self.processor.start()
+
+        # Open the execution-history run record and print the one-shot console header.
+        self._record_run_start(radar)
 
         mode = self.config.mode
         logger.debug("Pipeline running in %s mode. Press Ctrl+C to stop.", mode.upper())
@@ -427,6 +561,11 @@ class PipelineOrchestrator:
 
         self._stop_event = True
 
+        # Close the root pipeline span if it was opened in start().
+        if self._root_span is not None:
+            self._root_span.__exit__(None, None, None)
+            self._root_span = None
+
         # Stop threads
         for name, thread in [
             ("Downloader", self.downloader),
@@ -442,6 +581,10 @@ class PipelineOrchestrator:
         if self.processor:
             self.processor.save_results()
             self.processor.close_database()
+
+        # Execution history: flush captured warnings/errors, finalize the run record,
+        # and print the one-shot console summary (before the repository closes).
+        self._finalize_history()
 
         # Finalize repository
         if self.repository:

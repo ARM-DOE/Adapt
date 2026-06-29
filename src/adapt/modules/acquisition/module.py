@@ -15,7 +15,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from nexradaws import NexradAwsInterface
+from adapt.downloaders import NexradS3
 
 __all__ = ["AwsNexradDownloader"]
 
@@ -34,8 +34,8 @@ class AwsNexradDownloader(threading.Thread):
     research studies.
 
     **AWS S3 Bucket:** Files stored at
-    `s3://noaa-nexrad-level2/{YYYY}/{MM}/{DD}/{radar}/`
-    Example: `s3://noaa-nexrad-level2/2025/03/05/KDIX/KDIX20250305_000310_V06`
+    `s3://unidata-nexrad-level2/{YYYY}/{MM}/{DD}/{radar}/`
+    Example: `s3://unidata-nexrad-level2/2025/03/05/KDIX/KDIX20250305_000310_V06`
 
     **Deduplication:** Maintains set of known files to avoid re-downloading.
     Safe to restart mid-execution.
@@ -100,7 +100,7 @@ class AwsNexradDownloader(threading.Thread):
         file_tracker : FileProcessingTracker, optional
             Optional file processing tracker to record download completion.
 
-        conn : nexradaws.NexradAwsInterface, optional
+        conn : adapt.downloaders.NexradS3, optional
             AWS S3 connection object. If None, creates new connection.
             Allows injection for testing.
 
@@ -114,9 +114,8 @@ class AwsNexradDownloader(threading.Thread):
 
         Notes
         -----
-        Requires AWS credentials configured via environment variables or
-        ~/.aws/credentials. The S3 bucket is public and requires no auth,
-        but credentials can speed up downloads (higher rate limits).
+        The S3 bucket is public; downloads use anonymous (unsigned) requests
+        and require no AWS credentials.
         """
 
         super().__init__(daemon=True)
@@ -135,7 +134,7 @@ class AwsNexradDownloader(threading.Thread):
         self.file_tracker = file_tracker
 
         self.result_queue = result_queue
-        self.conn = conn or NexradAwsInterface()
+        self.conn = conn or NexradS3()
         # injectable time helpers for testing
         self._clock = clock or (lambda: datetime.now(UTC))
         self._sleep = sleeper or time.sleep
@@ -551,9 +550,8 @@ class AwsNexradDownloader(threading.Thread):
             temp_dir = base_dir / "_temp"
             temp_dir.mkdir(exist_ok=True)
 
-            # nexradaws prints "Downloaded ..." / "n out of m files downloaded..."
-            # straight to stdout with no quiet option. Contain it to this call (we log
-            # a controlled "Downloaded: <name>" below); logging uses stderr, so this
+            # Contain any stdout the conn's download() may emit (we log our own
+            # controlled "Downloaded: <name>" below). Logging uses stderr, so this
             # narrow stdout redirect never swallows our own output.
             with contextlib.redirect_stdout(io.StringIO()):
                 results = self.conn.download([scan], temp_dir, keep_aws_folders=False)

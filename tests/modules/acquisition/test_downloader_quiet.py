@@ -1,12 +1,12 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""The nexradaws download call must not leak its own print() chatter to the console.
+"""The conn's download call must not leak any print() chatter to the console.
 
-nexradaws prints "Downloaded <file>" and "<n> out of <m> files downloaded..." straight
-to stdout with no quiet option. The acquisition module already logs a controlled
-"Downloaded: <name>" line, so the library's duplicate prints are pure clutter and must
-be contained at the one call site (no supported quiet flag exists).
+The acquisition module already logs a controlled "Downloaded: <name>" line, so any
+stdout a download backend emits is pure clutter and must be contained at the one call
+site. (The retired ``nexradaws`` backend printed such chatter unconditionally; the
+guard remains so no backend can leak to the console.)
 """
 
 from datetime import UTC, datetime
@@ -18,10 +18,10 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_download_scan_suppresses_nexradaws_stdout(tmp_path, fake_scan, make_config, capsys):
+def test_download_scan_suppresses_conn_stdout(tmp_path, fake_scan, make_config, capsys):
     class PrintingConn:
         def download(self, files, basepath, keep_aws_folders=False):
-            print("Downloaded KOHX_TEST")  # nexradaws chatter
+            print("Downloaded KOHX_TEST")  # backend chatter
             print("1 out of 1 files downloaded...0 errors")
 
             class _Results:

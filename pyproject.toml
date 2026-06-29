@@ -38,7 +38,7 @@ dependencies = [
     "pydantic>=2.0",
     "arm_pyart",
     "opencv-python",
-    "nexradaws",
+    "boto3",
     "pyarrow",
     "duckdb",
 ]

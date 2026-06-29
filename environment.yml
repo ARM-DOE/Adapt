@@ -28,9 +28,9 @@ dependencies:
   - contextily
   - pyarrow
   - duckdb
+  - boto3
   - pydata-sphinx-theme
   - pydantic
   - pip:
-      - nexradaws
       - sphinx-autodoc-typehints
       - myst-parser>=2.0

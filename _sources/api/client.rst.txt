@@ -1,7 +1,7 @@
 Repository Client API
 =====================
 
-Read-only interface for querying ADAPT pipeline output from a repository.
+Read-only interface for querying Adapt pipeline output from a repository.
 Initialise :class:`~adapt.api.RepositoryClient` with the repository root path;
 it auto-discovers runs, radars, scans, and data items through the two-tier
 database system (root-level registry + per-radar catalog).

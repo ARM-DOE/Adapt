@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""RepositoryClient — read-only access to an ADAPT repository.
+"""RepositoryClient — read-only access to an Adapt repository.
 
 Discovers data through the two-tier database system:
 - Root-level registry (adapt_registry.db): runs and radars.
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 
 class RepositoryClient:
-    """Read-only interface for an ADAPT repository.
+    """Read-only interface for an Adapt repository.
 
     Thread-safe for notebook usage.
     Discovers all data through catalog databases — no filesystem inspection.
@@ -61,7 +61,7 @@ class RepositoryClient:
     Parameters
     ----------
     repository_root : str or Path
-        Root directory of the ADAPT repository.
+        Root directory of the Adapt repository.
     """
 
     def __init__(self, repository_root: str | Path) -> None:
@@ -494,7 +494,7 @@ class RepositoryClient:
             run_id=str(scan_record.get("run_id", "")),
             n_cells=int(scan_record.get("num_cells") or 0),
             max_reflectivity=float(scan_record.get("max_reflectivity") or 0.0),
-            has_tracks=bool(scan_record.get("has_tracks") or False),
+            has_tracks=bool(scan_record.get("has_tracks")),
         )
         seg = self._load_item_file(radar, scan_record.get("segmentation2d_item_id"))
         cells = self._load_item_file(radar, scan_record.get("analysis2d_item_id"))

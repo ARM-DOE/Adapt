@@ -121,6 +121,7 @@ class UserDownloaderConfig(_UserSection):
     latest_files: int | None = None
     latest_minutes: int | None = None
     poll_interval_sec: int | None = None
+    max_fetch_retries: int | None = None
     start_time: str | None = None
     end_time: str | None = None
 
@@ -164,6 +165,7 @@ class UserConfig(AdaptBaseModel):
     latest_files: int | None = Field(None, alias="LATEST_FILES")
     latest_minutes: int | None = Field(None, alias="LATEST_MINUTES")
     poll_interval_sec: int | None = Field(None, alias="POLL_INTERVAL_SEC")
+    max_fetch_retries: int | None = Field(None, alias="MAX_FETCH_RETRIES")
 
     # Historical settings
     start_time: str | None = Field(None, alias="START_TIME")
@@ -292,6 +294,8 @@ class UserConfig(AdaptBaseModel):
             downloader["latest_minutes"] = self.latest_minutes
         if self.poll_interval_sec is not None:
             downloader["poll_interval_sec"] = self.poll_interval_sec
+        if self.max_fetch_retries is not None:
+            downloader["max_fetch_retries"] = self.max_fetch_retries
 
         # Map base_dir to downloader.output_dir for convenience
         if self.base_dir is not None:

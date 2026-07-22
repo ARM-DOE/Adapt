@@ -36,6 +36,7 @@ class InternalDownloaderConfig(AdaptBaseModel):
     latest_files: int
     latest_minutes: int
     poll_interval_sec: int
+    max_fetch_retries: int
     start_time: str | None
     end_time: str | None
     min_file_size: int
@@ -50,6 +51,7 @@ class InternalRegridderConfig(AdaptBaseModel):
     min_radius: float
     weighting_function: Literal["cressman", "barnes", "nearest"]
     save_netcdf: bool
+    netcdf_save_retries: int
 
 
 class InternalSegmenterConfig(AdaptBaseModel):
@@ -140,6 +142,13 @@ class InternalTrackerConfig(AdaptBaseModel):
     core_reflectivity_threshold: float = Field(default=40.0, ge=0.0)
     max_gap_minutes: float = Field(default=10.0, gt=0.0)
     expected_speed_ms: float = Field(default=30.0, gt=0.0)
+    max_tracking_gap_minutes: float = Field(default=20.0, gt=0.0)
+    projection_horizon_minutes: float = Field(default=20.0, gt=0.0)
+    projection_interval_minutes: float = Field(default=1.0, gt=0.0)
+    max_speed_ms: float = Field(default=40.0, gt=0.0)
+    max_speed_multiplier: float = Field(default=3.0, gt=0.0)
+    overlap_match_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    heading_change_penalty_weight: float = Field(default=0.0, ge=0.0)
     cell_uid: InternalCellUidConfig
 
 
@@ -169,9 +178,22 @@ class InternalOutputConfig(AdaptBaseModel):
 
 
 class InternalLoggingConfig(AdaptBaseModel):
-    """Runtime logging configuration."""
+    """Runtime logging + observability configuration.
+
+    ``level`` governs the full file/JSON log; ``console_level`` keeps the console
+    quiet independently. The remaining toggles enable/disable the observability
+    subsystem and its pillars; the orchestrator translates these into an
+    ``ObsSettings`` when it builds the provider.
+    """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    console_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "WARNING"
+    enabled: bool = True
+    traces: bool = True
+    metrics: bool = True
+    json_logs: bool = False
+    console_logs: bool = True
+    progress_every: float = Field(default=30.0, gt=0.0)
 
 
 class InternalProcessorConfig(AdaptBaseModel):

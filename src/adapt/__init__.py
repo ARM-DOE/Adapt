@@ -11,6 +11,15 @@ Subpackages:
 Authors: Bhupendra Raut and Sid Gupta
 """
 
+import os as _os
+
+# Quiet third-party import-time chatter before any submodule (and its transitive
+# deps) load. Py-ART prints a citation banner on import unless PYART_QUIET is set,
+# and the ingest module imports pyart at its own import time — earlier than any
+# Adapt module could set this. The package root is the one place guaranteed to run
+# first. setdefault preserves a user-provided override.
+_os.environ.setdefault("PYART_QUIET", "1")
+
 import importlib.metadata as _importlib_metadata
 
 # Get the version

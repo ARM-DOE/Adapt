@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""First-class domain objects for the ADAPT repository API."""
+"""First-class domain objects for the Adapt repository API."""
 
 from __future__ import annotations
 

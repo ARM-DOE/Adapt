@@ -20,6 +20,7 @@ class IngestConfig(BaseModel):
     min_radius: float
     weighting_function: str
     save_netcdf: bool
+    netcdf_save_retries: int
     radar: str
     z_level: float
     z_coord: str

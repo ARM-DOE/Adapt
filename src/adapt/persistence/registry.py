@@ -16,12 +16,13 @@ Thread-safe for concurrent writer/reader access via SQLite WAL mode.
 """
 
 import logging
-import sqlite3
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
+
+from adapt.persistence.sqlite_store import SqliteStore
 
 __all__ = ["RepositoryRegistry"]
 
@@ -32,7 +33,7 @@ _registry_cache: dict[str, "RepositoryRegistry"] = {}
 _cache_lock = threading.Lock()
 
 
-class RepositoryRegistry:
+class RepositoryRegistry(SqliteStore):
     """Root-level registry for Adapt repository.
 
     Manages adapt_registry.db at {root_dir}/adapt_registry.db.
@@ -57,15 +58,7 @@ class RepositoryRegistry:
             Root directory for the Adapt repository
         """
         self.root_dir = Path(root_dir).resolve()
-        self.db_path = self.root_dir / "adapt_registry.db"
-
-        # Thread safety
-        self._lock = threading.RLock()
-        self._conn: sqlite3.Connection | None = None
-
-        # Initialize database
-        self._init_database()
-
+        super().__init__(self.root_dir / "adapt_registry.db", "registry_schema.sql")
         logger.debug("RepositoryRegistry initialized at %s", self.db_path)
 
     @classmethod
@@ -88,109 +81,6 @@ class RepositoryRegistry:
             if root_path not in _registry_cache:
                 _registry_cache[root_path] = cls(root_dir)
             return _registry_cache[root_path]
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get thread-safe database connection."""
-        if self._conn is None:
-            self._conn = sqlite3.connect(
-                str(self.db_path), check_same_thread=False, isolation_level="DEFERRED"
-            )
-            self._conn.row_factory = sqlite3.Row
-            # Enable WAL mode for concurrent access
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
-        return self._conn
-
-    def _init_database(self) -> None:
-        """Initialize database schema from SQL file."""
-        schema_path = Path(__file__).parent / "schemas" / "registry_schema.sql"
-
-        if not schema_path.exists():
-            # Fallback to embedded schema if file not found
-            self._create_schema_inline()
-            return
-
-        with open(schema_path) as f:
-            schema_sql = f.read()
-
-        conn = self._get_connection()
-        with self._lock:
-            conn.executescript(schema_sql)
-            conn.commit()
-
-        logger.debug(f"Registry schema initialized from {schema_path}")
-
-    def _create_schema_inline(self) -> None:
-        """Create schema inline (fallback)."""
-        conn = self._get_connection()
-        with self._lock:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA foreign_keys=ON")
-
-            # Runs table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS runs (
-                    run_id TEXT PRIMARY KEY,
-                    radar TEXT NOT NULL,
-                    start_time TEXT NOT NULL,
-                    end_time TEXT,
-                    status TEXT NOT NULL,
-                    mode TEXT,
-                    config_path TEXT,
-                    repository_version TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_start_time ON runs(start_time DESC)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_radar ON runs(radar)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)")
-
-            # Radars table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS radars (
-                    radar TEXT PRIMARY KEY,
-                    catalog_path TEXT NOT NULL,
-                    data_path TEXT NOT NULL,
-                    location_lat REAL,
-                    location_lon REAL,
-                    created_at TEXT NOT NULL,
-                    last_updated TEXT NOT NULL
-                )
-            """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_radars_updated ON radars(last_updated DESC)"
-            )
-
-            # Item types table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS item_types (
-                    item_type TEXT PRIMARY KEY,
-                    description TEXT NOT NULL,
-                    storage_format TEXT NOT NULL,
-                    dimensionality TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )
-            """)
-
-            # Prepopulate item types
-            now = datetime.now(UTC).isoformat()
-            item_types_data = [
-                ("gridded3d", "Gridded reflectivity volume", "netcdf", "3d", now),
-                ("segmentation2d", "Cell segmentation masks", "netcdf", "2d", now),
-                ("projection2d", "Cell motion projections", "netcdf", "2d", now),
-                ("analysis2d", "Cell-level analysis metrics", "parquet", "table", now),
-            ]
-
-            conn.executemany(
-                """
-                INSERT OR IGNORE INTO item_types
-                (item_type, description, storage_format, dimensionality, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                item_types_data,
-            )
-
-            conn.commit()
 
     # =========================================================================
     # Radar Management
@@ -470,11 +360,3 @@ class RepositoryRegistry:
             ).fetchone()
 
         return dict(row) if row else None
-
-    def close(self) -> None:
-        """Close database connection."""
-        if self._conn:
-            with self._lock:
-                self._conn.close()
-                self._conn = None
-        logger.debug("Registry connection closed")

@@ -7,13 +7,15 @@ Monitors AWS S3 bucket for new NEXRAD radar files and downloads them locally
 in realtime or historical batches. Deduplicates files to avoid re-downloading.
 """
 
+import contextlib
+import io
 import logging
 import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from nexradaws import NexradAwsInterface
+from adapt.downloaders import NexradS3
 
 __all__ = ["AwsNexradDownloader"]
 
@@ -32,8 +34,8 @@ class AwsNexradDownloader(threading.Thread):
     research studies.
 
     **AWS S3 Bucket:** Files stored at
-    `s3://noaa-nexrad-level2/{YYYY}/{MM}/{DD}/{radar}/`
-    Example: `s3://noaa-nexrad-level2/2025/03/05/KDIX/KDIX20250305_000310_V06`
+    `s3://unidata-nexrad-level2/{YYYY}/{MM}/{DD}/{radar}/`
+    Example: `s3://unidata-nexrad-level2/2025/03/05/KDIX/KDIX20250305_000310_V06`
 
     **Deduplication:** Maintains set of known files to avoid re-downloading.
     Safe to restart mid-execution.
@@ -98,7 +100,7 @@ class AwsNexradDownloader(threading.Thread):
         file_tracker : FileProcessingTracker, optional
             Optional file processing tracker to record download completion.
 
-        conn : nexradaws.NexradAwsInterface, optional
+        conn : adapt.downloaders.NexradS3, optional
             AWS S3 connection object. If None, creates new connection.
             Allows injection for testing.
 
@@ -112,9 +114,8 @@ class AwsNexradDownloader(threading.Thread):
 
         Notes
         -----
-        Requires AWS credentials configured via environment variables or
-        ~/.aws/credentials. The S3 bucket is public and requires no auth,
-        but credentials can speed up downloads (higher rate limits).
+        The S3 bucket is public; downloads use anonymous (unsigned) requests
+        and require no AWS credentials.
         """
 
         super().__init__(daemon=True)
@@ -125,6 +126,7 @@ class AwsNexradDownloader(threading.Thread):
         # Legacy support: if output_dir provided but not output_dirs, use old behavior
         self.output_dir = Path(output_dir) if output_dir else None
         self.poll_interval_sec = config.downloader.poll_interval_sec
+        self.max_fetch_retries = config.downloader.max_fetch_retries
         self.latest_files = config.downloader.latest_files
         self.latest_minutes = config.downloader.latest_minutes
         self.start_time = config.downloader.start_time
@@ -132,7 +134,7 @@ class AwsNexradDownloader(threading.Thread):
         self.file_tracker = file_tracker
 
         self.result_queue = result_queue
-        self.conn = conn or NexradAwsInterface()
+        self.conn = conn or NexradS3()
         # injectable time helpers for testing
         self._clock = clock or (lambda: datetime.now(UTC))
         self._sleep = sleeper or time.sleep
@@ -382,19 +384,38 @@ class AwsNexradDownloader(threading.Thread):
         return start, end
 
     def _fetch_scans(self, start: datetime, end: datetime) -> list:
-        """Fetch available scans from AWS."""
-        try:
-            scans = self.conn.get_avail_scans_in_range(start, end, self.radar)
-            scans = sorted(scans, key=lambda s: s.scan_time)
+        """Fetch available scans from AWS, retrying transient failures.
 
-            # Filter out MDM files
-            scans = [s for s in scans if not s.key.endswith("_MDM")]
+        Retries up to ``max_fetch_retries`` times with linear backoff. After the
+        final attempt fails, returns ``[]`` so a transient AWS error does not
+        stop the downloader — the next poll retries from scratch.
+        """
+        for attempt in range(1, self.max_fetch_retries + 1):
+            try:
+                scans = self.conn.get_avail_scans_in_range(start, end, self.radar)
+                scans = sorted(scans, key=lambda s: s.scan_time)
 
-            logger.debug("Found %d scans for %s", len(scans), self.radar)
-            return scans
-        except Exception as e:
-            logger.error("Failed to fetch scans: %s", e)
-            return []
+                # Filter out MDM files
+                scans = [s for s in scans if not s.key.endswith("_MDM")]
+
+                logger.debug("Found %d scans for %s", len(scans), self.radar)
+                return scans
+            except Exception as e:
+                if attempt < self.max_fetch_retries:
+                    logger.warning(
+                        "Fetch scans attempt %d/%d failed: %s; retrying",
+                        attempt,
+                        self.max_fetch_retries,
+                        e,
+                    )
+                    self._sleep(attempt)
+                else:
+                    logger.error(
+                        "Failed to fetch scans after %d attempts: %s",
+                        self.max_fetch_retries,
+                        e,
+                    )
+        return []
 
     # ========================================================================
     # Radar availability helpers
@@ -529,7 +550,11 @@ class AwsNexradDownloader(threading.Thread):
             temp_dir = base_dir / "_temp"
             temp_dir.mkdir(exist_ok=True)
 
-            results = self.conn.download([scan], temp_dir, keep_aws_folders=False)
+            # Contain any stdout the conn's download() may emit (we log our own
+            # controlled "Downloaded: <name>" below). Logging uses stderr, so this
+            # narrow stdout redirect never swallows our own output.
+            with contextlib.redirect_stdout(io.StringIO()):
+                results = self.conn.download([scan], temp_dir, keep_aws_folders=False)
             success = list(results.iter_success())
 
             if success:

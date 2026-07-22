@@ -7,7 +7,7 @@ scipy
 
 # NEXRAD & Radar
 arm_pyart
-nexradaws
+boto3   # anonymous S3 access for the native NEXRAD downloader
 
 # Image processing
 opencv-python

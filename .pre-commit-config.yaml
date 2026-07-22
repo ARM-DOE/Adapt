@@ -18,6 +18,15 @@ repos:
 
   - repo: local
     hooks:
+      - id: forbid-adapt-allcaps
+        name: forbid all-caps product name (use "Adapt")
+        language: pygrep
+        entry: '\bADAPT\b'
+        types: [text]
+        # Source + docs only; the enforcement tests and this config must name the
+        # literal to forbid it, so they are intentionally out of scope.
+        files: ^(src/adapt/|docs/)
+
       - id: mypy
         name: mypy
         entry: mypy

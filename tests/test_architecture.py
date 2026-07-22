@@ -13,6 +13,7 @@ Run: pytest tests/test_architecture.py
 import ast
 import importlib
 import pkgutil
+import re
 from pathlib import Path
 
 import pytest
@@ -144,6 +145,20 @@ def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
     )
 
 
+def test_adapt_name_is_never_all_caps() -> None:
+    """The product is 'Adapt', never 'ADAPT' — in output, prints, comments, or docstrings.
+
+    Matches the standalone token only, so 'arm_adaptive', 'ADAPTIVE', 'ADAPTER' are fine.
+    """
+    offenders = [
+        f"{py_file.relative_to(_SRC_ADAPT)}:{i}"
+        for py_file in _SRC_ADAPT.rglob("*.py")
+        for i, line in enumerate(py_file.read_text().splitlines(), 1)
+        if re.search(r"\bADAPT\b", line)
+    ]
+    assert not offenders, "Use 'Adapt', not 'ADAPT':\n" + "\n".join(offenders)
+
+
 # ── Determinism: no wall clock or global RNG in scientific modules ─────────────
 # Identical inputs + config must produce identical outputs. A module that reads
 # the wall clock or numpy's global RNG breaks that silently. The acquisition
@@ -206,7 +221,8 @@ _DEP_HOMES = {
     "tkinter": ("consumers/",),
     "cv2": ("modules/projection/",),
     "pyart": ("modules/ingest/",),
-    "nexradaws": ("modules/acquisition/",),
+    "boto3": ("downloaders/",),
+    "botocore": ("downloaders/",),
     "networkx": ("modules/tracking/",),
     "duckdb": ("api/",),
     "pyxlma": ("modules/xlma_stat/",),
@@ -350,4 +366,27 @@ def test_module_outputs_carry_contracts() -> None:
     assert not stale, (
         f"\n_UNCONTRACTED_OUTPUTS contains entries that now have contracts: "
         f"{sorted(stale)}. Remove them so the ratchet only tightens."
+    )
+
+
+# ── Telemetry ids stay out of the science context dict ────────────────────────
+# Observability correlation ids (trace/span/scan/pipeline/...) travel out-of-band
+# in contextvars. If one ever appeared as a module input/output key it would couple
+# telemetry to the science data contract and could perturb determinism. Pin it.
+
+
+def test_obs_context_fields_never_in_module_io() -> None:
+    """No ObsContext field name may be a module input/output key."""
+    from adapt.contracts.observability import ObsContext
+
+    obs_fields = set(ObsContext.__dataclass_fields__)
+    leaks: list[str] = []
+    for module in _registered_default_modules():
+        for key in list(module.inputs) + list(module.outputs):
+            if key in obs_fields:
+                leaks.append(f"  {module.name}: '{key}'")
+
+    assert not leaks, (
+        "\nTelemetry correlation ids leaked into the science context dict — keep "
+        "ObsContext fields out of module inputs/outputs:\n" + "\n".join(leaks)
     )

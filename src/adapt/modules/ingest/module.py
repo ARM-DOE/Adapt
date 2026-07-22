@@ -24,6 +24,9 @@ from typing import Any
 import pyart
 import xarray as xr
 
+# NB: the Py-ART citation banner is suppressed at the package root (adapt/__init__
+# sets PYART_QUIET) because pyart is imported at this module's import time.
+
 __all__ = ["RadarDataLoader"]
 
 logger = logging.getLogger(__name__)
@@ -107,6 +110,7 @@ class RadarDataLoader:
         self.min_radius = config.min_radius
         self.weighting_function = config.weighting_function
         self.save_netcdf = config.save_netcdf
+        self.netcdf_save_retries = config.netcdf_save_retries
 
     def read(self, filepath: Path | str) -> object:
         """Read a NEXRAD archive file into a Py-ART Radar object.
@@ -252,30 +256,51 @@ class RadarDataLoader:
         ds.attrs["radar_longitude"] = float(radar.longitude["data"][0])
         ds.attrs["radar_altitude"] = float(radar.altitude["data"][0])
 
-        # NetCDF save is best-effort: failure is logged but does not abort.
+        # When requested, the NetCDF file is a downstream input (registered as a
+        # gridded3d artifact), so a persistent write failure must raise.
         self._write_netcdf(ds, output_dir, source_filepath)
         return ds
 
     def _write_netcdf(self, ds, output_dir, source_filepath):
-        """Internal writer for netcdf output."""
-        try:
-            if output_dir is None:
-                output_dir = "."
+        """Write the regridded grid to NetCDF, retrying then raising on failure.
 
-            output_dir_path = Path(output_dir)
-            output_dir_path.mkdir(parents=True, exist_ok=True)
+        The saved file is a real downstream input (the ingest node registers it
+        as a ``gridded3d`` artifact and ``cell_volume_stats`` reads it), so a
+        persistent write failure raises rather than being swallowed — a missing
+        file must never be reported as produced. Retries ``netcdf_save_retries``
+        times before re-raising.
+        """
+        if output_dir is None:
+            output_dir = "."
 
-            nc_filename = Path(source_filepath).stem + ".nc"
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
 
-            nc_path = output_dir_path / nc_filename
+        nc_path = output_dir_path / (Path(source_filepath).stem + ".nc")
+        encoding = {var: {"zlib": True, "complevel": 9} for var in ds.data_vars}
 
-            encoding = {var: {"zlib": True, "complevel": 9} for var in ds.data_vars}
-            ds.to_netcdf(nc_path, encoding=encoding, compute=True)
-
-            logger.info("Saved regridded NetCDF: %s", nc_path)
-
-        except Exception as e:
-            logger.warning("Failed to save NetCDF: %s", e)
+        for attempt in range(1, self.netcdf_save_retries + 1):
+            try:
+                ds.to_netcdf(nc_path, encoding=encoding, compute=True)
+                logger.info("Saved regridded NetCDF: %s", nc_path)
+                return
+            except Exception as e:
+                if attempt < self.netcdf_save_retries:
+                    logger.warning(
+                        "NetCDF save attempt %d/%d failed for %s: %s; retrying",
+                        attempt,
+                        self.netcdf_save_retries,
+                        nc_path,
+                        e,
+                    )
+                else:
+                    logger.error(
+                        "NetCDF save failed after %d attempts for %s: %s",
+                        self.netcdf_save_retries,
+                        nc_path,
+                        e,
+                    )
+                    raise
 
     def load_and_regrid(
         self,
@@ -312,14 +337,19 @@ class RadarDataLoader:
             Cartesian grid xarray.Dataset if successful, None if:
             - File does not exist or cannot be read
             - Regridding fails
-            - NetCDF save fails (if save_netcdf=True)
+
+        Raises
+        ------
+        Exception
+            If save_netcdf=True and the NetCDF write fails on every attempt
+            (after netcdf_save_retries). An enabled save must succeed because the
+            file is a registered downstream artifact.
 
         Notes
         -----
         - Preferred method over separate read() + regrid() calls
-        - Two failure points: read stage and regrid stage
-        - NetCDF save is optional; set save_netcdf=False for memory-only
-          processing (avoids disk I/O)
+        - Set save_netcdf=False for memory-only processing (avoids disk I/O);
+          when set, the write is mandatory and raises on persistent failure
         - Returns same xarray.Dataset regardless of save_netcdf setting
 
         Examples

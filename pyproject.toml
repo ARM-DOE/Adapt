@@ -38,7 +38,7 @@ dependencies = [
     "pydantic>=2.0",
     "arm_pyart",
     "opencv-python",
-    "nexradaws",
+    "boto3",
     "pyarrow",
     "duckdb",
 ]
@@ -80,7 +80,7 @@ namespaces = false
 
 [tool.setuptools.package-data]
 "adapt.data" = ["user_config.py"]
-"adapt.schemas" = ["*.sql"]
+"adapt.configuration.schemas" = ["*.sql"]
 "adapt.config" = ["*.yaml"]
 
 [tool.setuptools_scm]

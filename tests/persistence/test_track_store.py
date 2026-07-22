@@ -65,7 +65,16 @@ CREATE TABLE IF NOT EXISTS cell_events (
     target_cell_label INTEGER,
     cost              REAL,
     is_dominant       INTEGER NOT NULL DEFAULT 0,
-    event_group_id    TEXT NOT NULL
+    event_group_id    TEXT NOT NULL,
+    candidate_overlap                  REAL,
+    candidate_iou                      REAL,
+    candidate_centroid_distance_m      REAL,
+    candidate_speed_ms                 REAL,
+    candidate_heading_change_deg       REAL,
+    candidate_area_ratio               REAL,
+    candidate_reflectivity_difference  REAL,
+    candidate_final_cost               REAL,
+    match_method                       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS cell_tracks (

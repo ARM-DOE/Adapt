@@ -18,21 +18,45 @@ The tracking module performs tracking-only association of segmented radar cells 
 
 ## Architecture
 
+The scientific layer is decomposed into focused, single-responsibility files under
+`adapt/modules/tracking/`. `RadarCellTracker` (in `module.py`) is orchestration only;
+it delegates to:
+
+| File | Responsibility |
+|------|----------------|
+| `module.py` | `RadarCellTracker` — per-scan flow, state, delegation |
+| `graph.py` | `TrackingGraph` (the only `networkx` home) |
+| `projection.py` | `select_registration_labels` — minute-resolution registration hull |
+| `matching/overlap.py` | `OverlapMatcher` — deterministic unique-overlap matching |
+| `matching/hungarian.py` | `MatchingEngine` — cost matrix + Hungarian (the only `scipy` home) |
+| `motion.py` | `MotionValidator` + heading-change helpers |
+| `models.py` | `MatchMethod` / `TrackingError` enums, `MatchDiagnostics`, `TrackMotionState` |
+| `identity.py` | stable `cell_uid` generation |
+| `events.py` | lineage event-row builders + diagnostics assembly |
+| `config.py` | frozen `TrackingConfig` |
+
+The node layer (`adapt/execution/nodes/tracking.py`) keeps the `BaseModule` wrapper,
+`registry.register`, `build_config`, contracts, and persistence specs — no engine
+imports ever live under `modules/tracking/`.
+
+### Matching hierarchy
+
+Each frame pair is resolved in this order (registration-driven, optimisation last):
+
 ```
-┌──────────────────────────┐
-│  RadarCellTracker        │  Scientific Implementation
-│  - Tracking graph        │
-│  - Cost function         │
-│  - Hungarian assignment  │
-│  - Event emission        │
-└──────────────────────────┘
-            ↓
-┌──────────────────────────┐
-│  TrackingModule          │  Pipeline Integration
-│  - BaseModule wrapper    │
-│  - Context management    │
-│  - Contract validation   │
-└──────────────────────────┘
+scan-gap classification (physical time; hard reset on excess gap / non-monotonic time)
+        ↓
+registration projected hulls (minute nearest the real gap)
+        ↓
+hard physical-motion rejection (speed / acceleration caps — before matching)
+        ↓
+deterministic unique-overlap matching (skips Hungarian)
+        ↓
+Hungarian assignment (residual ambiguity only; soft heading-consistency penalty)
+        ↓
+split / merge detection
+        ↓
+initiation / termination
 ```
 
 ## Usage
@@ -138,25 +162,38 @@ Normalized adjacency pairs in track identity space:
 
 ### Cost Function
 
-The matching cost combines multiple terms:
+The Hungarian matching cost (`matching/hungarian.py`) combines four terms:
 
 ```
-cost = 0.4 * D_pos + 0.3 * (1 - IoU) + 0.15 * |log(A2/A1)| + 0.1 * |Z2 - Z1| + 0.05 * core_penalty
+cost = 0.4 * D_pos + 0.3 * (1 - IoU) + 0.15 * |log(A2/A1)| + 0.1 * |Z2 - Z1| / 50
 ```
 
-Where:
-- `D_pos`: Normalized centroid distance
-- `IoU`: Intersection-over-union of masks
-- `A2/A1`: Area ratio
-- `Z2 - Z1`: Reflectivity difference
+Where `D_pos` is the centroid distance normalised by `expected_speed_ms * dt`,
+`IoU` is the projected-hull/current-cell overlap, `A2/A1` is the area ratio, and
+`Z2 - Z1` is the mean-reflectivity difference. When `heading_change_penalty_weight`
+> 0, a soft `weight * heading_change` (radians) term is added for tracks with an
+established velocity (crossing-track prevention).
 
 ### Assignment
 
-Uses the Hungarian algorithm (`scipy.optimize.linear_sum_assignment`) to find optimal cell-to-cell assignments while minimizing total cost.
+Hungarian assignment (`scipy.optimize.linear_sum_assignment`) is applied **only to
+residual ambiguity** — pairs left after deterministic unique-overlap matching and
+hard physical-motion rejection. See the matching hierarchy above.
 
 ### Search Region
 
-Candidates are filtered by non-zero overlap with the projected previous-cell labels in the current scan coordinates (`cell_projections[0]`).
+Candidates are filtered by non-zero overlap with the registration projected hull —
+the minute-resolution `registration_minutes` frame nearest the real scan gap,
+falling back to `cell_projections[0]` when minute frames are absent
+(`projection.select_registration_labels`).
+
+### Diagnostics
+
+Every accepted match records a `MatchDiagnostics` row persisted to `cell_events`:
+`candidate_overlap`, `candidate_iou`, `candidate_centroid_distance_m`,
+`candidate_speed_ms`, `candidate_heading_change_deg`, `candidate_area_ratio`,
+`candidate_reflectivity_difference`, `candidate_final_cost`, and `match_method`
+(`OVERLAP` / `HUNGARIAN` / `SPLIT` / `MERGE`).
 
 ## Testing
 
@@ -192,13 +229,41 @@ Typical performance for 50 cells per scan:
 - **Memory usage**: ~10 MB for 100 scans
 - **Graph size**: Linear with total cell-observations
 
+## Tracking-Assisted Segmentation Correction (design only — not implemented)
+
+Projected hulls carry motion-coherence information that can flag segmentation
+errors. This is a **designed extension point**, intentionally left unimplemented
+(YAGNI) until a concrete use case exists. No hooks or dead code are present today.
+
+**Motivating cases**
+
+- *Over-split.* Segmentation fragments one storm into several cells, but a single
+  continuing parent's projected hull covers all fragments coherently → the
+  fragments should be re-merged into one tracked object.
+- *Over-merge.* Segmentation fuses two storms into one cell, but two distinct
+  parents project into separable sub-regions → the cell should be re-split.
+
+**Where it would hook in.** A correction stage would sit between *registration
+projected hulls* and *deterministic unique-overlap matching* in the hierarchy
+above — i.e. it adjusts the current-frame label field *before* matching, so all
+downstream stages operate on the corrected segmentation. It would consume the
+same `select_registration_labels` hull plus the per-parent overlap structure
+already computed by `OverlapMatcher`.
+
+**Proposed shape when built.** A registered, swappable
+`SegmentationCorrector` strategy (Open/Closed, like detection/tracking backends)
+implemented under `modules/`, communicating via a `contracts/` interface, returning
+a corrected label array + provenance describing each merge/split it applied. It
+must be deterministic and produce no side effects. The correction provenance would
+travel as additional diagnostic rows so every change is traceable.
+
 ## Future Enhancements
 
 Potential improvements identified during development:
 
 1. **Advanced Split/Merge Logic**: Implement temporary merge identity restoration
-2. **Multi-Step Prediction**: Use multiple projection steps for better matching
-3. **Track Smoothing**: Apply Kalman filtering to motion vectors
+2. **Track Smoothing**: Apply Kalman filtering to motion vectors
+3. **Motion-coherent segmentation correction**: see the design section above
 4. **Parallel Processing**: Process multiple files concurrently
 5. **Persistence**: Save/load tracking graph for resumable processing
 

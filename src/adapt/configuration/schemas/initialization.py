@@ -63,8 +63,6 @@ def write_default_config(path: Path, extensions: list[str] | None = None) -> Non
     own params under ``module_params``. Public — called by both
     ``init_runtime_config`` (auto-bootstrap) and ``adapt config``.
     """
-    from datetime import datetime as _dt
-
     from adapt.configuration.schemas import yaml_writer
     from adapt.configuration.schemas.assemble import (
         assemble_default_config,
@@ -76,7 +74,7 @@ def write_default_config(path: Path, extensions: list[str] | None = None) -> Non
     # config.yaml` works without --base-dir; the user can edit or override it.
     data = {"base_dir": str(path.parent.resolve()), **data}
     descriptions = assemble_descriptions(extensions)
-    header = _CONFIG_HEADER.format(timestamp=_dt.now().strftime("%Y-%m-%d %H:%M:%S"))
+    header = _CONFIG_HEADER.format(timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml_writer.dump(data, descriptions, header=header))
@@ -99,7 +97,7 @@ def _load_user_config_dict(config_path: str) -> dict:
             raise ImportError(
                 "PyYAML is required for YAML config files: pip install pyyaml"
             ) from err
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return data or {}
 
@@ -187,7 +185,7 @@ def _persist_runtime_config(
     config_dict["run_id"] = run_id
     config_dict["created_at"] = datetime.now(UTC).isoformat()
 
-    with open(config_file, "w") as f:
+    with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config_dict, f, indent=2, default=str)
 
 
@@ -215,7 +213,7 @@ def _find_matching_run_id(new_config_dict: dict) -> str | None:
 
     for cfg_file in candidates:
         try:
-            with open(cfg_file) as f:
+            with open(cfg_file, encoding="utf-8") as f:
                 saved = json.load(f)
             if _config_fingerprint(saved) == target:
                 return saved.get("run_id")
@@ -238,7 +236,7 @@ def _load_saved_runtime_config(base_dir: str, run_id: str) -> InternalConfig:
     if not cfg_path.exists():
         raise FileNotFoundError(f"Saved runtime config not found for run_id '{run_id}': {cfg_path}")
 
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg_dict = json.load(f)
 
     # Non-schema metadata persisted for audit only.

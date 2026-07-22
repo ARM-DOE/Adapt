@@ -27,3 +27,10 @@ class TrackingConfig(BaseModel):
     labels_var: str
     max_gap_minutes: float
     expected_speed_ms: float
+    max_tracking_gap_minutes: float
+    projection_horizon_minutes: float
+    projection_interval_minutes: float
+    max_speed_ms: float
+    max_speed_multiplier: float
+    overlap_match_threshold: float
+    heading_change_penalty_weight: float

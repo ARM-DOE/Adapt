@@ -600,13 +600,20 @@ class RadarCellProjector:
         # Swap to (x, y) for Delaunay
         points = points[:, [1, 0]]
 
+        # A collinear / single-row / single-column point set is < 2-D, so Delaunay
+        # would raise QhullError ("input is less than 3-dimensional"). This is an
+        # expected case for thin cells, not an error: detect it up front and fall back
+        # to dilation silently instead of logging a verbose qhull dump per cell.
+        if np.linalg.matrix_rank(points - points.mean(axis=0)) < 2:
+            kernel = np.ones((3, 3), dtype=np.uint8)
+            return binary_dilation(label_mask, structure=kernel).astype(np.uint8)
+
         try:
             # Compute Delaunay triangulation
             tri = Delaunay(points)
 
             # Create output mask
             filled = np.zeros_like(label_mask, dtype=np.uint8)
-            H, W = label_mask.shape
 
             # Filter triangles by circumradius (alpha shape)
             for simplex in tri.simplices:
@@ -634,6 +641,8 @@ class RadarCellProjector:
             return filled.astype(np.uint8)
 
         except Exception as e:
-            logger.warning(f"Concave hull failed: {e}, falling back to dilation")
+            # Unexpected failure (degenerate input is handled above). Keep it to one
+            # concise line — never dump the full multi-line qhull diagnostic.
+            logger.warning("Concave hull fill failed (%s); using dilation", type(e).__name__)
             kernel = np.ones((3, 3), dtype=np.uint8)
             return binary_dilation(label_mask, structure=kernel).astype(np.uint8)

@@ -148,6 +148,14 @@ def _build_run_nexrad_parser(sub: argparse.ArgumentParser) -> None:
 
 def _run_nexrad(args: argparse.Namespace) -> None:
     """Execute the NEXRAD processing pipeline."""
+    from adapt import __version__
+    from adapt.runtime.run_reporter import format_banner
+
+    # Plain banner, first line of output — printed before logging is configured so it
+    # carries no log prefix and precedes any library/catalog chatter. Trailing blank
+    # line separates it cleanly from the run logs that follow.
+    print(format_banner(__version__) + "\n")
+
     if getattr(args, "only_modules", None) and getattr(args, "exclude_modules", None):
         raise SystemExit("error: --only and --not are mutually exclusive")
     _check_single_instance()
@@ -164,12 +172,6 @@ def _run_nexrad(args: argparse.Namespace) -> None:
 
     stop_event = threading.Event()
 
-    def _safe_stop(orch: PipelineOrchestrator) -> None:
-        try:
-            orch.stop()
-        except Exception as exc:
-            print(f"[adapt] Stop cleanup error (ignored): {exc}")
-
     def _run_orchestrator(
         orch: PipelineOrchestrator, max_runtime: int, done: threading.Event
     ) -> None:
@@ -182,7 +184,9 @@ def _run_nexrad(args: argparse.Namespace) -> None:
         print("\n[adapt] SIGTERM received — stopping pipeline...")
         orchestrator._interrupted = True
         stop_event.set()
-        threading.Thread(target=_safe_stop, args=(orchestrator,), daemon=True).start()
+        # Ask the orchestrator's own (joined) thread to stop; it runs finalize + the
+        # run summary in its start() finally, so the summary completes before exit.
+        orchestrator.request_stop()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
@@ -227,9 +231,10 @@ def _run_nexrad(args: argparse.Namespace) -> None:
         # Mark interrupted so the run is finalised as "cancelled" not "completed".
         orchestrator._interrupted = True
         stop_event.set()
-        # The orchestrator runs in a worker thread and never receives
-        # KeyboardInterrupt; set its stop flag explicitly.
-        threading.Thread(target=_safe_stop, args=(orchestrator,), daemon=True).start()
+        # The orchestrator runs in a worker thread and never receives KeyboardInterrupt.
+        # Ask it to break its loop; its own start() finally then runs stop() + the run
+        # summary on this (non-daemon, joined) thread — so the summary always prints.
+        orchestrator.request_stop()
         try:
             orchestrator_thread.join(timeout=20)
         except KeyboardInterrupt:
@@ -340,8 +345,6 @@ def _build_dashboard_parser(sub: argparse.ArgumentParser) -> None:
 
 def _dashboard_cmd(args: argparse.Namespace) -> None:
     """Launch the Adapt GUI dashboard."""
-    import os
-
     try:
         os.getcwd()
     except FileNotFoundError:

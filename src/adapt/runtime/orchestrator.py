@@ -13,22 +13,41 @@ is not blocked by visualization and validates repository API integrity.
 
 import logging
 import queue
+import random
+import sys
 import time
+from contextlib import AbstractContextManager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from adapt.contracts.execution_history import RunStart, RunSummary
 from adapt.persistence import DataRepository
+from adapt.runtime.console_status import ConsoleStatus
 from adapt.runtime.file_tracker import FileProcessingTracker
+from adapt.runtime.history_handler import HistoryLogHandler
+from adapt.runtime.logging_setup import configure_logging
+from adapt.runtime.observability import ObsSettings, build_observability
 from adapt.runtime.processor import RadarProcessor
+from adapt.runtime.provenance import capture_provenance, config_hash
+from adapt.runtime.run_reporter import RunReporter
 from adapt.runtime.sources import source_registry
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
+    from adapt.contracts.observability import Observability
     from adapt.contracts.source import ScanSource
 
 __all__ = ["PipelineOrchestrator"]
 
 logger = logging.getLogger(__name__)
+
+# Span names that wrap modules rather than being modules themselves; excluded from
+# the per-module summary breakdown (they share the module_duration_seconds histogram).
+_WRAPPER_SPANS = frozenset({"pipeline", "scan"})
+
+# Monitor-loop cadence; also the live status-line tick (spinner + elapsed) interval.
+_STATUS_TICK_SECONDS = 0.5
 
 
 class PipelineOrchestrator:
@@ -136,10 +155,155 @@ class PipelineOrchestrator:
 
         # Lifecycle state
         self._stop_event = False
+        self._stop_requested = False  # external break request (separate from the stop() guard)
         self._interrupted = False  # Track user interrupt (Ctrl+C) vs normal completion
         self._start_time: float | None = None
         self._max_duration: float | None = None
         self._close_repository_on_stop = close_repository_on_stop
+
+        # Telemetry (built in start()); kept here so stop() is safe before start().
+        self._obs: Observability | None = None
+        self._root_span: AbstractContextManager | None = None
+        self._root_trace_id = ""
+        self._history_handler: HistoryLogHandler | None = None
+        self._reporter: RunReporter | None = None
+        self._status: ConsoleStatus | None = None
+
+    def _obs_settings(self) -> ObsSettings:
+        """Translate the resolved logging/observability config into ObsSettings."""
+        lc = self.config.logging
+        return ObsSettings(
+            enabled=lc.enabled,
+            traces=lc.traces,
+            metrics=lc.metrics,
+            json_logs=lc.json_logs,
+            console_logs=lc.console_logs,
+            level=lc.level,
+            console_level=lc.console_level,
+            progress_every=lc.progress_every,
+        )
+
+    def _build_observability(self) -> "Observability":
+        """Build the telemetry provider from the resolved config.
+
+        Injects production clocks/rng here (the only place wall-clock reads are
+        legal for telemetry). Trace ids are random per run.
+        """
+        return build_observability(
+            self._obs_settings(),
+            clock=time.perf_counter,
+            wall_clock=lambda: datetime.now(UTC),
+            rng=random.Random(),
+        )
+
+    def _enabled_module_names(self) -> tuple[str, ...]:
+        """All enabled module names — in-pipeline AND post-persistence (phase-3).
+
+        The header is built from this, so phase-3 enrichment modules (e.g.
+        cell_volume_stats) are surfaced, not just the phase 0-2 pipeline.
+        """
+        if not self.processor:
+            return ()
+        mods = (*self.processor._pipeline_modules, *self.processor._post_modules)
+        return tuple(m.name for m in mods)
+
+    def _record_run_start(self, radar: str) -> None:
+        """Open the execution-history run record and print the console run header."""
+        prov = capture_provenance()
+        modules = self._enabled_module_names()
+        start = RunStart(
+            run_id=self.run_id or "",
+            pipeline=self.config.source,
+            pipeline_version=prov.software_version,
+            site=radar,
+            dataset=radar,
+            instrument="NEXRAD",
+            mode=self.config.mode,
+            start_time=datetime.now(UTC),
+            configuration_hash=config_hash(self.config.model_dump_json()),
+            configuration_file=str(
+                self.repository.catalog.radar_dir / f"config_run_{self.run_id}.json"
+            )
+            if self.repository
+            else "",
+            provenance=prov,
+            enabled_modules=modules,
+        )
+        assert self.repository is not None
+        assert self._reporter is not None
+        self.repository.history.start_run(start)
+        self._reporter.header(start)
+
+    def _finalize_history(self) -> None:
+        """Print the run summary, then persist history.
+
+        The console summary is built from in-memory telemetry + the drained handler
+        counts and printed FIRST, so it never depends on a database write succeeding
+        (a DB failure during shutdown is logged loudly but cannot hide the summary).
+        """
+        if self._obs is None or self.repository is None:
+            return
+        warnings: list = []
+        errors: list = []
+        if self._history_handler is not None:
+            warnings, errors = self._history_handler.drain()
+
+        summary = self._build_run_summary(
+            "cancelled" if self._interrupted else "success",
+            warnings=len(warnings),
+            errors=len(errors),
+        )
+        if self._reporter is not None:
+            self._reporter.summary(summary)
+
+        # Persist after the user-facing summary is out. Failures here are reported
+        # loudly but must not abort the orderly shutdown.
+        run_id = self.run_id or ""
+        try:
+            if warnings:
+                self.repository.history.record_warnings(run_id, warnings)
+            if errors:
+                self.repository.history.record_errors(run_id, errors)
+            self.repository.history.finalize_run(summary)
+        except Exception:
+            logger.exception("Failed to persist execution history on shutdown")
+
+    def _build_run_summary(self, status: str, *, warnings: int, errors: int) -> RunSummary:
+        """Aggregate the end-of-run summary from in-memory telemetry metrics.
+
+        warnings/errors are passed in (drained from the history handler) so the
+        summary never reads the database — keeping it robust during shutdown.
+        """
+        assert self._obs is not None
+        m = self._obs.metrics
+        scan_times = m.histogram_values("scan_processing_time")
+        totals = m.histogram_totals_by_label("module_duration_seconds", "stage")
+        counts = m.histogram_counts_by_label("module_duration_seconds", "stage")
+        # "pipeline" (root) and "scan" are wrapper spans, not modules — exclude them
+        # from the per-module breakdown so the table shows only real stages.
+        module_stats = tuple(
+            (name, counts.get(name, 0), total)
+            for name, total in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+            if name not in _WRAPPER_SPANS
+        )
+        slowest = tuple((name, total) for name, _calls, total in module_stats[:3])
+        duration = (time.time() - self._start_time) if self._start_time else 0.0
+        return RunSummary(
+            run_id=self.run_id or "",
+            status=status,
+            end_time=datetime.now(UTC),
+            duration_seconds=duration,
+            files_processed=int(m.counter_total("files_processed_total")),
+            scans_processed=len(scan_times),
+            objects_detected=int(m.counter_total("cells_detected_total")),
+            warnings=warnings,
+            errors=errors,
+            average_scan_time=(sum(scan_times) / len(scan_times)) if scan_times else 0.0,
+            maximum_scan_time=max(scan_times) if scan_times else 0.0,
+            slowest_stages=slowest,
+            module_stats=module_stats,
+            failures=int(m.counter_total("errors_total")),
+        )
 
     def _setup_logging(self):
         """Configure logging and file tracking systems.
@@ -258,6 +422,31 @@ class PipelineOrchestrator:
             config=self.config,
         )
 
+        # Build telemetry and open the root pipeline span. The root trace id is handed
+        # to the processor thread (contextvars do not cross threads) so the whole run
+        # shares one trace.
+        self._obs = self._build_observability()
+        self._root_span = self._obs.span(
+            "pipeline", pipeline_id=self.run_id or "", dataset_id=radar
+        )
+        self._root_span.__enter__()
+        self._root_trace_id = self._obs.current().trace_id
+
+        # Live status line (spinner) — TTY only; self-disables when piped or quiet.
+        settings = self._obs_settings()
+        self._status = ConsoleStatus(
+            sys.stderr,
+            enabled=settings.console_logs and sys.stderr.isatty(),
+            clock=time.monotonic,
+        )
+
+        # Structured logging (JSON file + quiet console) + capture warnings/errors.
+        log_path = Path(self.output_dirs["logs"]) / f"pipeline_{radar}.log"
+        configure_logging(settings, log_path, console_status=self._status)
+        self._history_handler = HistoryLogHandler()
+        logging.getLogger().addHandler(self._history_handler)
+        self._reporter = RunReporter()
+
         self._start_time = time.time()
         self._max_duration = max_runtime * 60 if max_runtime else None
 
@@ -279,8 +468,14 @@ class PipelineOrchestrator:
             output_dirs=self.output_dirs,
             file_tracker=self.tracker,
             repository=self.repository,
+            observability=self._obs,
+            root_trace_id=self._root_trace_id,
+            reporter=self._reporter,
         )
         self.processor.start()
+
+        # Open the execution-history run record and print the one-shot console header.
+        self._record_run_start(radar)
 
         mode = self.config.mode
         logger.debug("Pipeline running in %s mode. Press Ctrl+C to stop.", mode.upper())
@@ -298,8 +493,10 @@ class PipelineOrchestrator:
         last_status_time = time.time()
 
         while True:
-            # 0. Honour external stop() call (e.g. from CLI after SIGTERM/SIGINT)
-            if self._stop_event:
+            # 0. Honour an external stop request or a prior stop() (e.g. from the CLI
+            #    after SIGTERM/SIGINT). request_stop() lets the orchestrator's OWN thread
+            #    run finalize+summary, instead of a daemon that the process kills on exit.
+            if self._stop_requested or self._stop_event:
                 break
 
             # 1. Historical completion check (must run before downloader death check)
@@ -331,12 +528,19 @@ class PipelineOrchestrator:
                     logger.info("Max duration reached")
                     break
 
-            # 4. Status logging (every 30s)
+            # 4. Status logging (every 30s, file only) + live status line (every tick)
             if time.time() - last_status_time > 30:
                 self._log_status()
                 last_status_time = time.time()
 
-            time.sleep(1)
+            if self._status is not None:
+                self._status.set(self.processor.current_activity() or "waiting for next scan")
+                self._status.tick()
+
+            time.sleep(_STATUS_TICK_SECONDS)
+
+        if self._status is not None:
+            self._status.clear()  # leave the terminal clean before stop()/summary
 
     def _check_historical_complete(self) -> bool:
         """Check if historical mode is complete. Returns True to exit."""
@@ -397,6 +601,16 @@ class PipelineOrchestrator:
                 )
                 break
 
+    def request_stop(self) -> None:
+        """Ask the monitoring loop to exit so the orchestrator's own thread finalizes.
+
+        Called from the CLI on SIGINT/SIGTERM. Distinct from ``stop()`` so signalling
+        the loop never trips ``stop()``'s "already finalized" guard — finalize +
+        summary then run on the joined (non-daemon) orchestrator thread, not a daemon
+        the process kills on exit.
+        """
+        self._stop_requested = True
+
     def stop(self):
         """Stop the pipeline gracefully and finalize all results.
 
@@ -427,6 +641,11 @@ class PipelineOrchestrator:
 
         self._stop_event = True
 
+        # Close the root pipeline span if it was opened in start().
+        if self._root_span is not None:
+            self._root_span.__exit__(None, None, None)
+            self._root_span = None
+
         # Stop threads
         for name, thread in [
             ("Downloader", self.downloader),
@@ -442,6 +661,10 @@ class PipelineOrchestrator:
         if self.processor:
             self.processor.save_results()
             self.processor.close_database()
+
+        # Execution history: flush captured warnings/errors, finalize the run record,
+        # and print the one-shot console summary (before the repository closes).
+        self._finalize_history()
 
         # Finalize repository
         if self.repository:

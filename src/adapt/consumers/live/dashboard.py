@@ -681,7 +681,7 @@ class AdaptDashboard(tk.Tk):
         self._plot_settings_win = None
         win.destroy()
 
-    # ── Run ADAPT wizard ──────────────────────────────────────────────────────
+    # ── Run Adapt wizard ──────────────────────────────────────────────────────
 
     def _open_run_wizard(self) -> None:
         import webbrowser
@@ -863,6 +863,7 @@ class AdaptDashboard(tk.Tk):
                 capture_output=True,
                 text=True,
                 timeout=15,
+                check=False,
             )
             if result.returncode != 0:
                 messagebox.showerror(
@@ -2089,7 +2090,7 @@ class AdaptDashboard(tk.Tk):
                 marker="*",
                 markersize=8,
                 linestyle="None",
-                label="qurrent centroid",
+                label="Current Centroid",
             ),
         ]
 

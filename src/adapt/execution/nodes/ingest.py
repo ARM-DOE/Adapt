@@ -62,6 +62,7 @@ class LoadModule(BaseModule):
             min_radius=cfg.regridder.min_radius,
             weighting_function=cfg.regridder.weighting_function,
             save_netcdf=cfg.regridder.save_netcdf,
+            netcdf_save_retries=cfg.regridder.netcdf_save_retries,
             radar=cfg.downloader.radar,
             z_level=cfg.global_.z_level,
             z_coord=cfg.global_.coord_names.z,

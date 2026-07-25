@@ -16,7 +16,7 @@ from adapt.modules.detection.config import DetectionConfig  # noqa: E402
 def _make() -> DetectionConfig:
     return DetectionConfig(
         method="threshold",
-        threshold=30.0,
+        method_params={"threshold": 30.0},
         closing_kernel=(3, 3),
         filter_by_size=True,
         min_cellsize_gridpoint=5,
@@ -32,7 +32,7 @@ class TestDetectionConfig:
     def test_holds_all_required_fields(self):
         cfg = _make()
         assert cfg.method == "threshold"
-        assert cfg.threshold == 30.0
+        assert cfg.method_params == {"threshold": 30.0}
         assert cfg.closing_kernel == (3, 3)
         assert cfg.min_cellsize_gridpoint == 5
         assert cfg.max_cellsize_gridpoint is None
@@ -44,4 +44,4 @@ class TestDetectionConfig:
     def test_is_frozen(self):
         cfg = _make()
         with pytest.raises((TypeError, ValueError)):
-            cfg.threshold = 99.0
+            cfg.method = "conv_strat_raut"

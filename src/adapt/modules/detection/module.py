@@ -3,28 +3,32 @@
 
 """Segment convective cells from gridded radar reflectivity.
 
-This module detects convective cell boundaries using thresholding and
-morphological operations. Input is a 2D reflectivity field (at fixed altitude);
-output is a labeled image where each cell is assigned a unique integer ID.
+Detects convective cell boundaries from a 2D reflectivity field (at a fixed
+altitude) and returns a labeled image where each cell is assigned a unique
+integer ID.
 
-Cell detection enables downstream analysis: motion tracking, intensity analysis,
-cell-by-cell statistics extraction. The segmentation is configurable (threshold,
-minimum/maximum cell size) for different storm morphologies.
+Two families of methods build the *convective mask* that a shared watershed +
+size-filtering backend then labels into cells:
 
-Cell size ordering: cells are numbered 1, 2, 3, ... in decreasing order of
-size (area in grid points). This ensures reproducible analysis and allows
-size-based filtering in downstream steps.
+- ``threshold`` — reflectivity above a fixed dBZ threshold (the original method).
+- pyart convective/stratiform classifiers — ``conv_strat_raut`` (default),
+  ``conv_strat_yuter``, ``feature_detection``, ``steiner_conv_strat`` — the
+  convective class(es) of a per-pixel classification, computed over the full 3D
+  grid via ``pyart.xradar.Xgrid``.
 
-Key capabilities:
-- Morphological filtering (closing to fill small holes)
-- Size-based filtering (min/max grid points per cell)
-- Automatic relabeling by decreasing size for reproducibility
-- Metadata preservation (threshold, z-level, configuration)
+Only the mask differs between methods; downstream labeling, size filtering, and
+size-ranked numbering are identical, so the output contract (integer,
+non-negative, 2D ``cell_labels``) is unchanged and tracking is unaffected.
+
+Cell size ordering: cells are numbered 1, 2, 3, ... in decreasing order of size
+(area in grid points), so the largest cell is always ID 1. This ensures
+reproducible analysis and allows size-based filtering in downstream steps.
 """
 
 import logging
 
 import numpy as np
+import pyart
 import xarray as xr
 from scipy.ndimage import label
 from skimage.morphology import h_maxima
@@ -65,75 +69,114 @@ def _label_maxtree(binary: np.ndarray, field: np.ndarray, h: float = 5.0) -> np.
     return np.where(binary, ws, 0).astype(np.int32)
 
 
-class RadarCellSegmenter:
-    """Threshold-based cell detection and labeling for 2D radar reflectivity.
+# ---------------------------------------------------------------------------
+# pyart convective/stratiform mask builders
+#
+# Each maps a pyart classifier over the full 3D grid (wrapped as
+# ``pyart.xradar.Xgrid``) to a 2D boolean convective mask at the analysis
+# z-level. Registered by method name in ``_CONV_STRAT_MASKERS`` below; adding a
+# classifier is one entry with no change to the segmenter (Open/Closed).
+# ---------------------------------------------------------------------------
 
-    This class applies a series of image processing steps to identify and label
+
+def _grid_spacing(xgrid) -> tuple[float, float]:
+    """Horizontal grid spacing (dx, dy) in metres from an Xgrid's x/y axes."""
+    x = np.asarray(xgrid.x["data"])
+    y = np.asarray(xgrid.y["data"])
+    return float(x[1] - x[0]), float(y[1] - y[0])
+
+
+def _mask_conv_strat_raut(xgrid, refl_field: str, z_level: float, params: dict) -> np.ndarray:
+    """Raut wavelet classification -> convective mask (cores + mixed: classes 2, 3)."""
+    z = np.asarray(xgrid.z["data"])
+    cappi_level = int(np.argmin(np.abs(z - z_level)))
+    result = pyart.retrieve.conv_strat_raut(xgrid, refl_field, cappi_level=cappi_level, **params)
+    classes = np.asarray(result["wt_reclass"]["data"]).squeeze()
+    return np.isin(classes, (2, 3))
+
+
+def _mask_conv_strat_yuter(xgrid, refl_field: str, z_level: float, params: dict) -> np.ndarray:
+    """Yuter/Powell feature detection -> convective mask (class 2)."""
+    dx, dy = _grid_spacing(xgrid)
+    result = pyart.retrieve.conv_strat_yuter(
+        xgrid, dx=dx, dy=dy, level_m=z_level, refl_field=refl_field, **params
+    )
+    classes = np.asarray(result["feature_detection"]["data"]).squeeze()
+    return classes == 2
+
+
+def _mask_feature_detection(xgrid, refl_field: str, z_level: float, params: dict) -> np.ndarray:
+    """Tomkins generalized feature detection -> convective mask (class 2)."""
+    dx, dy = _grid_spacing(xgrid)
+    result = pyart.retrieve.feature_detection(
+        xgrid, dx=dx, dy=dy, level_m=z_level, field=refl_field, **params
+    )
+    classes = np.asarray(result["feature_detection"]["data"]).squeeze()
+    return classes == 2
+
+
+def _mask_steiner_conv_strat(xgrid, refl_field: str, z_level: float, params: dict) -> np.ndarray:
+    """Steiner et al. 1995 classification -> convective mask (class 2)."""
+    dx, dy = _grid_spacing(xgrid)
+    result = pyart.retrieve.steiner_conv_strat(
+        xgrid, dx=dx, dy=dy, work_level=z_level, refl_field=refl_field, **params
+    )
+    classes = np.asarray(result["data"]).squeeze()
+    return classes == 2
+
+
+_CONV_STRAT_MASKERS = {
+    "conv_strat_raut": _mask_conv_strat_raut,
+    "conv_strat_yuter": _mask_conv_strat_yuter,
+    "feature_detection": _mask_feature_detection,
+    "steiner_conv_strat": _mask_steiner_conv_strat,
+}
+
+
+class RadarCellSegmenter:
+    """Convective-cell detection and labeling for 2D radar reflectivity.
+
+    Applies a series of image-processing steps to identify and label
     convective cells:
 
-    1. **Binary thresholding**: Mark reflectivity > threshold as cell candidates
-    2. **Morphological closing**: Fill small holes within cells (tunable)
-    3. **Connected component labeling**: Assign unique IDs (1, 2, 3, ...)
-    4. **Size filtering**: Remove cells smaller than min_gridpoints or larger
+    1. **Convective mask**: mark convective grid points (``threshold`` uses
+       reflectivity > threshold; the pyart methods use the convective class of a
+       convective/stratiform classification)
+    2. **Morphological closing**: fill small holes within cells (tunable)
+    3. **Cell seeding + labeling**: h-maxima seeds grown by watershed
+    4. **Size filtering**: remove cells smaller than min_gridpoints or larger
        than max_gridpoints (optional)
-    5. **Relabeling by size**: Largest cell gets label 1, second-largest gets 2, etc.
+    5. **Relabeling by size**: largest cell gets label 1, second-largest 2, etc.
 
     The output is a labeled image (xarray.DataArray) with integer cell IDs.
     Cell ID = 0 means no cell; cell ID > 0 means part of that cell.
 
     Configuration
-    ==============
-    Expects config dict with:
+    =============
+    Reads from a validated ``DetectionConfig``:
 
-    - `method` : str, optional (default: "threshold")
-        Segmentation algorithm. Currently only "threshold" is supported.
-
-    - `threshold` : float, default 30
-        Reflectivity threshold in dBZ. Cells have reflectivity > threshold.
-        Typical: 30 dBZ for convection, 20 dBZ for weaker features.
-
+    - `method` : str
+        ``conv_strat_raut`` (default), ``conv_strat_yuter``,
+        ``feature_detection``, ``steiner_conv_strat`` or ``threshold``.
+        The pyart methods require the 3D gridded NetCDF (``grid_nc_path``).
+    - `method_params` : dict
+        Resolved parameters for the selected method. For ``threshold`` this is
+        ``{"threshold": <dBZ>}``; for the pyart methods it is the algorithm's
+        keyword arguments (splatted into the pyart call, recorded in the output).
     - `closing_kernel` : tuple of int, default (1, 1)
-        Size of morphological closing footprint. (1, 1) means no closing.
-        (3, 3) or (5, 5) fill small holes.
-
+        Morphological closing footprint. (1, 1) means no closing.
     - `filter_by_size` : bool, default True
         Whether to apply cell size filtering.
-
     - `min_cellsize_gridpoint` : int, default 5
         Minimum cell size in grid points. Smaller cells are removed.
-        Typical: 5-20 points (1-4 km at 200 m spacing).
-
     - `max_cellsize_gridpoint` : int or None, default None
-        Maximum cell size in grid points. Larger cells are removed.
-        If None, no upper limit.
-
-    - `global` : dict, optional
-        Sub-dict with variable/coordinate naming:
-
-        - `var_names` : dict, optional
-            - `reflectivity` : str, name of reflectivity variable (default: "reflectivity")
-            - `cell_labels` : str, name for output labels (default: "cell_labels")
+        Maximum cell size in grid points. If None, no upper limit.
 
     Notes
     -----
     - Input dataset must be 2D (already sliced at a fixed altitude by processor)
     - Not thread-safe; create separate instances for concurrent processing
-    - Processing time: 50-200 ms per frame (depends on cell count)
     - Cell numbering is deterministic: largest cells always get lower IDs
-    - Closing kernel of (1,1) means no morphological processing
-
-    Examples
-    --------
-    >>> config = {
-    ...     "method": "threshold",
-    ...     "threshold": 30,
-    ...     "closing_kernel": (3, 3),
-    ...     "min_cellsize_gridpoint": 5,
-    ...     "global": {"var_names": {"reflectivity": "reflectivity"}}
-    ... }
-    >>> segmenter = RadarCellSegmenter(config)
-    >>> ds_labeled = segmenter.segment(ds_2d)
-    >>> print(f"Found {ds_labeled['cell_labels'].max()} cells")
     """
 
     def __init__(self, config):
@@ -141,7 +184,7 @@ class RadarCellSegmenter:
 
         Parameters
         ----------
-        config : InternalConfig
+        config : DetectionConfig
             Fully validated runtime configuration.
 
         Notes
@@ -149,15 +192,9 @@ class RadarCellSegmenter:
         All parameters are read directly from config - no defaults,
         no .get() calls, no validation. Configuration is already
         complete and validated by Pydantic.
-
-        Examples
-        --------
-        >>> from adapt.configuration.schemas import resolve_config, ParamConfig
-        >>> config = resolve_config(ParamConfig())
-        >>> segmenter = RadarCellSegmenter(config)
         """
         self.method = config.method
-        self.threshold = config.threshold
+        self.method_params = config.method_params
         self.kernel_size = config.closing_kernel
         self.filter_by_size = config.filter_by_size
         self.min_gridpoints = config.min_cellsize_gridpoint
@@ -168,98 +205,40 @@ class RadarCellSegmenter:
         self.z_level = config.z_level
 
         logger.info(
-            "RadarCellSegmenter initialized: method=%s, threshold=%s",
+            "RadarCellSegmenter initialized: method=%s, params=%s",
             self.method,
-            self.threshold,
+            self.method_params,
         )
 
-    def segment(self, ds: xr.Dataset) -> xr.Dataset:
+    def segment(self, ds: xr.Dataset, grid_nc_path: str | None = None) -> xr.Dataset:
         """Segment 2D reflectivity and return dataset with cell labels.
 
-        Dispatches to appropriate segmentation method (currently only threshold).
-        The input dataset should be 2D (reflectivity at a fixed altitude).
-        The output dataset is a copy of the input with an additional
-        "cell_labels" variable containing integer cell IDs.
+        The configured ``method`` determines how the convective mask is built;
+        the mask is then labeled into size-ranked cells by a shared backend.
+        The output dataset is a copy of the input with an added ``cell_labels``
+        variable of integer cell IDs.
 
         Parameters
         ----------
         ds : xr.Dataset
-            2D xarray.Dataset containing reflectivity field and coordinates.
-            Expected dimensions: (y, x)
-            Expected data variables: reflectivity (or custom name via config)
-            Expected attributes: z_level_m (altitude in meters, set by processor)
+            2D dataset (dims y, x) with the reflectivity field, sliced at the
+            analysis z-level. Supplies the reflectivity, coordinates, and attrs
+            for the output.
+        grid_nc_path : str | None
+            Path to the full 3D gridded NetCDF. Required by the pyart
+            convective/stratiform methods (they classify the 3D grid via
+            ``pyart.xradar.Xgrid``); unused by ``threshold``.
 
         Returns
         -------
         xr.Dataset
-            Copy of input dataset with added cell_labels variable.
-            Dataset attributes are preserved; cell_labels attributes
-            include segmentation metadata (threshold, z-level, method, etc.).
-
-
-        Notes
-        -----
-        - Method is determined at initialization (config["method"])
-        - Currently only "threshold" is implemented
-        - Cell labels are stored as int32 (0 = background, 1+ = cell IDs)
-        - Cells are numbered in decreasing order of size (largest = 1)
-        - Processing time: ~50-200 ms per frame
-
-        Examples
-        --------
-        >>> segmenter = RadarCellSegmenter(config)
-        >>> ds_labeled = segmenter.segment(ds_2d)
-        >>> num_cells = ds_labeled['cell_labels'].max().item()
-        >>> print(f"Found {num_cells} cells in this scan")
+            Copy of ``ds`` with an int32 ``cell_labels`` variable
+            (0 = background, 1..N = cells by decreasing size). Label attrs
+            record method, threshold, z-level, and size-filter settings.
         """
-        return self._segment2D_threshold(ds)
-
-    def _segment2D_threshold(self, ds: xr.Dataset) -> xr.Dataset:
-        """Apply threshold and morphology to detect cells (internal method).
-
-        Steps:
-        1. Extract reflectivity field (must be 2D: already sliced by processor)
-        2. Apply binary threshold (reflectivity > threshold)
-        3. Apply morphological closing (fill small holes)
-        4. Label connected components
-        5. Filter cells by size (min/max grid points)
-        6. Relabel by decreasing size (largest cell = 1)
-        7. Attach labels to dataset and return
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            2D xarray.Dataset with reflectivity at fixed z-level.
-            Expected to be pre-sliced at a single altitude by processor.
-
-        Returns
-        -------
-        xr.Dataset
-            Copy of input with new cell_labels variable. Attributes include:
-            - long_name: "Cell segmentation labels"
-            - units: "1"
-            - method: segmentation method (e.g., "threshold")
-            - threshold: threshold value used
-            - z_level_m: altitude of this slice (from ds.attrs)
-            - min_cellsize_gridpoint: minimum size filter
-            - max_cellsize_gridpoint: maximum size filter (if set)
-
-        Notes
-        -----
-        - Expects 2D input (if 3D, slicing is caller's responsibility)
-        - Variable names (reflectivity, cell_labels) are read from config
-        - Logging includes cell count, filtering results
-        - Processing time: typically 50-200 ms
-
-        Examples
-        --------
-        >>> # Not typically called directly; use segment() instead
-        >>> ds_labeled = segmenter._segment2D_threshold(ds_2d)
-        """
-        # Extract reflectivity (already 2D)
         refl = ds[self.refl_name].values
+        binary_mask = self._convective_mask(refl, grid_nc_path)
 
-        binary_mask = refl > self.threshold
         labels = self._binary_to_labels(
             binary_mask,
             refl,
@@ -274,25 +253,58 @@ class RadarCellSegmenter:
             "long_name": "Cell segmentation labels",
             "units": "1",
             "method": self.method,
-            "threshold": self.threshold,
             "z_level_m": self.z_level,
             "min_cellsize_gridpoint": self.min_gridpoints,
         }
         if self.max_gridpoints is not None:
             attrs["max_cellsize_gridpoint"] = self.max_gridpoints
+        # Record the parameters actually passed to the selected method, so the
+        # output states exactly what drove the classification. Skip None and cast
+        # bool -> int for NetCDF attribute serialization.
+        for key, value in self.method_params.items():
+            if value is None:
+                continue
+            attrs[key] = int(value) if isinstance(value, bool) else value
 
         labels_da = xr.DataArray(
             labels, dims=("y", "x"), coords={"y": ds.y, "x": ds.x}, attrs=attrs
         )
 
-        # we attach labels to original dataset
         ds_out = ds.copy()
         ds_out[self.labels_name] = labels_da
         logger.debug(
             f"Labels attached: var={self.labels_name}, shape={labels.shape}, max={labels.max()}"
         )
-
         return ds_out
+
+    def _convective_mask(self, refl: np.ndarray, grid_nc_path: str | None) -> np.ndarray:
+        """Build the 2D boolean convective mask for the configured method.
+
+        ``threshold`` masks the 2D reflectivity directly; every other method
+        delegates to a pyart convective/stratiform classifier and keeps the
+        convective class(es).
+        """
+        if self.method == "threshold":
+            return refl > self.method_params["threshold"]
+        return self._pyart_conv_strat_mask(grid_nc_path)
+
+    def _pyart_conv_strat_mask(self, grid_nc_path: str | None) -> np.ndarray:
+        """Classify the 3D grid with the configured pyart method; return convective mask.
+
+        Opens the gridded NetCDF as a fresh dataset and wraps it in
+        ``pyart.xradar.Xgrid`` (the grid representation the pyart retrievals
+        consume). The returned mask is 2D (y, x) at the analysis z-level,
+        aligned with the 2D reflectivity used for labeling.
+        """
+        if grid_nc_path is None:
+            raise RuntimeError(
+                f"Segmentation method '{self.method}' requires the gridded 3D NetCDF "
+                "(grid_nc_path), but none was produced. Enable regridder.save_netcdf."
+            )
+        masker = _CONV_STRAT_MASKERS[self.method]
+        with xr.open_dataset(grid_nc_path, decode_times=False) as grid_ds:
+            xgrid = pyart.xradar.Xgrid(grid_ds)
+            return masker(xgrid, self.refl_name, self.z_level, self.method_params)
 
     def _binary_to_labels(
         self,

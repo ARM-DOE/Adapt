@@ -10,12 +10,19 @@ from adapt.modules.detection.module import RadarCellSegmenter
 pytestmark = pytest.mark.unit
 
 
-def test_default_config(detection_module_config):
-    """Segmenter uses expert defaults when no user overrides provided."""
+def test_threshold_fixture_config(detection_module_config):
+    """The threshold test fixture yields a threshold segmenter with expert values."""
     seg = RadarCellSegmenter(detection_module_config)
     assert seg.method == "threshold"
-    assert seg.threshold == 30.0
+    assert seg.method_params["threshold"] == 30.0
     assert seg.filter_by_size is True
+
+
+def test_expert_default_method_is_conv_strat_raut():
+    """The unconfigured expert default segmentation method is conv_strat_raut."""
+    from adapt.configuration.schemas.param import ParamConfig
+
+    assert ParamConfig().segmenter.method == "conv_strat_raut"
 
 
 def test_custom_config(make_detection_config):
@@ -27,7 +34,7 @@ def test_custom_config(make_detection_config):
     )
 
     seg = RadarCellSegmenter(config)
-    assert seg.threshold == 45.0
+    assert seg.method_params["threshold"] == 45.0
     assert seg.min_gridpoints == 10
 
 

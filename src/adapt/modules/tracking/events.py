@@ -27,13 +27,12 @@ __all__ = [
 
 # Per-accepted-match explainability columns (null for INITIATION / TERMINATION).
 DIAGNOSTIC_COLUMNS = [
-    "candidate_overlap",
-    "candidate_iou",
+    "candidate_opc",
+    "candidate_ocp",
     "candidate_centroid_distance_m",
     "candidate_speed_ms",
     "candidate_heading_change_deg",
     "candidate_area_ratio",
-    "candidate_reflectivity_difference",
     "candidate_final_cost",
     "match_method",
 ]
@@ -59,13 +58,12 @@ def _diagnostic_fields(diag: MatchDiagnostics | None) -> dict:
     if diag is None:
         return dict.fromkeys(DIAGNOSTIC_COLUMNS)
     return {
-        "candidate_overlap": diag.overlap,
-        "candidate_iou": diag.iou,
+        "candidate_opc": diag.opc,
+        "candidate_ocp": diag.ocp,
         "candidate_centroid_distance_m": diag.centroid_distance_m,
         "candidate_speed_ms": diag.speed_ms,
         "candidate_heading_change_deg": diag.heading_change_deg,
         "candidate_area_ratio": diag.area_ratio,
-        "candidate_reflectivity_difference": diag.reflectivity_difference,
         "candidate_final_cost": diag.final_cost,
         "match_method": diag.match_method,
     }

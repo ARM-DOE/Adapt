@@ -21,8 +21,8 @@ __all__ = [
 class MatchMethod(StrEnum):
     """How an accepted match was decided."""
 
-    OVERLAP = "OVERLAP"
-    HUNGARIAN = "HUNGARIAN"
+    PROPAGATED = "PROPAGATED"  # deterministic constraint propagation (no optimisation)
+    HUNGARIAN = "HUNGARIAN"  # optimal assignment inside an ambiguous component
     SPLIT = "SPLIT"
     MERGE = "MERGE"
 
@@ -41,15 +41,18 @@ class TrackingError(StrEnum):
 
 @dataclass(frozen=True)
 class MatchDiagnostics:
-    """Per-accepted-match explainability record (persisted with the event row)."""
+    """Per-accepted-match explainability record (persisted with the event row).
 
-    overlap: float | None = None
-    iou: float | None = None
+    ``opc``/``ocp`` are the bidirectional overlap fractions; ``centroid_distance_m``
+    is the projected-hull→candidate residual; ``final_cost`` is ``m + d/L`` (+ penalty).
+    """
+
+    opc: float | None = None
+    ocp: float | None = None
     centroid_distance_m: float | None = None
     speed_ms: float | None = None
     heading_change_deg: float | None = None
     area_ratio: float | None = None
-    reflectivity_difference: float | None = None
     final_cost: float | None = None
     match_method: str | None = None
 

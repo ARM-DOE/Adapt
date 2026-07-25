@@ -45,7 +45,7 @@ class MotionValidator:
     """Reject candidate pairs that violate hard kinematic limits.
 
     A pair is rejected when its implied speed exceeds ``max_speed_ms`` (absolute
-    cap) or ``max_speed_multiplier × previous_speed`` (acceleration cap). Rejected
+    cap) or ``max_speed_multiplier * previous_speed`` (acceleration cap). Rejected
     pairs never reach overlap or Hungarian matching.
     """
 

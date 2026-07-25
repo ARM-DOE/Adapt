@@ -53,6 +53,7 @@ def assert_projected(ds: xr.Dataset, max_steps: int = 5) -> None:
             f"(1 registration + {max_steps_actual} projections from config)",
         )
         _assert_registration_minutes(ds)
+        _assert_projection_minutes(ds)
 
 
 def _assert_registration_minutes(ds: xr.Dataset) -> None:
@@ -84,6 +85,39 @@ def _assert_registration_minutes(ds: xr.Dataset) -> None:
     require(
         bool((minutes[1:] > minutes[:-1]).all()),
         "Projection contract violated: 'minute' coordinate must be strictly increasing",
+    )
+
+
+def _assert_projection_minutes(ds: xr.Dataset) -> None:
+    """Minute-resolution forward projection masks must accompany cell_projections."""
+    require(
+        "projection_minutes" in ds.data_vars,
+        "Projection contract violated: missing 'projection_minutes' — the "
+        "minute-resolution forward projection masks must be produced with the projections",
+    )
+    masks = ds["projection_minutes"]
+    require(
+        masks.dims == ("projection_minute", "y", "x"),
+        f"Projection contract violated: 'projection_minutes' dims {masks.dims}, "
+        "expected ('projection_minute', 'y', 'x')",
+    )
+    require(
+        "projection_fraction" in ds.coords,
+        "Projection contract violated: missing 'projection_fraction' coordinate "
+        "on the projection_minute dimension",
+    )
+    if masks.sizes["projection_minute"] == 0:
+        return
+    fractions = ds["projection_fraction"].values
+    require(
+        bool((fractions > 0).all()),
+        "Projection contract violated: projection_fraction values must be positive "
+        "(they may exceed 1 for horizons beyond one scan gap)",
+    )
+    minutes = ds["projection_minute"].values
+    require(
+        bool((minutes[1:] > minutes[:-1]).all()),
+        "Projection contract violated: 'projection_minute' coordinate must be strictly increasing",
     )
 
 

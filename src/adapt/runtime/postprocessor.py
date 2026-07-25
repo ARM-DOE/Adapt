@@ -110,7 +110,8 @@ class PostProcessor:
         Repository-backed inputs are injected only when a selected module declares
         them (the same on-demand pattern the live processor uses for
         ``grid_ds_3d``): ``minute_masks`` (minute-resolution registration masks —
-        the geometry product every external-association module consumes) and
+        the geometry product every external-association module consumes),
+        ``projection_minute_masks`` (the forward-projection analogue), and
         ``radar_origin`` (the radar lat/lon for projection).
         """
         context = {
@@ -125,6 +126,10 @@ class PostProcessor:
             from adapt.persistence.scan_mask_reader import read_minute_masks
 
             context["minute_masks"] = read_minute_masks(self.repository)
+        if "projection_minute_masks" in declared:
+            from adapt.persistence.scan_mask_reader import read_projection_minute_masks
+
+            context["projection_minute_masks"] = read_projection_minute_masks(self.repository)
         if "radar_origin" in declared:
             lat, lon = self.repository.registry.get_radar_location(self.repository.radar)
             context["radar_origin"] = (lat, lon)

@@ -59,6 +59,7 @@ class ProjectionModule(BaseModule):
             min_motion_threshold=cfg.projector.min_motion_threshold,
             max_flow_magnitude=cfg.projector.max_flow_magnitude,
             registration_step_minutes=cfg.projector.registration_step_minutes,
+            projection_horizon_minutes=cfg.projector.projection_horizon_minutes,
             reflectivity_var=cfg.global_.var_names.reflectivity,
         )
 

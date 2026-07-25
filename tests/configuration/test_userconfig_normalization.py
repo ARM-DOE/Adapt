@@ -5,7 +5,7 @@ def test_uppercase_keys_are_handled():
     raw = {
         "MODE": "historical",
         "RADAR_ID": "KHTX",
-        "THRESHOLD_DBZ": 40,
+        "MIN_CELLSIZE_GRIDPOINT": 40,
         "BASE_DIR": "/tmp/adapt_out",
     }
 
@@ -13,7 +13,7 @@ def test_uppercase_keys_are_handled():
 
     assert user.mode == "historical"
     assert user.radar == "KHTX"
-    assert isinstance(user.threshold, float) and user.threshold == 40.0
+    assert user.min_cellsize_gridpoint == 40
     assert user.base_dir == "/tmp/adapt_out"
 
 

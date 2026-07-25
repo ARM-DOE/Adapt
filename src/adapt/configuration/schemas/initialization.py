@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from adapt.configuration.schemas.cli import CLIConfig
+from adapt.configuration.schemas.errors import validated
 from adapt.configuration.schemas.internal import InternalConfig
 from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.resolve import resolve_config
@@ -322,7 +323,7 @@ def init_runtime_config(args) -> InternalConfig:
     param_cfg = ParamConfig()
     if config_path:
         user_cfg_dict = _load_user_config_dict(config_path)
-        user_cfg = UserConfig.model_validate(user_cfg_dict)
+        user_cfg = validated(UserConfig, user_cfg_dict, source=str(config_path))
     else:
         user_cfg = UserConfig()  # type: ignore[call-arg]  # all fields optional
 
@@ -342,7 +343,7 @@ def init_runtime_config(args) -> InternalConfig:
         }.items()
         if v is not None
     }
-    cli_cfg = CLIConfig.model_validate(cli_args)
+    cli_cfg = validated(CLIConfig, cli_args, source="command-line flags")
 
     # Resolve to final internal config
     internal_config_dict = resolve_config(param_cfg, user_cfg, cli_cfg).model_dump()

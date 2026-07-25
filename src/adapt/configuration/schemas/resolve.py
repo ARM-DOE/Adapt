@@ -32,6 +32,7 @@ Example precedence:
 """
 
 from adapt.configuration.schemas.cli import CLIConfig
+from adapt.configuration.schemas.errors import ConfigError, validated
 from adapt.configuration.schemas.internal import InternalConfig
 from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.user import UserConfig
@@ -108,8 +109,9 @@ def resolve_config(
 
     Raises
     ------
-    ValidationError
-        If any config fails Pydantic validation
+    ConfigError
+        If any config fails validation — with a clear message naming the
+        offending section/field, its value, and why.
 
     Examples
     --------
@@ -130,21 +132,21 @@ def resolve_config(
     """
     # Validate/convert inputs to Pydantic models
     if not isinstance(param_cfg, ParamConfig):
-        param = ParamConfig.model_validate(param_cfg)
+        param = validated(ParamConfig, param_cfg, source="expert defaults")
     else:
         param = param_cfg
 
     if user_cfg is None or (isinstance(user_cfg, dict) and not user_cfg):
         user = UserConfig()  # type: ignore[call-arg]
     elif not isinstance(user_cfg, UserConfig):
-        user = UserConfig.model_validate(user_cfg)
+        user = validated(UserConfig, user_cfg, source="config file")
     else:
         user = user_cfg
 
     if cli_cfg is None or (isinstance(cli_cfg, dict) and not cli_cfg):
         cli = CLIConfig()
     elif not isinstance(cli_cfg, CLIConfig):
-        cli = CLIConfig.model_validate(cli_cfg)
+        cli = validated(CLIConfig, cli_cfg, source="command-line flags")
     else:
         cli = cli_cfg
 
@@ -195,17 +197,17 @@ def resolve_config(
         merged["downloader"]["mode"] = merged.get("mode", "realtime")
 
     # Validate and freeze as InternalConfig
-    internal = InternalConfig.model_validate(merged)
+    internal = validated(InternalConfig, merged, source="merged runtime configuration")
 
     # Conditional validation: Historical mode requires start_time and end_time
     if internal.downloader.mode == "historical":
         if not internal.downloader.start_time:
-            raise ValueError(
+            raise ConfigError(
                 "start_time is required when mode='historical'. "
                 "Please provide start_time in user config or CLI arguments."
             )
         if not internal.downloader.end_time:
-            raise ValueError(
+            raise ConfigError(
                 "end_time is required when mode='historical'. "
                 "Please provide end_time in user config or CLI arguments."
             )

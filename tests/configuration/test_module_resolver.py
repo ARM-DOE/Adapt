@@ -34,11 +34,14 @@ class TestResolveModuleConfigs:
         ):
             assert key in configs
 
-    def test_detection_threshold_matches_internal_config(self, internal_config):
+    def test_detection_method_params_match_internal_config(self, internal_config):
         from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
         configs = resolve_module_configs(internal_config)
-        assert configs["detection_config"].threshold == internal_config.segmenter.threshold
+        detection = configs["detection_config"]
+        seg = internal_config.segmenter
+        assert detection.method == seg.method
+        assert detection.method_params == getattr(seg, f"{seg.method}_params").model_dump()
 
     def test_analysis_cross_reference_to_projector(self, internal_config):
         from adapt.configuration.schemas.module_resolver import resolve_module_configs

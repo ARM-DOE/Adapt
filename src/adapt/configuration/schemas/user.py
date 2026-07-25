@@ -38,23 +38,20 @@ class _UserSection(AdaptBaseModel):
 
 
 class UserSegmenterConfig(_UserSection):
-    """User-facing segmentation config with aliases."""
+    """User-facing segmentation config with aliases.
+
+    Per-method scientific parameters are not exposed here yet — the user selects
+    only `method`, and its parameters resolve from ParamConfig. Advanced users
+    may still override a nested `<method>_params` block, which passes through via
+    this section's ``extra="allow"``.
+    """
 
     method: str | None = None
-    threshold: float | None = None
     min_cellsize_gridpoint: int | None = None
     max_cellsize_gridpoint: int | None = None
     closing_kernel: tuple[int, int] | None = None
     filter_by_size: bool | None = None
     h_maxima: float | None = None
-
-    @field_validator("threshold", mode="before")
-    @classmethod
-    def coerce_threshold(cls, v):
-        """Accept int or float for threshold."""
-        if v is not None:
-            return float(v)
-        return v
 
     @field_validator("method", mode="before")
     @classmethod
@@ -92,6 +89,7 @@ class UserProjectorConfig(_UserSection):
     min_motion_threshold: float | None = None
     max_flow_magnitude: float | None = None
     registration_step_minutes: int | None = None
+    projection_horizon_minutes: int | None = None
 
     @field_validator("method", mode="before")
     @classmethod
@@ -181,7 +179,6 @@ class UserConfig(AdaptBaseModel):
     z_level: float | None = Field(None, alias="Z_LEVEL")
     reflectivity_var: str | None = Field(None, alias="REFLECTIVITY_VAR")
     segmentation_method: str | None = Field(None, alias="SEGMENTATION_METHOD")
-    threshold: float | None = Field(None, alias="THRESHOLD_DBZ")
     min_cellsize_gridpoint: int | None = Field(None, alias="MIN_CELLSIZE_GRIDPOINT")
     max_cellsize_gridpoint: int | None = Field(None, alias="MAX_CELLSIZE_GRIDPOINT")
 
@@ -233,7 +230,7 @@ class UserConfig(AdaptBaseModel):
 
         return self
 
-    @field_validator("z_level", "threshold", mode="before")
+    @field_validator("z_level", mode="before")
     @classmethod
     def coerce_numeric_fields(cls, v):
         """Accept int or float for numeric fields."""
@@ -327,8 +324,6 @@ class UserConfig(AdaptBaseModel):
         segmenter: dict[str, Any] = {}
         if self.segmentation_method is not None:
             segmenter["method"] = self.segmentation_method
-        if self.threshold is not None:
-            segmenter["threshold"] = self.threshold
         if self.min_cellsize_gridpoint is not None:
             segmenter["min_cellsize_gridpoint"] = self.min_cellsize_gridpoint
         if self.max_cellsize_gridpoint is not None:

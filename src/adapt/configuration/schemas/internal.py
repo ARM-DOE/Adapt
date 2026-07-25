@@ -12,9 +12,16 @@ runtime code - everything is explicit here.
 
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from adapt.configuration.schemas.base import AdaptBaseModel
+from adapt.configuration.schemas.segmenter_methods import (
+    ConvStratRautParams,
+    ConvStratYuterParams,
+    FeatureDetectionParams,
+    SteinerConvStratParams,
+    ThresholdParams,
+)
 
 # =============================================================================
 # Nested Configuration Models (Runtime)
@@ -57,13 +64,45 @@ class InternalRegridderConfig(AdaptBaseModel):
 class InternalSegmenterConfig(AdaptBaseModel):
     """Runtime segmentation configuration."""
 
-    method: Literal["threshold"]
-    threshold: float
+    method: Literal[
+        "conv_strat_raut",
+        "conv_strat_yuter",
+        "feature_detection",
+        "steiner_conv_strat",
+        "threshold",
+    ]
     min_cellsize_gridpoint: int
     max_cellsize_gridpoint: int | None
     closing_kernel: tuple[int, int]
     filter_by_size: bool
     h_maxima: float
+    threshold_params: ThresholdParams
+    conv_strat_raut_params: ConvStratRautParams
+    conv_strat_yuter_params: ConvStratYuterParams
+    feature_detection_params: FeatureDetectionParams
+    steiner_conv_strat_params: SteinerConvStratParams
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_only_selected_method_params(cls, data):
+        """Only the selected method's params are validated; unused per-method
+        blocks are reset to their defaults.
+
+        The generated config carries a block for every method, but a run uses
+        exactly one. A stale or renamed field in a method that is not selected
+        must never block the pipeline, while a bad param in the selected method
+        still fails loudly (its block is validated as-is).
+        """
+        if not isinstance(data, dict):
+            return data
+        keep = f"{data.get('method')}_params"
+        param_fields = {name for name in cls.model_fields if name.endswith("_params")}
+        if keep not in param_fields:
+            return data  # unknown/missing method: let normal validation report it
+        data = dict(data)
+        for field in param_fields - {keep}:
+            data[field] = {}  # unused block -> model defaults, ignoring any content
+        return data
 
 
 class InternalVarNamesConfig(AdaptBaseModel):
@@ -113,6 +152,7 @@ class InternalProjectorConfig(AdaptBaseModel):
     min_motion_threshold: float
     max_flow_magnitude: float
     registration_step_minutes: int = Field(ge=1)
+    projection_horizon_minutes: int = Field(ge=1)
 
 
 class InternalAnalyzerConfig(AdaptBaseModel):
@@ -135,20 +175,17 @@ class InternalTrackerConfig(AdaptBaseModel):
         width: int = Field(ge=1)
         alphabet: Literal["base36_upper"]
 
-    match_cost_threshold: float = Field(default=0.15, ge=0.0)
-    keep_cost_threshold: float = Field(default=1.0, ge=0.0)
-    unmatch_cost_threshold: float = Field(default=2.0, ge=0.0)
     split_overlap_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    core_reflectivity_threshold: float = Field(default=40.0, ge=0.0)
-    max_gap_minutes: float = Field(default=10.0, gt=0.0)
-    expected_speed_ms: float = Field(default=30.0, gt=0.0)
+    core_field_threshold: float = Field(default=40.0, ge=0.0)
     max_tracking_gap_minutes: float = Field(default=20.0, gt=0.0)
-    projection_horizon_minutes: float = Field(default=20.0, gt=0.0)
-    projection_interval_minutes: float = Field(default=1.0, gt=0.0)
     max_speed_ms: float = Field(default=40.0, gt=0.0)
     max_speed_multiplier: float = Field(default=3.0, gt=0.0)
-    overlap_match_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
     heading_change_penalty_weight: float = Field(default=0.0, ge=0.0)
+    projected_hull_buffer_km: float = Field(default=1.0, gt=0.0)
+    minimum_candidate_overlap: float = Field(default=0.20, ge=0.0, le=1.0)
+    minimum_projected_overlap: float = Field(default=0.20, ge=0.0, le=1.0)
+    length_scale: Literal["hull_equiv_diameter", "sum_radii", "fixed_km"] = "hull_equiv_diameter"
+    geometry_length_scale_km: float = Field(default=5.0, gt=0.0)
     cell_uid: InternalCellUidConfig
 
 

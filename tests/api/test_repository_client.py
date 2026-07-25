@@ -8,6 +8,7 @@ No network, no NEXRAD files, no pipeline needed.
 """
 
 import sqlite3
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
@@ -193,6 +194,16 @@ class TestTrackEvents:
     def test_track_events_returns_dataframe(self, client):
         df = client.track_events(_RUN_ID, _UID_A, radar=_RADAR)
         assert isinstance(df, pd.DataFrame)
+
+
+class TestCellsAtScan:
+    def test_returns_rows_for_exact_scan(self, client):
+        df = client.cells_at_scan(_RUN_ID, datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC), radar=_RADAR)
+        assert list(df["cell_uid"]) == [_UID_A]
+
+    def test_empty_for_scan_with_no_cells(self, client):
+        df = client.cells_at_scan(_RUN_ID, datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC), radar=_RADAR)
+        assert df.empty
 
 
 class TestLightningViaGenericTable:

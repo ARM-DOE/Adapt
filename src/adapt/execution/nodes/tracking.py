@@ -12,7 +12,7 @@ from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.tracking.config import TrackingConfig
 from adapt.modules.tracking.lut import attach_cell_uid_lut, attach_registration_uid_lut
-from adapt.modules.tracking.module import RadarCellTracker
+from adapt.modules.tracking.module import CellTracker
 
 
 class TrackingModule(BaseModule):
@@ -78,30 +78,27 @@ class TrackingModule(BaseModule):
     @classmethod
     def build_config(cls, cfg) -> TrackingConfig:
         return TrackingConfig(
-            match_cost=cfg.tracker.match_cost_threshold,
-            keep_cost=cfg.tracker.keep_cost_threshold,
-            unmatch_cost=cfg.tracker.unmatch_cost_threshold,
             split_overlap=cfg.tracker.split_overlap_threshold,
-            core_reflectivity_threshold=cfg.tracker.core_reflectivity_threshold,
+            core_field_threshold=cfg.tracker.core_field_threshold,
             uid_time_step_s=cfg.tracker.cell_uid.time_step_s,
             uid_latlon_step_deg=cfg.tracker.cell_uid.latlon_step_deg,
             uid_area_step_km2=cfg.tracker.cell_uid.area_step_km2,
             uid_width=cfg.tracker.cell_uid.width,
-            reflectivity_var=cfg.global_.var_names.reflectivity,
+            field_var=cfg.global_.var_names.reflectivity,
             labels_var=cfg.global_.var_names.cell_labels,
-            max_gap_minutes=cfg.tracker.max_gap_minutes,
-            expected_speed_ms=cfg.tracker.expected_speed_ms,
             max_tracking_gap_minutes=cfg.tracker.max_tracking_gap_minutes,
-            projection_horizon_minutes=cfg.tracker.projection_horizon_minutes,
-            projection_interval_minutes=cfg.tracker.projection_interval_minutes,
             max_speed_ms=cfg.tracker.max_speed_ms,
             max_speed_multiplier=cfg.tracker.max_speed_multiplier,
-            overlap_match_threshold=cfg.tracker.overlap_match_threshold,
             heading_change_penalty_weight=cfg.tracker.heading_change_penalty_weight,
+            projected_hull_buffer_km=cfg.tracker.projected_hull_buffer_km,
+            minimum_candidate_overlap=cfg.tracker.minimum_candidate_overlap,
+            minimum_projected_overlap=cfg.tracker.minimum_projected_overlap,
+            length_scale=cfg.tracker.length_scale,
+            geometry_length_scale_km=cfg.tracker.geometry_length_scale_km,
         )
 
     def __init__(self) -> None:
-        self._tracker: RadarCellTracker | None = None
+        self._tracker: CellTracker | None = None
         # Previous scan's tracked cells: maps the prev-scan labels carried by
         # registration_minutes to global uids on the next scan's analysis_ds.
         self._prev_tracked_cells = None
@@ -112,7 +109,7 @@ class TrackingModule(BaseModule):
         cell_stats = context["cell_stats"]
 
         if self._tracker is None:
-            self._tracker = RadarCellTracker(config)
+            self._tracker = CellTracker(config)
 
         tracked_cells, cell_events = self._tracker.track(
             ds_projected=ds_2d,

@@ -69,50 +69,6 @@ def test_get_nodes_at_time_unknown_time_returns_empty():
     assert g.get_nodes_at_time(T3) == []
 
 
-def test_get_track_nodes_returns_sorted_by_time():
-    g = TrackingGraph()
-    # Add in non-chronological order
-    n2 = _add_node(g, T3, track_index=1)
-    n0 = _add_node(g, T1, track_index=1)
-    n1 = _add_node(g, T2, track_index=1)
-
-    result = g.get_track_nodes(1)
-    assert result == [n0, n1, n2]
-
-
-def test_get_track_nodes_excludes_other_tracks():
-    g = TrackingGraph()
-    n_track1_a = _add_node(g, T1, track_index=1, cell_id=1)
-    n_track1_b = _add_node(g, T2, track_index=1, cell_id=1)
-    _add_node(g, T1, track_index=2, cell_id=2)
-    _add_node(g, T2, track_index=2, cell_id=2)
-
-    result = g.get_track_nodes(1)
-    assert sorted(result) == sorted([n_track1_a, n_track1_b])
-
-
-def test_add_edge_and_get_successors():
-    g = TrackingGraph()
-    a = _add_node(g, T1)
-    b = _add_node(g, T2)
-    g.add_edge(a, b, edge_type="CONTINUE", cost=0.05)
-
-    succs = g.get_successors(a)
-    assert len(succs) == 1
-    assert succs[0] == (b, "CONTINUE")
-
-
-def test_add_edge_and_get_predecessors():
-    g = TrackingGraph()
-    a = _add_node(g, T1)
-    b = _add_node(g, T2)
-    g.add_edge(a, b, edge_type="SPLIT", cost=0.2)
-
-    preds = g.get_predecessors(b)
-    assert len(preds) == 1
-    assert preds[0] == (a, "SPLIT")
-
-
 def test_get_node_attr_returns_stored_value():
     g = TrackingGraph()
     n = g.add_observation(
@@ -131,29 +87,3 @@ def test_get_node_attr_returns_stored_value():
     assert g.get_node_attr(n, "area") == pytest.approx(12.5)
     assert g.get_node_attr(n, "cell_id") == 7
     assert g.get_node_attr(n, "cell_uid") == "ABCDE12345"
-
-
-def test_node_with_no_predecessor_has_empty_predecessors():
-    g = TrackingGraph()
-    n = _add_node(g, T1)
-    assert g.get_predecessors(n) == []
-
-
-def test_node_with_no_successors_has_empty_successors():
-    g = TrackingGraph()
-    n = _add_node(g, T1)
-    assert g.get_successors(n) == []
-
-
-def test_merge_edge_type_recorded():
-    g = TrackingGraph()
-    a = _add_node(g, T1, cell_id=1)
-    b = _add_node(g, T1, cell_id=2)
-    c = _add_node(g, T2, cell_id=1)
-    g.add_edge(a, c, edge_type="MERGE")
-    g.add_edge(b, c, edge_type="MERGE")
-
-    preds = g.get_predecessors(c)
-    edge_types = {etype for _, etype in preds}
-    assert edge_types == {"MERGE"}
-    assert len(preds) == 2

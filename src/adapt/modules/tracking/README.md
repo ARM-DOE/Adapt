@@ -10,26 +10,34 @@ The tracking module performs tracking-only association of segmented radar cells 
 
 ## Features
 
-- **Optical Flow-Based Prediction**: Uses projected cell masks for robust matching
-- **Multi-Term Cost Function**: Combines position, IoU, area, and reflectivity
-- **Graph-Based Lineage**: Stores complete tracking history as a directed graph
-- **Explicit Events**: Emits CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION event rows per scan
-- **Adjacency Plumbing**: Translates scan-local cell adjacency into track identity space
+- **Registration-driven**: matches against projected (advected) cell hulls
+- **Geometry-first, field-agnostic**: bidirectional overlap + `m + d/L` cost; the field is only a centroid weight
+- **Constraint propagation before optimisation**: Hungarian only for ambiguous connected components
+- **Graph-Based Lineage**: stores complete tracking history as a directed graph
+- **Explicit Events**: emits CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION rows per scan
 
 ## Architecture
 
 The scientific layer is decomposed into focused, single-responsibility files under
-`adapt/modules/tracking/`. `RadarCellTracker` (in `module.py`) is orchestration only;
+`adapt/modules/tracking/`. `CellTracker` (in `module.py`) is orchestration only;
 it delegates to:
+
+The tracker is **geometry-first** and **field-agnostic**: the pixel field (reflectivity,
+brightness temperature, vertical wind, …) is used only as a centroid weight, never
+assumed to be reflectivity. Association is resolved as progressively stronger
+constraints with optimisation as the last resort.
 
 | File | Responsibility |
 |------|----------------|
-| `module.py` | `RadarCellTracker` — per-scan flow, state, delegation |
+| `module.py` | `CellTracker` — per-scan flow, state, delegation |
 | `graph.py` | `TrackingGraph` (the only `networkx` home) |
 | `projection.py` | `select_registration_labels` — minute-resolution registration hull |
-| `matching/overlap.py` | `OverlapMatcher` — deterministic unique-overlap matching |
-| `matching/hungarian.py` | `MatchingEngine` — cost matrix + Hungarian (the only `scipy` home) |
-| `motion.py` | `MotionValidator` + heading-change helpers |
+| `matching/geometry.py` | overlap (Opc/Ocp), hull dilation, length-scale strategies, `pair_cost`, centroids |
+| `matching/candidate.py` | `CandidateGenerator` — buffered high-recall candidate pairs |
+| `matching/validation.py` | `GeometricValidator` — bidirectional-overlap hard gate |
+| `matching/assignment.py` | `ConstraintPropagator` + `AssignmentGraph` (connected components) |
+| `matching/hungarian.py` | `HungarianMatcher` — per-component assignment (the only `scipy` optimisation home) |
+| `motion.py` | `MotionValidator` (speed/accel caps) + heading-change helpers |
 | `models.py` | `MatchMethod` / `TrackingError` enums, `MatchDiagnostics`, `TrackMotionState` |
 | `identity.py` | stable `cell_uid` generation |
 | `events.py` | lineage event-row builders + diagnostics assembly |
@@ -48,16 +56,23 @@ scan-gap classification (physical time; hard reset on excess gap / non-monotonic
         ↓
 registration projected hulls (minute nearest the real gap)
         ↓
-hard physical-motion rejection (speed / acceleration caps — before matching)
+dilate hulls by projected_hull_buffer_km → liberal candidate pairs (high recall)
         ↓
-deterministic unique-overlap matching (skips Hungarian)
+hard gate: bidirectional overlap (Opc, Ocp) + kinematic speed/acceleration caps
         ↓
-Hungarian assignment (residual ambiguity only; soft heading-consistency penalty)
+deterministic constraint propagation (mutually-unique matches → PROPAGATED)
+        ↓
+connected components → Hungarian inside ambiguous groups only (→ HUNGARIAN)
         ↓
 split / merge detection
         ↓
 initiation / termination
 ```
+
+Bidirectional overlap — `Opc = |I|/|candidate|` and `Ocp = |I|/|projected hull|`, both
+required above their thresholds — rejects tiny cells inside large hulls, merged cells
+engulfing a prediction, and grazing contacts that a one-sided fraction or IoU would pass.
+The buffer widens candidate *recall* only; the gate and cost use the un-buffered hull.
 
 ## Usage
 
@@ -82,38 +97,42 @@ initiation / termination
 ### Standalone
 
 ```python
-from adapt.modules.tracking.module import RadarCellTracker
+from adapt.modules.tracking.module import CellTracker
 from adapt.schemas import init_runtime_config
 
 # Initialize
 config = init_runtime_config(user_config)
-tracker = RadarCellTracker(config)
+tracker = CellTracker(config)
 
 # Track one scan at a time (scan-local outputs)
-tracked_cells, track_events, tracked_cell_adjacency = tracker.track(ds, cell_stats, cell_adjacency)
-
-# Access results
-print(f"Tracked {len(tracks_df)} distinct storms")
-print(f"Total {len(cells_df)} cell observations")
+tracked_cells, cell_events = tracker.track(projected_ds, cell_stats)
 ```
 
 ## Configuration
 
-Default configuration in `adapt.schemas.param.TrackerConfig`:
+Defaults live in `adapt.configuration.schemas.param.TrackerConfig`. Key knobs:
 
 ```python
-max_cost_threshold: float = 0.7         # Maximum cost for valid assignment
-merge_memory_scans: int = 3             # Scans to remember for merge tracking
-core_reflectivity_threshold: float = 40.0  # Core area threshold (dBZ)
+projected_hull_buffer_km: float = 1.0    # dilation radius for candidate recall
+minimum_candidate_overlap: float = 0.20  # Opc gate
+minimum_projected_overlap: float = 0.20  # Ocp gate
+length_scale: str = "hull_equiv_diameter"  # hull_equiv_diameter | sum_radii | fixed_km
+geometry_length_scale_km: float = 5.0    # used only when length_scale == "fixed_km"
+max_tracking_gap_minutes: float = 20.0   # hard reset when a scan gap exceeds this
+max_speed_ms: float = 40.0               # kinematic velocity cap
+max_speed_multiplier: float = 3.0        # kinematic acceleration cap
+heading_change_penalty_weight: float = 0.0  # optional crossing-track penalty
+split_overlap_threshold: float = 0.8     # SPLIT / MERGE overlap threshold
+core_field_threshold: float = 40.0       # core-area output threshold (field units)
 ```
 
 Override in user config:
 
 ```yaml
 tracker:
-  max_cost_threshold: 0.65
-  merge_memory_scans: 5
-  core_reflectivity_threshold: 42.0
+  minimum_candidate_overlap: 0.25
+  length_scale: sum_radii
+  max_speed_ms: 35.0
 ```
 
 ## Data Outputs
@@ -160,40 +179,51 @@ Normalized adjacency pairs in track identity space:
 
 ## Algorithm Details
 
-### Cost Function
+### Cost Function (geometry-only, `matching/geometry.py`)
 
-The Hungarian matching cost (`matching/hungarian.py`) combines four terms:
+The cost is dimensionless and scale-invariant so the same tracker behaves
+consistently across radar, satellite, and cloud-mask inputs:
 
 ```
-cost = 0.4 * D_pos + 0.3 * (1 - IoU) + 0.15 * |log(A2/A1)| + 0.1 * |Z2 - Z1| / 50
+cost = m + d / L + heading_penalty
+m    = 1 − √Opc · √Ocp                     # overlap mismatch, in [0, 1]
+d    = ‖ mass_centroid(candidate) − centroid(projected hull) ‖   # metres (prediction residual)
 ```
 
-Where `D_pos` is the centroid distance normalised by `expected_speed_ms * dt`,
-`IoU` is the projected-hull/current-cell overlap, `A2/A1` is the area ratio, and
-`Z2 - Z1` is the mean-reflectivity difference. When `heading_change_penalty_weight`
-> 0, a soft `weight * heading_change` (radians) term is added for tracks with an
-established velocity (crossing-track prevention).
+`√Opc·√Ocp` spreads near-threshold overlaps and compresses near-perfect ones. `d` is
+normalised by a **configurable characteristic length** `L` (`length_scale`), so both
+terms are O(1) with no invented weights:
+
+| `length_scale` | L |
+|----------------|---|
+| `hull_equiv_diameter` (default) | `2·√(|hull|·pixel_area/π)` |
+| `sum_radii` | `√(|hull|·pixel_area/π) + √(|cell|·pixel_area/π)` |
+| `fixed_km` | `geometry_length_scale_km · 1000` |
+
+When `heading_change_penalty_weight > 0`, a soft `weight · Δheading` (radians) term is
+added for tracks with an established velocity (crossing-track prevention).
 
 ### Assignment
 
-Hungarian assignment (`scipy.optimize.linear_sum_assignment`) is applied **only to
-residual ambiguity** — pairs left after deterministic unique-overlap matching and
-hard physical-motion rejection. See the matching hierarchy above.
+Most pairs are resolved by **constraint propagation** (mutually-unique matches, no
+optimisation → `PROPAGATED`). Only genuinely ambiguous connected components reach
+`scipy.optimize.linear_sum_assignment`, run **per component** — never one global matrix
+(→ `HUNGARIAN`).
 
 ### Search Region
 
-Candidates are filtered by non-zero overlap with the registration projected hull —
-the minute-resolution `registration_minutes` frame nearest the real scan gap,
-falling back to `cell_projections[0]` when minute frames are absent
-(`projection.select_registration_labels`).
+Candidates come from the registration projected hull — the minute-resolution
+`registration_minutes` frame nearest the real scan gap (falling back to
+`cell_projections[0]`) — dilated by `projected_hull_buffer_km` for recall
+(`projection.select_registration_labels`, `matching/candidate.py`).
 
 ### Diagnostics
 
 Every accepted match records a `MatchDiagnostics` row persisted to `cell_events`:
-`candidate_overlap`, `candidate_iou`, `candidate_centroid_distance_m`,
+`candidate_opc`, `candidate_ocp`, `candidate_centroid_distance_m`,
 `candidate_speed_ms`, `candidate_heading_change_deg`, `candidate_area_ratio`,
-`candidate_reflectivity_difference`, `candidate_final_cost`, and `match_method`
-(`OVERLAP` / `HUNGARIAN` / `SPLIT` / `MERGE`).
+`candidate_final_cost`, and `match_method`
+(`PROPAGATED` / `HUNGARIAN` / `SPLIT` / `MERGE`).
 
 ## Testing
 

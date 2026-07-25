@@ -61,7 +61,7 @@ def test_cli_precedence_no_user_config():
 
 def test_cli_only_overrides_specified_fields():
     """CLI should only override fields that are explicitly set."""
-    user = UserConfig(base_dir="/tmp", radar="KABC", mode="realtime", threshold=35)
+    user = UserConfig(base_dir="/tmp", radar="KABC", mode="realtime", min_cellsize_gridpoint=35)
 
     # CLI only sets radar_id
     cli = CLIConfig(radar="KHTX")
@@ -70,4 +70,4 @@ def test_cli_only_overrides_specified_fields():
 
     assert config.downloader.radar == "KHTX"  # CLI override
     assert config.mode == "realtime"  # User value preserved
-    assert config.segmenter.threshold == 35.0  # User value preserved
+    assert config.segmenter.min_cellsize_gridpoint == 35  # User value preserved

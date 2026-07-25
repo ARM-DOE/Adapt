@@ -13,7 +13,8 @@ init_runtime_config : function
     Complete runtime initialization - the ONLY public function
 """
 
+from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.initialization import init_runtime_config
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
-__all__ = ["init_runtime_config", "resolve_module_configs"]
+__all__ = ["ConfigError", "init_runtime_config", "resolve_module_configs"]

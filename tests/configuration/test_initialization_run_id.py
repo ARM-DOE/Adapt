@@ -79,7 +79,8 @@ def test_init_runtime_config_existing_run_ignores_config_and_cli(tmp_path, capsy
     saved_cfg = baseline.model_dump()
     saved_cfg["run_id"] = run_id
     saved_cfg["downloader"]["radar"] = "KBOX"
-    saved_cfg["segmenter"]["threshold"] = 37.0
+    saved_cfg["segmenter"]["method"] = "threshold"
+    saved_cfg["segmenter"]["threshold_params"]["threshold"] = 37.0
     saved_cfg["created_at"] = "2026-03-23T02:06:00+00:00"
     with open(tmp_path / f"runtime_config_{run_id}.json", "w") as f:
         json.dump(saved_cfg, f)
@@ -110,7 +111,7 @@ def test_init_runtime_config_existing_run_ignores_config_and_cli(tmp_path, capsy
 
     assert config.run_id == run_id
     assert config.downloader.radar == "KBOX"
-    assert config.segmenter.threshold == 37.0
+    assert config.segmenter.threshold_params.threshold == 37.0
     assert "Ignoring user config file and CLI config overrides" in out
 
 

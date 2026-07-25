@@ -43,8 +43,13 @@ class TestRoundTrip:
         loaded = _generate_and_load()
         internal = resolve_config(ParamConfig(), UserConfig.model_validate(loaded))
         defaults = ParamConfig()
-        assert internal.segmenter.threshold == defaults.segmenter.threshold
-        assert internal.tracker.match_cost_threshold == defaults.tracker.match_cost_threshold
+        assert (
+            internal.segmenter.threshold_params.threshold
+            == defaults.segmenter.threshold_params.threshold
+        )
+        assert (
+            internal.tracker.minimum_candidate_overlap == defaults.tracker.minimum_candidate_overlap
+        )
         assert (
             internal.analyzer.adjacency_min_touching_boundary_pixels
             == defaults.analyzer.adjacency_min_touching_boundary_pixels
@@ -57,11 +62,13 @@ class TestRoundTrip:
         assert "reflectivity_var" not in loaded["module_params"]["cell_volume_stats"]
 
     def test_core_section_edit_overrides(self):
-        loaded = _generate_and_load({"segmenter": {"threshold": 42.0}})
+        loaded = _generate_and_load(
+            {"segmenter": {"method": "threshold", "threshold_params": {"threshold": 42.0}}}
+        )
         internal = resolve_config(ParamConfig(), UserConfig.model_validate(loaded))
-        assert internal.segmenter.threshold == 42.0
+        assert internal.segmenter.threshold_params.threshold == 42.0
 
     def test_passthrough_section_edit_overrides(self):
-        loaded = _generate_and_load({"tracker": {"expected_speed_ms": 12.0}})
+        loaded = _generate_and_load({"tracker": {"max_speed_ms": 12.0}})
         internal = resolve_config(ParamConfig(), UserConfig.model_validate(loaded))
-        assert internal.tracker.expected_speed_ms == 12.0
+        assert internal.tracker.max_speed_ms == 12.0

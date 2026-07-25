@@ -15,6 +15,13 @@ from typing import Literal
 from pydantic import Field, field_validator
 
 from adapt.configuration.schemas.base import AdaptBaseModel
+from adapt.configuration.schemas.segmenter_methods import (
+    ConvStratRautParams,
+    ConvStratYuterParams,
+    FeatureDetectionParams,
+    SteinerConvStratParams,
+    ThresholdParams,
+)
 
 # =============================================================================
 # Nested Configuration Models
@@ -64,21 +71,34 @@ class RegridderConfig(AdaptBaseModel):
 
 
 class SegmenterConfig(AdaptBaseModel):
-    """Cell segmentation configuration."""
+    """Cell segmentation configuration.
 
-    method: Literal["threshold"] = "threshold"
-    threshold: float = Field(30.0, description="Reflectivity threshold in dBZ")
+    The user selects a `method`; the parameters for that method come from the
+    matching nested block below (Adapt-owned defaults). The shared labeling
+    parameters apply to every method's convective mask.
+    """
+
+    method: Literal[
+        "conv_strat_raut",
+        "conv_strat_yuter",
+        "feature_detection",
+        "steiner_conv_strat",
+        "threshold",
+    ] = "conv_strat_raut"
+    # Shared labeling-backend parameters (applied to every method's mask)
     min_cellsize_gridpoint: int = Field(5, ge=1)
     max_cellsize_gridpoint: int | None = Field(None, ge=1)
     closing_kernel: tuple[int, int] = (1, 1)
     filter_by_size: bool = True
     h_maxima: float = Field(5.0, gt=0, description="h-maxima height for cell seeding (dBZ)")
-
-    @field_validator("threshold", mode="before")
-    @classmethod
-    def coerce_threshold_to_float(cls, v):
-        """Allow int or float for threshold."""
-        return float(v)
+    # Per-method scientific parameters (one block per method; defaults = algorithm defaults)
+    threshold_params: ThresholdParams = Field(default_factory=ThresholdParams)  # type: ignore[arg-type]
+    conv_strat_raut_params: ConvStratRautParams = Field(default_factory=ConvStratRautParams)  # type: ignore[arg-type]
+    conv_strat_yuter_params: ConvStratYuterParams = Field(default_factory=ConvStratYuterParams)  # type: ignore[arg-type]
+    feature_detection_params: FeatureDetectionParams = Field(default_factory=FeatureDetectionParams)  # type: ignore[arg-type]
+    steiner_conv_strat_params: SteinerConvStratParams = Field(
+        default_factory=SteinerConvStratParams  # type: ignore[arg-type]
+    )
 
 
 class VarNamesConfig(AdaptBaseModel):
@@ -142,6 +162,12 @@ class ProjectorConfig(AdaptBaseModel):
         ge=1,
         description="Step of the minute-resolution registration masks between scans",
     )
+    projection_horizon_minutes: int = Field(
+        15,
+        ge=1,
+        le=60,
+        description="Forward horizon (minutes) for the minute-resolution projection product",
+    )
 
     @field_validator("method", mode="before")
     @classmethod
@@ -196,21 +222,6 @@ class TrackerConfig(AdaptBaseModel):
         width: int = Field(10, ge=1)
         alphabet: Literal["base36_upper"] = "base36_upper"
 
-    match_cost_threshold: float = Field(
-        0.15,
-        ge=0.0,
-        description="Cost below this is forced to 0 before Hungarian (guaranteed match)",
-    )
-    keep_cost_threshold: float = Field(
-        1.0,
-        ge=0.0,
-        description="Post-Hungarian: cost <= this confirms CONTINUE, else pair is rejected",
-    )
-    unmatch_cost_threshold: float = Field(
-        2.0,
-        ge=0.0,
-        description="Cost above this is forced to dummy_cost before Hungarian (unlikely match)",
-    )
     split_overlap_threshold: float = Field(
         0.8,
         ge=0.0,
@@ -220,34 +231,14 @@ class TrackerConfig(AdaptBaseModel):
             "to confirm SPLIT or MERGE"
         ),
     )
-    core_reflectivity_threshold: float = Field(
-        40.0, ge=0.0, description="Reflectivity threshold for core area (dBZ)"
-    )
-    max_gap_minutes: float = Field(
-        10.0,
-        gt=0.0,
-        description="Maximum gap between scans before a dormant track is terminated",
-    )
-    expected_speed_ms: float = Field(
-        30.0,
-        gt=0.0,
-        description="Maximum expected cell propagation speed (m/s); scales D_pos with dt",
+    core_field_threshold: float = Field(
+        40.0, ge=0.0, description="Field threshold for the core-area output (e.g. dBZ for radar)"
     )
     max_tracking_gap_minutes: float = Field(
         20.0,
         gt=0.0,
         description="Hard limit: scan gaps above this terminate all tracks and restart "
         "(no matching attempted across the gap)",
-    )
-    projection_horizon_minutes: float = Field(
-        20.0,
-        gt=0.0,
-        description="How far ahead (minutes) registration-based projected hulls are consumed",
-    )
-    projection_interval_minutes: float = Field(
-        1.0,
-        gt=0.0,
-        description="Spacing (minutes) between registration projected hulls",
     )
     max_speed_ms: float = Field(
         40.0,
@@ -260,17 +251,40 @@ class TrackerConfig(AdaptBaseModel):
         description="Hard acceleration cap: reject if candidate speed exceeds this times the "
         "track's previous speed",
     )
-    overlap_match_threshold: float = Field(
-        0.3,
-        ge=0.0,
-        le=1.0,
-        description="Min projected-hull overlap for a deterministic unique-overlap direct match "
-        "(uniqueness dominates the threshold)",
-    )
     heading_change_penalty_weight: float = Field(
         0.0,
         ge=0.0,
         description="Optional cost penalty per radian of heading change (0 = diagnostic only)",
+    )
+    projected_hull_buffer_km: float = Field(
+        1.0,
+        gt=0.0,
+        description="Dilation radius (km) applied to projected hulls before candidate generation, "
+        "to absorb segmentation and optical-flow uncertainty",
+    )
+    minimum_candidate_overlap: float = Field(
+        0.20,
+        ge=0.0,
+        le=1.0,
+        description="Hard gate: min fraction of the candidate cell covered by the projected hull "
+        "(Opc = intersection / candidate area)",
+    )
+    minimum_projected_overlap: float = Field(
+        0.20,
+        ge=0.0,
+        le=1.0,
+        description="Hard gate: min fraction of the projected hull covered by the candidate cell "
+        "(Ocp = intersection / projected hull area)",
+    )
+    length_scale: Literal["hull_equiv_diameter", "sum_radii", "fixed_km"] = Field(
+        "hull_equiv_diameter",
+        description="Characteristic length L that normalises centroid displacement in the "
+        "geometry-first cost (cost = m + d/L). Swappable for experimentation",
+    )
+    geometry_length_scale_km: float = Field(
+        5.0,
+        gt=0.0,
+        description="Fixed characteristic length (km) used only when length_scale='fixed_km'",
     )
     cell_uid: CellUidConfig = Field(default_factory=CellUidConfig)  # type: ignore[arg-type]
 

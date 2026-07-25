@@ -36,11 +36,21 @@ def _projected_ds(n_minutes=3, fractions=None, minutes=None) -> xr.Dataset:
                 ("minute", "y", "x"),
                 np.zeros((n_minutes, *shape), np.int32),
             ),
+            "projection_minutes": (
+                ("projection_minute", "y", "x"),
+                np.zeros((n_minutes, *shape), np.int32),
+            ),
         },
-        coords={**coords, "frame_offset": [0, 1], "minute": minutes},
+        coords={
+            **coords,
+            "frame_offset": [0, 1],
+            "minute": minutes,
+            "projection_minute": minutes,
+        },
         attrs={"max_projection_steps": max_steps},
     )
-    return ds.assign_coords(interpolation_fraction=("minute", fractions))
+    ds = ds.assign_coords(interpolation_fraction=("minute", fractions))
+    return ds.assign_coords(projection_fraction=("projection_minute", fractions))
 
 
 class TestRegistrationMinutesContract:

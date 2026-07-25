@@ -167,6 +167,7 @@ class RadarCellProjector:
         self.min_motion_threshold = config.min_motion_threshold
         self.max_flow_magnitude = config.max_flow_magnitude
         self.registration_step_minutes = config.registration_step_minutes
+        self.projection_horizon_minutes = config.projection_horizon_minutes
         self.refl_var = config.reflectivity_var
 
     def project(self, ds_list):
@@ -361,6 +362,30 @@ class RadarCellProjector:
             "Minutes elapsed since the previous scan divided by the scan-pair gap"
         )
 
+        # Minute-resolution forward projection: current labels advected to each
+        # whole minute in (t_curr, t_curr + horizon]. Same flow, same fill;
+        # forward fractions may exceed 1 when the horizon reaches beyond one
+        # scan gap (Lagrangian extrapolation).
+        proj_minutes = self._projection_minute_times(t_curr, self.projection_horizon_minutes)
+        proj_fractions = ((proj_minutes - t_curr) / (t_curr - t_prev)).to_numpy().astype(np.float32)
+        proj_frames = self._project_fractions(labels_curr, flow, list(proj_fractions))
+
+        ds_out["projection_minutes"] = xr.DataArray(
+            proj_frames,
+            dims=["projection_minute", "y", "x"],
+            coords={"projection_minute": proj_minutes.values, "y": ds_out.y, "x": ds_out.x},
+            attrs={
+                "description": (
+                    "Current scan's cell labels advected forward to each whole minute "
+                    "after the scan (label space: current scan)"
+                )
+            },
+        )
+        ds_out = ds_out.assign_coords(projection_fraction=("projection_minute", proj_fractions))
+        ds_out["projection_fraction"].attrs["description"] = (
+            "Minutes after the current scan divided by the scan-pair gap (may exceed 1)"
+        )
+
         # Store projection metadata for contract validation
         # This enables self-describing datasets: validators can read runtime config
         # from dataset attributes without needing context access
@@ -369,6 +394,7 @@ class RadarCellProjector:
                 "max_projection_steps": self.max_proj_steps,
                 "num_projection_steps": (len(labels_proj_list) if labels_proj_list else 0),
                 "projection_method": "adapt_default",
+                "projection_horizon_minutes": self.projection_horizon_minutes,
                 "registration_source_scan_time": pd.Timestamp(t_prev).isoformat(),
                 "registration_target_scan_time": pd.Timestamp(t_curr).isoformat(),
             }
@@ -408,6 +434,19 @@ class RadarCellProjector:
         step = pd.Timedelta(minutes=self.registration_step_minutes)
         first = t_prev.floor(f"{self.registration_step_minutes}min") + step
         return pd.date_range(first, t_curr, freq=step)
+
+    def _projection_minute_times(
+        self, t_curr: pd.Timestamp, horizon_minutes: int
+    ) -> pd.DatetimeIndex:
+        """Whole-minute grid points m with t_curr < m <= t_curr + horizon_minutes.
+
+        Shares the epoch-aligned grid step with registration so the backward and
+        forward minute timelines stay continuous across t_prev -> t_curr -> horizon.
+        """
+        step = pd.Timedelta(minutes=self.registration_step_minutes)
+        first = t_curr.floor(f"{self.registration_step_minutes}min") + step
+        last = t_curr + pd.Timedelta(minutes=horizon_minutes)
+        return pd.date_range(first, last, freq=step)
 
     def _project_frames(self, labels_src, flow, n_steps=1):
         """Project labels for whole flow steps (1, 2, ..., n_steps)."""

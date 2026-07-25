@@ -89,3 +89,51 @@ def read_minute_masks(repository: DataRepository) -> list[dict]:
             ds.close()
 
     return [by_minute[m] for m in sorted(by_minute)]
+
+
+def read_projection_minute_masks(repository: DataRepository) -> list[dict]:
+    """Return one forward-projection mask record per future minute, ascending.
+
+    Each record: ``{minute_time, cell_labels, x, y, cell_uid_lut,
+    source_scan_time, projection_fraction}``. ``cell_labels`` are the source
+    scan's own labels advected forward (current-scan label space), so they are
+    resolved by that scan's ``cell_uid`` LUT — no registration LUT is needed.
+
+    Consecutive scans forecast the same future minute; the most recent source
+    scan wins (shortest lead time is the best nowcast). Raises if a file carries
+    ``projection_minutes`` but lacks the ``cell_uid`` lookup.
+    """
+    by_minute: dict[pd.Timestamp, dict] = {}
+    for artifact in repository.query(product_type=ProductType.ANALYSIS_NC):
+        ds = repository.open_dataset(artifact["artifact_id"])
+        try:
+            if "projection_minutes" not in ds:
+                continue
+            if "cell_uid" not in ds:
+                raise ValueError(
+                    f"Analysis artifact {artifact['artifact_id']} has 'projection_minutes' "
+                    "but no 'cell_uid' lookup; cannot attribute forward projections without it."
+                )
+            source = pd.Timestamp(ds.attrs["registration_target_scan_time"])
+            lut = ds["cell_uid"].values.astype(str)
+            frames = ds["projection_minutes"].values
+            minutes = pd.to_datetime(ds["projection_minute"].values)
+            fractions = ds["projection_fraction"].values
+            x = ds["x"].values
+            y = ds["y"].values
+            for i, minute in enumerate(minutes):
+                incumbent = by_minute.get(minute)
+                if incumbent is None or source > incumbent["source_scan_time"]:
+                    by_minute[minute] = {
+                        "minute_time": minute,
+                        "cell_labels": frames[i],
+                        "x": x,
+                        "y": y,
+                        "cell_uid_lut": lut,
+                        "source_scan_time": source,
+                        "projection_fraction": float(fractions[i]),
+                    }
+        finally:
+            ds.close()
+
+    return [by_minute[m] for m in sorted(by_minute)]

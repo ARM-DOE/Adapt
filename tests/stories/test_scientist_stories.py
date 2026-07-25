@@ -134,9 +134,9 @@ class TestScientistCanDetectCells:
 class TestScientistCanTrackStorms:
     @pytest.fixture
     def tracker(self, tracking_module_config):
-        from adapt.modules.tracking.module import RadarCellTracker
+        from adapt.modules.tracking.module import CellTracker
 
-        return RadarCellTracker(tracking_module_config)
+        return CellTracker(tracking_module_config)
 
     def test_user_can_track_a_persistent_storm(self, tracker):
         """Given: one cell that persists at the same location across two frames.

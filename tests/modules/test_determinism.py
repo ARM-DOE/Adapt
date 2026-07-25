@@ -17,7 +17,7 @@ import xarray as xr
 from adapt.modules.analysis.module import RadarCellAnalyzer
 from adapt.modules.detection.module import RadarCellSegmenter
 from adapt.modules.projection.module import RadarCellProjector
-from adapt.modules.tracking.module import RadarCellTracker
+from adapt.modules.tracking.module import CellTracker
 from tests.helpers.fake_grid import make_textured_2d_ds
 
 pytestmark = [pytest.mark.unit, pytest.mark.determinism]
@@ -98,7 +98,7 @@ def test_tracking_is_deterministic(tracking_module_config):
     labels[2:4, 2:4] = 1
 
     def run_sequence():
-        tracker = RadarCellTracker(tracking_module_config)
+        tracker = CellTracker(tracking_module_config)
         frames = []
         for t in (t1, t2):
             tracked, events = tracker.track(_tracking_scan(t, labels), _tracking_stats(t, 1))

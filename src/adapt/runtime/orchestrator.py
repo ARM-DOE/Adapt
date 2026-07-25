@@ -49,6 +49,14 @@ _WRAPPER_SPANS = frozenset({"pipeline", "scan"})
 # Monitor-loop cadence; also the live status-line tick (spinner + elapsed) interval.
 _STATUS_TICK_SECONDS = 0.5
 
+# Shutdown grace per worker: how long stop() waits for a thread to exit after
+# signalling it, before warning that it may be stuck. The processor cannot be
+# interrupted mid-scan, so it needs long enough to finish the in-flight scan
+# (ingest dominates, tens of seconds) and persist its data before exiting; a
+# warning after this grace means the thread is genuinely wedged, not just busy.
+_PROCESSOR_SHUTDOWN_GRACE_SECONDS = 60.0
+_DOWNLOADER_SHUTDOWN_GRACE_SECONDS = 5.0
+
 
 class PipelineOrchestrator:
     """Manages the multi-threaded radar processing pipeline.
@@ -233,6 +241,7 @@ class PipelineOrchestrator:
         assert self._reporter is not None
         self.repository.history.start_run(start)
         self._reporter.header(start)
+        self._reporter.methods(self.config, modules)
 
     def _finalize_history(self) -> None:
         """Print the run summary, then persist history.
@@ -553,34 +562,42 @@ class PipelineOrchestrator:
         processed, expected = self.downloader.get_historical_progress()
         logger.info("Downloader complete: %d/%d files queued", processed, expected)
 
-        # Stop downloader explicitly to signal thread termination
+        # Stop the downloader (ends ingestion) so the queue can only shrink.
         self.downloader.stop()
         logger.info("Stopping downloader thread...")
-        self.downloader.join(timeout=5)
+        self.downloader.join(timeout=_DOWNLOADER_SHUTDOWN_GRACE_SECONDS)
         if self.downloader.is_alive():
-            logger.warning("Downloader thread did not stop cleanly")
+            logger.warning(
+                "Downloader did not stop within %.0fs — thread may be stuck",
+                _DOWNLOADER_SHUTDOWN_GRACE_SECONDS,
+            )
 
-        # Wait for processor queue to drain
+        # Drain the queue into the processor (aborts at once on a stop request).
+        # The processor keeps consuming here; it is stopped by stop() once the
+        # monitoring loop exits, so it is never torn down mid-drain.
         self._drain_queue(self.downloader_queue, "processor")
-
-        # Now stop processor thread
-        logger.info("Stopping processor thread...")
-        if self.processor and self.processor.is_alive():
-            self.processor.stop()
-            self.processor.join(timeout=10)
-            if self.processor.is_alive():
-                logger.warning("Processor thread did not stop cleanly")
 
         logger.info("Historical mode complete")
         return True
 
     def _drain_queue(self, q: queue.Queue, name: str, timeout: int = 300):
-        """Wait for queue to drain with timeout."""
+        """Wait for the queue to drain, aborting at once on a stop request.
+
+        On normal historical completion this blocks until the processor has
+        consumed every queued file. A stop request (Ctrl+C / SIGTERM) sets
+        ``_stop_requested``; the remaining backlog is then abandoned so shutdown
+        is prompt instead of grinding through the full queue. Abandoned files
+        stay marked "downloaded" (not "analyzed") and resume on the next run.
+        """
         wait_count = 0
         start_time = time.time()
         last_size = q.qsize()
 
         while q.qsize() > 0:
+            if self._stop_requested or self._stop_event:
+                logger.info("Stop requested — abandoning %d queued %s file(s)", q.qsize(), name)
+                break
+
             current_size = q.qsize()
             if current_size == last_size:
                 wait_count += 1
@@ -646,16 +663,19 @@ class PipelineOrchestrator:
             self._root_span.__exit__(None, None, None)
             self._root_span = None
 
-        # Stop threads
-        for name, thread in [
-            ("Downloader", self.downloader),
-            ("Processor", self.processor),
-        ]:
-            if thread and thread.is_alive():
-                thread.stop()
-                thread.join(timeout=5)
-                if thread.is_alive():
-                    logger.warning("%s did not stop cleanly", name)
+        # Stop the downloader (ends ingestion), then the processor. The processor
+        # runs its in-flight scan to completion — including saving its data — before
+        # it exits, so _stop_processor() announces that wait, confirms a clean stop,
+        # and warns only when the thread is genuinely stuck past its grace.
+        if self.downloader and self.downloader.is_alive():
+            self.downloader.stop()
+            self.downloader.join(timeout=_DOWNLOADER_SHUTDOWN_GRACE_SECONDS)
+            if self.downloader.is_alive():
+                logger.warning(
+                    "Downloader did not stop within %.0fs — thread may be stuck",
+                    _DOWNLOADER_SHUTDOWN_GRACE_SECONDS,
+                )
+        self._stop_processor()
 
         # Save results
         if self.processor:
@@ -688,6 +708,40 @@ class PipelineOrchestrator:
             self.tracker.close()
         else:
             logger.info("Pipeline stopped. Runtime: %.1fs", elapsed)
+
+    def _stop_processor(self) -> None:
+        """Stop the processor, letting it finish its in-flight scan, with clear status.
+
+        The processor cannot be interrupted mid-scan; on shutdown it runs the
+        current scan to completion (including saving its data) and then exits.
+        When a scan is in flight this announces the wait and confirms a clean stop
+        on success; it warns only if the thread is still alive past the grace
+        period, which means it is genuinely stuck rather than merely busy.
+        """
+        proc = self.processor
+        if proc is None or not proc.is_alive():
+            return
+        busy = proc.current_activity() is not None
+        if busy:
+            self._report(
+                "Finishing the current scan and saving its data before exit — please wait..."
+            )
+        proc.stop()
+        proc.join(timeout=_PROCESSOR_SHUTDOWN_GRACE_SECONDS)
+        if proc.is_alive():
+            logger.warning(
+                "Processor did not stop within %.0fs — thread may be stuck; abandoning on exit",
+                _PROCESSOR_SHUTDOWN_GRACE_SECONDS,
+            )
+        elif busy:
+            self._report("Last scan processed and data saved — shutdown clean.")
+
+    def _report(self, message: str) -> None:
+        """Emit a user-facing shutdown-status line to the quiet console (and log)."""
+        if self._reporter is not None:
+            self._reporter.progress(message)
+        else:
+            logger.info(message)
 
     def _log_status(self):
         """Log current pipeline status."""

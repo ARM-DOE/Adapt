@@ -10,13 +10,18 @@ routine per-scan logs stay in the file/JSON log only.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from adapt.contracts.execution_history import RunStart, RunSummary
 from adapt.contracts.observability import SpanRecord
 
+if TYPE_CHECKING:
+    from adapt.configuration.schemas.internal import InternalConfig
+
 __all__ = [
     "RunReporter",
     "format_header",
+    "format_methods",
     "format_summary",
     "format_duration",
     "format_seconds",
@@ -81,6 +86,40 @@ def format_header(start: RunStart) -> str:
     )
 
 
+# One short "<method> · <key choices>" per module, read straight off the frozen
+# InternalConfig. Only algorithmic modules with a real method/approach appear;
+# purely parametric ones (analysis, cell_volume_stats) are left out. Add a module
+# here to give it a line — nothing else references this map.
+_METHOD_LINES = {
+    "ingest": lambda c: f"regrid {c.regridder.weighting_function} · roi {c.regridder.roi_func}",
+    "detection": lambda c: (
+        f"{c.segmenter.method} · min_cellsize {c.segmenter.min_cellsize_gridpoint}"
+    ),
+    "projection": lambda c: (
+        f"{c.projector.method} · horizon {c.projector.projection_horizon_minutes}min "
+        f"· steps {c.projector.max_projection_steps}"
+    ),
+    "tracking": lambda c: (
+        f"gap {c.tracker.max_tracking_gap_minutes:g}min "
+        f"· overlap≥{c.tracker.minimum_candidate_overlap:g} · vmax {c.tracker.max_speed_ms:g}m/s"
+    ),
+}
+
+
+def format_methods(config: InternalConfig, enabled_modules: tuple[str, ...]) -> str:
+    """One line per enabled algorithmic module: its chosen method and key choices.
+
+    Built from the frozen config only, in pipeline order. Returns ``""`` when no
+    enabled module carries a method (so the caller can skip emitting anything).
+    """
+    lines = [
+        f"  {name:<11}{_METHOD_LINES[name](config)}"
+        for name in enabled_modules
+        if name in _METHOD_LINES
+    ]
+    return "\n".join(["methods:", *lines]) if lines else ""
+
+
 def format_summary(summary: RunSummary) -> str:
     """One compact block of end-of-run stats with a per-module timing table."""
     module_lines = [
@@ -125,6 +164,11 @@ class RunReporter:
 
     def header(self, start: RunStart) -> None:
         self._log.info(format_header(start), extra={"console": True})
+
+    def methods(self, config: InternalConfig, enabled_modules: tuple[str, ...]) -> None:
+        text = format_methods(config, enabled_modules)
+        if text:
+            self._log.info(text, extra={"console": True})
 
     def progress(self, text: str) -> None:
         self._log.info(text, extra={"console": True})

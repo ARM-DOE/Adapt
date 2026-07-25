@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 
 from adapt import __version__
+from adapt.configuration.schemas import ConfigError
 
 # ---------------------------------------------------------------------------
 # Single-instance enforcement
@@ -36,6 +37,11 @@ from adapt import __version__
 logger = logging.getLogger(__name__)
 
 _PID_FILE = Path.home() / ".adapt" / "pipeline.pid"
+
+# Ctrl+C shutdown must outlast the orchestrator letting the processor finish its
+# in-flight scan (orchestrator._PROCESSOR_SHUTDOWN_GRACE_SECONDS) plus finalize.
+# Press Ctrl+C again to force an earlier exit.
+_SHUTDOWN_JOIN_TIMEOUT_SECONDS = 90
 
 
 def _check_single_instance() -> None:
@@ -236,11 +242,11 @@ def _run_nexrad(args: argparse.Namespace) -> None:
         # summary on this (non-daemon, joined) thread — so the summary always prints.
         orchestrator.request_stop()
         try:
-            orchestrator_thread.join(timeout=20)
+            orchestrator_thread.join(timeout=_SHUTDOWN_JOIN_TIMEOUT_SECONDS)
         except KeyboardInterrupt:
             print("[adapt] Forcing shutdown...")
         if orchestrator_thread.is_alive():
-            print("Warning: orchestrator did not stop within 20 s")
+            print(f"Warning: orchestrator did not stop within {_SHUTDOWN_JOIN_TIMEOUT_SECONDS} s")
 
     finally:
         stop_event.set()
@@ -486,7 +492,13 @@ def main() -> None:
     postprocess_parser.set_defaults(func=_postprocess_cmd)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except ConfigError as exc:
+        # A configuration value is invalid — show the clear, section/field-level
+        # message instead of a pydantic traceback, and exit non-zero.
+        print(str(exc), file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

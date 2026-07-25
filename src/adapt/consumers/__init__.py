@@ -11,4 +11,6 @@ Available consumers
 -------------------
 adapt.consumers.live
     Operational scan viewer (Tkinter dashboard).
+adapt.consumers.target_selection
+    Target selection engine for adaptive scanning.
 """

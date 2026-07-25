@@ -6,6 +6,8 @@
 import json
 from pathlib import Path
 
+POLL_MS = 10_000  # auto-refresh / live-wait cadence shared by shell and tabs
+
 _USER_CONFIG_PATH = Path.home() / ".adapt" / "user_dashboard.json"
 _DEFAULT_CONFIG_PATH = Path(__file__).parent / "dashboard_default_config.json"
 

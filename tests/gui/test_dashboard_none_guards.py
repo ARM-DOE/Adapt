@@ -41,7 +41,7 @@ def _make_history_df():
 def test_draw_tracking_history_does_not_crash_when_dataset_is_none():
     """_draw_tracking_history must return silently when _current_nc_ds is None.
     Previously it crashed with TypeError before the None guard was added."""
-    from adapt.consumers.live.dashboard import _centroid_track_to_km
+    from adapt.consumers.live._utils import _centroid_track_to_km
 
     # Simulate the guard: ds=None → function returns before calling _centroid_track_to_km
     # We verify that passing None to _centroid_track_to_km itself raises TypeError
@@ -54,7 +54,7 @@ def test_draw_tracking_history_does_not_crash_when_dataset_is_none():
 def test_centroid_track_to_km_raises_key_error_when_pixel_columns_absent():
     """_centroid_track_to_km must raise KeyError if the required pixel-coordinate
     columns are missing, not silently produce wrong coordinates from lat/lon."""
-    from adapt.consumers.live.dashboard import _centroid_track_to_km
+    from adapt.consumers.live._utils import _centroid_track_to_km
 
     df_no_pixel = pd.DataFrame(
         [
@@ -77,7 +77,7 @@ def test_compact_toolbar_toolitems_is_tuple():
     NavigationToolbar2's type annotation requires a tuple; a list can cause
     downstream type mismatches in Tkinter toolbar construction."""
     try:
-        from adapt.consumers.live.dashboard import _CompactToolbarCls
+        from adapt.consumers.live._widgets import _CompactToolbarCls
     except ImportError:
         pytest.skip("matplotlib not available")
 
@@ -90,7 +90,7 @@ def test_compact_toolbar_excludes_back_and_forward_buttons():
     """Back and Forward buttons must be removed from the toolbar.
     This verifies the filter logic produces the correct items, not just the right type."""
     try:
-        from adapt.consumers.live.dashboard import _CompactToolbarCls
+        from adapt.consumers.live._widgets import _CompactToolbarCls
     except ImportError:
         pytest.skip("matplotlib not available")
 

@@ -89,7 +89,8 @@ class RepositoryClient:
 
     def _track_store(self, radar: str) -> TrackStore:
         catalog = self._catalog(radar)
-        return TrackStore(catalog.db_path)
+        # immutable reader: sees checkpointed data, never takes write locks
+        return TrackStore(catalog.db_path, readonly=True)
 
     def _duckdb(self):
         if self._duckdb_conn is None:
@@ -200,6 +201,13 @@ class RepositoryClient:
         """Return lineage events for one track."""
         radar = self._resolve_radar(radar)
         return self._track_store(radar).get_cell_events(run_id, cell_uid)
+
+    def cells_at_scan(
+        self, run_id: str, scan_time: datetime, radar: str | None = None
+    ) -> pd.DataFrame:
+        """Return all cells_by_scan rows for one scan of a run."""
+        radar = self._resolve_radar(radar)
+        return self._track_store(radar).get_cells_by_scan(run_id, scan_time)
 
     # =========================================================================
     # Generic table access (catalog-driven discovery)

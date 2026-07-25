@@ -201,3 +201,23 @@ forbidden_modules =
     adapt.extensions
     adapt.contracts
     adapt.utils
+
+# ==========================================================
+# 9. Consumers speak only through the public API
+# ==========================================================
+#
+# Consumers (Ring 2) sit above RepositoryClient. They must not
+# reach into persistence, runtime, or execution directly —
+# reaching them THROUGH adapt.api is the sanctioned path, hence
+# allow_indirect_imports.
+
+[importlinter:contract:consumers_use_public_api_only]
+name = Consumers do not import persistence, runtime, or execution
+type = forbidden
+source_modules =
+    adapt.consumers
+forbidden_modules =
+    adapt.persistence
+    adapt.runtime
+    adapt.execution
+allow_indirect_imports = True

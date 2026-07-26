@@ -92,6 +92,12 @@ class TrackStore:
     # Connection
     # ------------------------------------------------------------------
 
+    def __enter__(self) -> TrackStore:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def _connect(self) -> sqlite3.Connection:
         if self._conn is None:
             if self._readonly:

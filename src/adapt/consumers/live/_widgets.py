@@ -34,8 +34,9 @@ if _HAS_MPL:
             t for t in NavigationToolbar2Tk.toolitems if t[0] not in ("Back", "Forward")
         )
 
-        def __init__(self, canvas, window, *, pack_toolbar=True, lat0=0.0, lon0=0.0):
+        def __init__(self, canvas, window, *, pack_toolbar=True, lat0=0.0, lon0=0.0, on_home=None):
             self._ltrans = None
+            self._on_home = on_home
             if _HAS_PROJ and (lat0 or lon0):
                 with contextlib.suppress(Exception):
                     self._ltrans = Transformer.from_crs(
@@ -44,6 +45,14 @@ if _HAS_MPL:
                         always_xy=True,
                     )
             super().__init__(canvas, window, pack_toolbar=pack_toolbar)
+
+        def home(self, *args):
+            """Reset to full extent. The app callback is authoritative — the
+            matplotlib nav-stack home can hold a zoomed view after the canvas
+            was rebuilt while zoomed, so it runs last and wins."""
+            super().home(*args)
+            if self._on_home is not None:
+                self._on_home()
 
         def set_message(self, s):
             if self._ltrans is not None and s and "x=" in s:

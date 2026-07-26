@@ -98,6 +98,18 @@ def _masked_cmap(name: str):
     return cmap
 
 
+def data_extent_km(ds: xr.Dataset) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Full ``((xmin, xmax), (ymin, ymax))`` map extent in km from the grid.
+
+    This is the authoritative "home" view for the toolbar Home button — the
+    dataset's own bounds, never a matplotlib nav-stack snapshot (which can hold
+    a zoomed view after the canvas was rebuilt while zoomed).
+    """
+    x_km = ds["x"].values / 1000.0
+    y_km = ds["y"].values / 1000.0
+    return (float(x_km.min()), float(x_km.max())), (float(y_km.min()), float(y_km.max()))
+
+
 def render_scan(
     ax, cbar_ax, ds: xr.Dataset, view: ViewState, overlays: OverlayData
 ) -> RenderResult:
@@ -380,10 +392,28 @@ def scan_frame_drawer(
     return draw
 
 
+def _basemap_extent_key(x_km, y_km) -> tuple[float, float, float, float]:
+    """Quantized (xmin, xmax, ymin, ymax) identifying a basemap extent.
+
+    Two renders of the same view produce the same key, so cached tiles are
+    reused instead of re-fetched; a zoom (new extent) yields a new key.
+    """
+    return (
+        round(float(x_km.min()), 1),
+        round(float(x_km.max()), 1),
+        round(float(y_km.min()), 1),
+        round(float(y_km.max()), 1),
+    )
+
+
 def add_basemap(ax, ds, x_km, y_km) -> None:
     """Add an OpenStreetMap basemap to *ax* using the dataset's radar location.
 
-    No-op when contextily is unavailable or the dataset has no lat/lon attrs.
+    Tiles are fetched at most once per extent and cached on the axes, then
+    re-drawn from that cache on later frames: every ``render_scan`` clears the
+    axes, so without the cache a redraw loop would re-hit the network (and open
+    fresh sockets) on every frame. No-op when contextily is unavailable or the
+    dataset has no lat/lon attrs.
     """
     if not HAS_CTX:
         return
@@ -400,9 +430,20 @@ def add_basemap(ax, ds, x_km, y_km) -> None:
         return
 
     lat, lon = float(lat), float(lon)
-    crs_str = f"+proj=aeqd +lat_0={lat} +lon_0={lon} +x_0=0 +y_0=0 +datum=WGS84 +units=km"
     ax.set_xlim(x_km.min(), x_km.max())
     ax.set_ylim(y_km.min(), y_km.max())
+
+    key = _basemap_extent_key(x_km, y_km)
+    cached = getattr(ax, "_adapt_basemap", None)
+    if cached is not None and cached[0] == key:
+        _, array, extent, origin = cached
+        # aspect=ax.get_aspect() mirrors contextily (GH251): a bare imshow would
+        # force aspect='equal' and squash the radar panel on every redraw.
+        ax.imshow(array, extent=extent, origin=origin, aspect=ax.get_aspect(), alpha=0.6, zorder=0)
+        return
+
+    crs_str = f"+proj=aeqd +lat_0={lat} +lon_0={lon} +x_0=0 +y_0=0 +datum=WGS84 +units=km"
+    before = list(ax.images)
     try:
         ctx.add_basemap(
             ax,
@@ -415,3 +456,9 @@ def add_basemap(ax, ds, x_km, y_km) -> None:
         )
     except Exception as e:
         logger.warning("Basemap unavailable: %s", e)
+        return
+
+    added = [im for im in ax.images if im not in before]
+    if added:
+        im = added[-1]
+        ax._adapt_basemap = (key, im.get_array(), im.get_extent(), im.origin)

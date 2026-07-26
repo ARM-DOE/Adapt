@@ -96,9 +96,9 @@ class TestDetectionEdgeCases:
 class TestTrackerEdgeCases:
     @pytest.fixture
     def tracker(self, tracking_module_config):
-        from adapt.modules.tracking.module import RadarCellTracker
+        from adapt.modules.tracking.module import CellTracker
 
-        return RadarCellTracker(tracking_module_config)
+        return CellTracker(tracking_module_config)
 
     def _make_ds(self, labels, time):
         H, W = labels.shape
@@ -143,7 +143,7 @@ class TestTrackerEdgeCases:
 
     def test_tracker_uid_is_deterministic(self, tracking_module_config):
         """Same input frames produce the same cell_uid on every run."""
-        from adapt.modules.tracking.module import RadarCellTracker
+        from adapt.modules.tracking.module import CellTracker
 
         t1 = np.datetime64("2025-01-01T12:00:00")
         labels = np.zeros((6, 6), dtype=np.int32)
@@ -151,8 +151,8 @@ class TestTrackerEdgeCases:
         ds1 = self._make_ds(labels, t1)
         stats1 = self._stats(1, t1)
 
-        tracker_a = RadarCellTracker(tracking_module_config)
-        tracker_b = RadarCellTracker(tracking_module_config)
+        tracker_a = CellTracker(tracking_module_config)
+        tracker_b = CellTracker(tracking_module_config)
 
         tracked_a, _ = tracker_a.track(ds1, stats1)
         tracked_b, _ = tracker_b.track(ds1, stats1)

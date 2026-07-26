@@ -12,8 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from pydantic import ValidationError  # noqa: E402
-
+from adapt.configuration.schemas.errors import ConfigError  # noqa: E402
 from adapt.configuration.schemas.param import ParamConfig  # noqa: E402
 from adapt.configuration.schemas.resolve import resolve_config  # noqa: E402
 from adapt.configuration.schemas.user import UserConfig  # noqa: E402
@@ -26,8 +25,8 @@ def _resolve(user_dict):
 
 class TestPassthroughSections:
     def test_tracker_override_reaches_internal(self):
-        internal = _resolve({"radar": "KLOT", "tracker": {"match_cost_threshold": 0.5}})
-        assert internal.tracker.match_cost_threshold == 0.5
+        internal = _resolve({"radar": "KLOT", "tracker": {"minimum_candidate_overlap": 0.5}})
+        assert internal.tracker.minimum_candidate_overlap == 0.5
 
     def test_visualization_override_reaches_internal(self):
         internal = _resolve({"radar": "KLOT", "visualization": {"dpi": 123}})
@@ -44,5 +43,5 @@ class TestPassthroughSections:
 
 class TestValidationStillStrict:
     def test_unknown_key_in_section_raises(self):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ConfigError):
             _resolve({"radar": "KLOT", "tracker": {"bogus_param": 1}})

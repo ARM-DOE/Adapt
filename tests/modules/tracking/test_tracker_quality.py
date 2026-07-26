@@ -20,7 +20,7 @@ from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.resolve import resolve_config
 from adapt.configuration.schemas.user import UserConfig
 from adapt.execution.nodes.tracking import TrackingModule
-from adapt.modules.tracking.module import RadarCellTracker
+from adapt.modules.tracking.module import CellTracker
 from adapt.modules.tracking.projection import select_registration_labels
 
 pytestmark = pytest.mark.unit
@@ -104,7 +104,7 @@ def _one_cell_scan(time, x_pix, proj_labels=None):
 def test_gap_exceeded_terminates_and_restarts():
     """dt above max_tracking_gap_minutes terminates active tracks and starts fresh."""
     cfg = _make_config(max_tracking_gap_minutes=10.0)
-    tracker = RadarCellTracker(cfg)
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:00:00")
     t1 = np.datetime64("2024-01-01T12:20:00")  # 20 min > 10-min hard limit
@@ -128,7 +128,7 @@ def test_gap_exceeded_terminates_and_restarts():
 def test_non_monotonic_time_resets_without_crash():
     """A backwards scan time must not raise; it resets tracks instead."""
     cfg = _make_config()
-    tracker = RadarCellTracker(cfg)
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:05:00")
     t_back = np.datetime64("2024-01-01T12:00:00")  # earlier than t0
@@ -147,8 +147,8 @@ def test_non_monotonic_time_resets_without_crash():
 
 def test_normal_gap_still_continues():
     """A within-limit gap with an exact projection still produces CONTINUE."""
-    cfg = _make_config(max_tracking_gap_minutes=20.0, match_cost_threshold=0.0)
-    tracker = RadarCellTracker(cfg)
+    cfg = _make_config(max_tracking_gap_minutes=20.0)
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:00:00")
     t1 = np.datetime64("2024-01-01T12:05:00")  # 5 min < 20-min limit
@@ -169,8 +169,8 @@ def test_normal_gap_still_continues():
 def test_velocity_exceeded_rejects_match():
     """An over-speed candidate is rejected even with a perfect projection overlap."""
     # x=2 → x=6 is 4000 m in 300 s = 13.3 m/s; cap at 5 m/s rejects it.
-    cfg = _make_config(max_speed_ms=5.0, match_cost_threshold=0.0, max_tracking_gap_minutes=60.0)
-    tracker = RadarCellTracker(cfg)
+    cfg = _make_config(max_speed_ms=5.0, max_tracking_gap_minutes=60.0)
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:00:00")
     t1 = np.datetime64("2024-01-01T12:05:00")
@@ -194,10 +194,9 @@ def test_acceleration_exceeded_rejects_match():
     cfg = _make_config(
         max_speed_ms=40.0,
         max_speed_multiplier=2.0,
-        match_cost_threshold=0.0,
         max_tracking_gap_minutes=60.0,
     )
-    tracker = RadarCellTracker(cfg)
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:00:00")
     t1 = np.datetime64("2024-01-01T12:05:00")
@@ -215,17 +214,15 @@ def test_acceleration_exceeded_rejects_match():
 
 
 # ---------------------------------------------------------------------------
-# B4 — deterministic overlap-first matching
+# B4 — deterministic constraint propagation (no optimisation)
 # ---------------------------------------------------------------------------
 
 
-def test_unique_overlap_matches_despite_high_cost():
-    """A unique projected-hull overlap continues a track even when the cost-based
-    Hungarian post-filter (keep_cost) would have rejected it."""
-    # keep_cost is tiny so a non-zero-cost pair fails the Hungarian filter, but the
-    # projection covers the child fully (overlap 1.0 ≥ 0.3) → overlap-first matches.
-    cfg = _make_config(keep_cost_threshold=0.01, match_cost_threshold=0.0)
-    tracker = RadarCellTracker(cfg)
+def test_unique_candidate_resolved_by_constraint_propagation():
+    """A mutually-unique candidate is matched deterministically (PROPAGATED),
+    never entering Hungarian assignment."""
+    cfg = _make_config()
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:00:00")
     t1 = np.datetime64("2024-01-01T12:05:00")
@@ -234,18 +231,47 @@ def test_unique_overlap_matches_despite_high_cost():
     _, events0 = tracker.track(ds0, stats0)
     uid0 = str(events0[events0["event_type"] == "INITIATION"].iloc[0]["target_cell_uid"])
 
-    # Cell shifts one pixel and brightens → small but non-zero 4-term cost.
-    labels1 = np.zeros((8, 8), dtype=np.int32)
-    labels1[2:4, 3:5] = 1
-    stats1 = _cell_stats(
-        t1,
-        [{"id": 1, "area": 4.0, "cx": 3500.0, "cy": 2500.0, "mean_refl": 50.0, "max_refl": 55.0}],
-    )
-    ds1 = _synthetic_ds(t1, labels1, proj_labels=labels1)  # projection predicts new position
+    ds1, stats1 = _one_cell_scan(t1, 3)  # single cell, single prediction → unique
     tracked1, events1 = tracker.track(ds1, stats1)
 
-    assert (events1["event_type"] == "CONTINUE").sum() == 1, "overlap-first must continue the track"
+    cont = events1[events1["event_type"] == "CONTINUE"]
+    assert len(cont) == 1
+    assert cont.iloc[0]["match_method"] == "PROPAGATED", "unique match must not use Hungarian"
     assert str(tracked1.iloc[0]["cell_uid"]) == uid0, "continued cell keeps its uid"
+
+
+def test_ambiguous_group_uses_hungarian():
+    """Two projected hulls that each overlap both current cells form an ambiguous
+    2×2 component resolved by Hungarian (match_method == HUNGARIAN). The hulls are
+    kept disjoint by placing them on different rows (one label per pixel)."""
+    cfg = _make_config(max_tracking_gap_minutes=60.0)
+    tracker = CellTracker(cfg)
+
+    t0 = np.datetime64("2024-01-01T12:00:00")
+    t1 = np.datetime64("2024-01-01T12:05:00")
+
+    labels0 = np.zeros((6, 12), dtype=np.int32)
+    labels0[2:4, 3:5] = 1
+    labels0[2:4, 6:8] = 2
+    stats0 = _cell_stats(
+        t0,
+        [
+            {"id": 1, "area": 4.0, "cx": 3500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0},
+            {"id": 2, "area": 4.0, "cx": 6500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0},
+        ],
+    )
+    tracker.track(_synthetic_ds(t0, labels0, proj_labels=labels0), stats0)
+
+    labels1 = labels0.copy()  # current cells at the same positions
+    # Disjoint hulls on separate rows, each spanning both current cells' columns.
+    proj1 = np.zeros((6, 12), dtype=np.int32)
+    proj1[2, 3:8] = 1  # row 2 spans cols 3..7 → overlaps both cells' row 2
+    proj1[3, 3:8] = 2  # row 3 spans cols 3..7 → overlaps both cells' row 3
+    _, events1 = tracker.track(_synthetic_ds(t1, labels1, proj_labels=proj1), stats0)
+
+    cont = events1[events1["event_type"] == "CONTINUE"]
+    assert len(cont) >= 1
+    assert (cont["match_method"] == "HUNGARIAN").any(), "the ambiguous 2×2 must use Hungarian"
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +281,8 @@ def test_unique_overlap_matches_despite_high_cost():
 
 def test_continue_event_carries_diagnostics():
     """An accepted CONTINUE records overlap, iou, distance, speed, cost, method."""
-    cfg = _make_config(match_cost_threshold=0.0, max_tracking_gap_minutes=60.0)
-    tracker = RadarCellTracker(cfg)
+    cfg = _make_config(max_tracking_gap_minutes=60.0)
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:00:00")
     t1 = np.datetime64("2024-01-01T12:05:00")
@@ -270,23 +296,24 @@ def test_continue_event_carries_diagnostics():
     cont = events1[events1["event_type"] == "CONTINUE"]
     assert len(cont) == 1
     row = cont.iloc[0]
-    assert row["match_method"] in {"OVERLAP", "HUNGARIAN"}
-    assert 0.0 <= float(row["candidate_overlap"]) <= 1.0
-    assert 0.0 <= float(row["candidate_iou"]) <= 1.0
-    # cell moved 1000 m in 300 s ≈ 3.33 m/s
-    assert float(row["candidate_centroid_distance_m"]) == pytest.approx(1000.0, abs=1e-6)
-    assert float(row["candidate_speed_ms"]) == pytest.approx(1000.0 / 300.0, abs=1e-6)
+    assert row["match_method"] in {"PROPAGATED", "HUNGARIAN"}
+    assert 0.0 <= float(row["candidate_opc"]) <= 1.0
+    assert 0.0 <= float(row["candidate_ocp"]) <= 1.0
+    # cell moved 1000 m in 300 s ≈ 3.33 m/s (residual from the exact projection)
+    assert float(row["candidate_speed_ms"]) == pytest.approx(
+        float(row["candidate_centroid_distance_m"]) / 300.0, abs=1e-6
+    )
     assert pd.notna(row["candidate_final_cost"])
 
 
 def test_initiation_event_has_null_diagnostics():
     """INITIATION rows carry no candidate diagnostics."""
     cfg = _make_config()
-    tracker = RadarCellTracker(cfg)
+    tracker = CellTracker(cfg)
     ds0, stats0 = _one_cell_scan(np.datetime64("2024-01-01T12:00:00"), 2)
     _, events0 = tracker.track(ds0, stats0)
     init = events0[events0["event_type"] == "INITIATION"].iloc[0]
-    assert pd.isna(init["candidate_overlap"])
+    assert pd.isna(init["candidate_opc"])
     assert pd.isna(init["match_method"])
 
 
@@ -300,10 +327,9 @@ def test_heading_penalty_breaks_ambiguous_match_toward_consistent_track():
     match to the heading-consistent candidate instead of the reversed one."""
     cfg = _make_config(
         heading_change_penalty_weight=0.5,
-        match_cost_threshold=0.0,
         max_tracking_gap_minutes=60.0,
     )
-    tracker = RadarCellTracker(cfg)
+    tracker = CellTracker(cfg)
 
     t0 = np.datetime64("2024-01-01T12:00:00")
     t1 = np.datetime64("2024-01-01T12:05:00")

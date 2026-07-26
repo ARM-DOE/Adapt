@@ -18,6 +18,12 @@ class DetectModule(BaseModule):
     --------------
     grid_ds_2d : xr.Dataset
         2D Cartesian dataset (output of LoadModule).
+    grid_nc_path : str, optional
+        Path to the full 3D gridded NetCDF (also an ingest output). Read
+        opportunistically from the shared context — the pyart convective/
+        stratiform methods require it; ``threshold`` does not. Not declared as a
+        formal input so the graph is not gated on it (ingest omits it when
+        ``regridder.save_netcdf`` is off).
     config : InternalConfig
         Runtime configuration.
 
@@ -41,14 +47,16 @@ class DetectModule(BaseModule):
 
     @classmethod
     def build_config(cls, cfg) -> DetectionConfig:
+        seg = cfg.segmenter
+        method_params = getattr(seg, f"{seg.method}_params").model_dump()
         return DetectionConfig(
-            method=cfg.segmenter.method,
-            threshold=cfg.segmenter.threshold,
-            closing_kernel=cfg.segmenter.closing_kernel,
-            filter_by_size=cfg.segmenter.filter_by_size,
-            min_cellsize_gridpoint=cfg.segmenter.min_cellsize_gridpoint,
-            max_cellsize_gridpoint=cfg.segmenter.max_cellsize_gridpoint,
-            h_maxima=cfg.segmenter.h_maxima,
+            method=seg.method,
+            method_params=method_params,
+            closing_kernel=seg.closing_kernel,
+            filter_by_size=seg.filter_by_size,
+            min_cellsize_gridpoint=seg.min_cellsize_gridpoint,
+            max_cellsize_gridpoint=seg.max_cellsize_gridpoint,
+            h_maxima=seg.h_maxima,
             reflectivity_var=cfg.global_.var_names.reflectivity,
             labels_var=cfg.global_.var_names.cell_labels,
             z_level=cfg.global_.z_level,
@@ -60,11 +68,14 @@ class DetectModule(BaseModule):
     def run(self, context: dict) -> dict:
         config = context["detection_config"]
         ds_2d = context["grid_ds_2d"]
+        # Present only when ingest wrote the 3D grid (save_netcdf); the pyart
+        # methods require it and raise loudly if it is absent.
+        grid_nc_path = context.get("grid_nc_path")
 
         if self._segmenter is None:
             self._segmenter = RadarCellSegmenter(config)
 
-        segmented = self._segmenter.segment(ds_2d)
+        segmented = self._segmenter.segment(ds_2d, grid_nc_path)
         num_cells = int(segmented[config.labels_var].max().item())
 
         return {"segmented_ds": segmented, "num_cells": num_cells}

@@ -45,9 +45,10 @@ class TestDetectModuleBuildConfig:
         from adapt.execution.nodes.detection import DetectModule
 
         cfg = DetectModule.build_config(internal_config)
-        assert cfg.threshold == internal_config.segmenter.threshold
-        assert cfg.method == internal_config.segmenter.method
-        assert cfg.h_maxima == internal_config.segmenter.h_maxima
+        seg = internal_config.segmenter
+        assert cfg.method == seg.method
+        assert cfg.method_params == getattr(seg, f"{seg.method}_params").model_dump()
+        assert cfg.h_maxima == seg.h_maxima
 
     def test_build_config_injects_global_fields(self, internal_config):
         """Global fields (z_level, var names) come from the global section."""

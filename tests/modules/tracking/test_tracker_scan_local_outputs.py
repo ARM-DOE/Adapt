@@ -13,7 +13,7 @@ from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.resolve import resolve_config
 from adapt.configuration.schemas.user import UserConfig
 from adapt.execution.nodes.tracking import TrackingModule
-from adapt.modules.tracking.module import RadarCellTracker
+from adapt.modules.tracking.module import CellTracker
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def config():
 
 @pytest.fixture
 def tracker(config):
-    return RadarCellTracker(config)
+    return CellTracker(config)
 
 
 def _synthetic_ds(time, labels, refl=None, proj_labels=None):
@@ -252,25 +252,17 @@ def test_merge_event_emits_death(tracker):
 
 
 # ---------------------------------------------------------------------------
-# dt-scaling and gap-survival tests
+# geometry-first cost
 # ---------------------------------------------------------------------------
 
 
-def _make_config(
-    max_gap_minutes=10.0,
-    expected_speed_ms=30.0,
-    split_overlap=0.4,
-    match_cost_threshold=0.15,
-):
+def _make_config(split_overlap=0.4):
     import shutil
 
     d = tempfile.mkdtemp()
     try:
         param = ParamConfig()
         param.tracker.split_overlap_threshold = split_overlap
-        param.tracker.max_gap_minutes = max_gap_minutes
-        param.tracker.expected_speed_ms = expected_speed_ms
-        param.tracker.match_cost_threshold = match_cost_threshold
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
         return TrackingModule.build_config(internal)
@@ -278,149 +270,37 @@ def _make_config(
         shutil.rmtree(d, ignore_errors=True)
 
 
-def _ds_no_projections(time, labels, refl=None):
-    """Dataset with no cell_projections variable — simulates a missing scan."""
-    H, W = labels.shape
-    if refl is None:
-        refl = np.zeros((H, W), dtype=np.float32)
-        refl[labels > 0] = 40.0
-    ds = xr.Dataset(
-        {
-            "cell_labels": (["y", "x"], labels.astype(np.int32)),
-            "reflectivity": (["y", "x"], refl.astype(np.float32)),
-            "heading_x": (["y", "x"], np.zeros((H, W), dtype=np.float32)),
-            "heading_y": (["y", "x"], np.zeros((H, W), dtype=np.float32)),
-        },
-        coords={"y": np.arange(H) * 1000.0, "x": np.arange(W) * 1000.0},
-    )
-    return ds.assign_coords(time=time)
-
-
-def test_dpos_scales_with_dt():
-    """Shorter dt → higher D_pos → higher match cost for same displacement."""
-    # Cell moves 2000 m (2 pixels at 1000 m/pixel).
-    # expected_speed_ms=30 → max_displacement = 30 * dt_s.
-    # dt=300 s: D_pos = 2000/9000 ≈ 0.222   (higher cost)
-    # dt=600 s: D_pos = 2000/18000 ≈ 0.111  (lower cost)
-    # match_cost_threshold=0 disables pre-clamping so raw cost is preserved in events
-    cfg = _make_config(expected_speed_ms=30.0, match_cost_threshold=0.0)
+def test_prediction_residual_raises_continue_cost():
+    """Geometry-first cost = m + d/L: a projected hull that lands off the true cell
+    costs more than one predicting the position exactly (m≈0, d≈0 → cost≈0)."""
+    cfg = _make_config()
 
     t0 = np.datetime64("2024-01-01T12:00:00")
-    labels0 = np.zeros((8, 8), dtype=np.int32)
-    labels0[2:4, 2:4] = 1
+    t1 = np.datetime64("2024-01-01T12:05:00")
+    labels0 = np.zeros((10, 10), dtype=np.int32)
+    labels0[4:6, 2:4] = 1
     stats0 = _cell_stats(
         t0,
-        [{"id": 1, "area": 4.0, "cx": 2500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0}],
+        [{"id": 1, "area": 4.0, "cx": 2500.0, "cy": 4500.0, "mean_refl": 40.0, "max_refl": 45.0}],
     )
-
-    # T1 cell moved 2 pixels right; proj_labels at new position → full IoU overlap
-    labels1 = np.zeros((8, 8), dtype=np.int32)
-    labels1[2:4, 4:6] = 1
-    proj1 = labels1.copy()  # projection predicts exact new position
+    labels1 = np.zeros((10, 10), dtype=np.int32)
+    labels1[4:6, 4:6] = 1  # current cell at cols 4-5
     stats1 = _cell_stats(
-        None,  # time set per tracker below
-        [{"id": 1, "area": 4.0, "cx": 4500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0}],
+        t1,
+        [{"id": 1, "area": 4.0, "cx": 4500.0, "cy": 4500.0, "mean_refl": 40.0, "max_refl": 45.0}],
     )
 
-    def _run_tracker(t1):
-        tracker = RadarCellTracker(cfg)
+    def _cost(proj):
+        tracker = CellTracker(cfg)
         tracker.track(_synthetic_ds(t0, labels0, proj_labels=labels0), stats0)
-        s1 = stats1.copy()
-        s1["time"] = t1
-        s1["time_volume_start"] = t1
-        _, events = tracker.track(_synthetic_ds(t1, labels1, proj_labels=proj1), s1)
+        _, events = tracker.track(_synthetic_ds(t1, labels1, proj_labels=proj), stats1)
         cont = events[events["event_type"] == "CONTINUE"]
-        assert len(cont) == 1, f"Expected CONTINUE at {t1}"
+        assert len(cont) == 1
         return float(cont.iloc[0]["cost"])
 
-    t1_short = np.datetime64("2024-01-01T12:05:00")  # dt = 300 s
-    t1_long = np.datetime64("2024-01-01T12:10:00")  # dt = 600 s
+    exact = np.zeros((10, 10), dtype=np.int32)
+    exact[4:6, 4:6] = 1  # predicts the cell exactly → cost ≈ 0
+    offset = np.zeros((10, 10), dtype=np.int32)
+    offset[4:6, 3:5] = 1  # prediction off by one pixel → higher m and d
 
-    cost_short = _run_tracker(t1_short)
-    cost_long = _run_tracker(t1_long)
-
-    assert cost_short > cost_long, (
-        f"Expected cost_short ({cost_short:.4f}) > cost_long ({cost_long:.4f})"
-    )
-
-
-def test_track_survives_one_missing_scan():
-    """A track whose scan is missing stays dormant; no TERMINATION emitted within gap."""
-    cfg = _make_config(max_gap_minutes=15.0)
-    tracker = RadarCellTracker(cfg)
-
-    t0 = np.datetime64("2024-01-01T12:00:00")
-    t1 = np.datetime64("2024-01-01T12:05:00")  # 5 min later — no projections
-    t2 = np.datetime64("2024-01-01T12:10:00")  # 10 min from T0 — within 15-min gap
-
-    labels = np.zeros((8, 8), dtype=np.int32)
-    labels[2:4, 2:4] = 1
-    stats = _cell_stats(
-        t0,
-        [{"id": 1, "area": 4.0, "cx": 2500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0}],
-    )
-
-    _, events0 = tracker.track(_synthetic_ds(t0, labels, proj_labels=labels), stats)
-    uid_t0 = str(events0[events0["event_type"] == "INITIATION"].iloc[0]["target_cell_uid"])
-
-    # T1: no projections — should NOT terminate T0's track
-    stats1 = stats.copy()
-    stats1["time"] = t1
-    stats1["time_volume_start"] = t1
-    _, events1 = tracker.track(_ds_no_projections(t1, labels), stats1)
-
-    terminations_t1 = events1[events1["event_type"] == "TERMINATION"]
-    assert uid_t0 not in terminations_t1["source_cell_uid"].values, (
-        "Track was terminated at T1 despite being within the gap window"
-    )
-
-    # T2: valid projections — T0's track is still dormant (10 min < 15 min gap)
-    # T1 created a new track with label=1; use that as proj context
-    labels2 = labels.copy()
-    stats2 = stats.copy()
-    stats2["time"] = t2
-    stats2["time_volume_start"] = t2
-    _, events2 = tracker.track(_synthetic_ds(t2, labels2, proj_labels=labels), stats2)
-
-    terminations_t2 = events2[events2["event_type"] == "TERMINATION"]
-    assert uid_t0 not in terminations_t2["source_cell_uid"].values, (
-        "Track was terminated at T2 despite gap (10 min) < max_gap (15 min)"
-    )
-
-
-def test_track_terminated_after_gap_exceeded():
-    """A dormant track is terminated when the gap exceeds max_gap_minutes."""
-    cfg = _make_config(max_gap_minutes=5.0)  # 5-minute gap limit
-    tracker = RadarCellTracker(cfg)
-
-    t0 = np.datetime64("2024-01-01T12:00:00")
-    t1 = np.datetime64("2024-01-01T12:03:00")  # 3 min later — no projections (gap starts)
-    t2 = np.datetime64("2024-01-01T12:10:00")  # 10 min from T0 — exceeds 5-min gap
-
-    labels = np.zeros((8, 8), dtype=np.int32)
-    labels[2:4, 2:4] = 1
-    stats = _cell_stats(
-        t0,
-        [{"id": 1, "area": 4.0, "cx": 2500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0}],
-    )
-
-    _, events0 = tracker.track(_synthetic_ds(t0, labels, proj_labels=labels), stats)
-    uid_t0 = str(events0[events0["event_type"] == "INITIATION"].iloc[0]["target_cell_uid"])
-
-    # T1: no projections — moves T0's track to dormant (last_seen = epoch(T0))
-    stats1 = stats.copy()
-    stats1["time"] = t1
-    stats1["time_volume_start"] = t1
-    tracker.track(_ds_no_projections(t1, labels), stats1)
-
-    # T2: valid projections — gap from T0 to T2 is 10 min > 5-min limit → TERMINATION
-    labels2 = labels.copy()
-    stats2 = stats.copy()
-    stats2["time"] = t2
-    stats2["time_volume_start"] = t2
-    _, events2 = tracker.track(_synthetic_ds(t2, labels2, proj_labels=labels), stats2)
-
-    terminations = events2[events2["event_type"] == "TERMINATION"]
-    assert uid_t0 in terminations["source_cell_uid"].values, (
-        "Expected TERMINATION for dormant track after gap exceeded max_gap_minutes"
-    )
+    assert _cost(offset) > _cost(exact)

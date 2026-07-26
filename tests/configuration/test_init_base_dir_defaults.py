@@ -60,13 +60,15 @@ class TestInitBaseDirDefaults:
         """When config.yaml exists in CWD it is loaded as user config."""
         monkeypatch.chdir(tmp_path)
         config_yaml = tmp_path / "config.yaml"
-        config_yaml.write_text("threshold: 45.0\nradar: KLOT\nbase_dir: " + str(tmp_path) + "\n")
+        config_yaml.write_text(
+            "min_cellsize_gridpoint: 12\nradar: KLOT\nbase_dir: " + str(tmp_path) + "\n"
+        )
 
         from adapt.configuration.schemas.initialization import init_runtime_config
 
         config = init_runtime_config(_minimal_args())
 
-        assert config.segmenter.threshold == 45.0
+        assert config.segmenter.min_cellsize_gridpoint == 12
 
     def test_downloader_output_dir_matches_base_dir(self, tmp_path, monkeypatch):
         """downloader.output_dir must equal base_dir — the two errors from the crash."""

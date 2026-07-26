@@ -1,12 +1,11 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Custom Tkinter and matplotlib widgets for the dashboard — no business logic."""
+"""Custom matplotlib toolbar for the dashboard — no business logic."""
 
 import contextlib
 import logging
 import re
-import tkinter as tk
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,9 @@ if _HAS_MPL:
             t for t in NavigationToolbar2Tk.toolitems if t[0] not in ("Back", "Forward")
         )
 
-        def __init__(self, canvas, window, *, pack_toolbar=True, lat0=0.0, lon0=0.0):
+        def __init__(self, canvas, window, *, pack_toolbar=True, lat0=0.0, lon0=0.0, on_home=None):
             self._ltrans = None
+            self._on_home = on_home
             if _HAS_PROJ and (lat0 or lon0):
                 with contextlib.suppress(Exception):
                     self._ltrans = Transformer.from_crs(
@@ -45,6 +45,14 @@ if _HAS_MPL:
                         always_xy=True,
                     )
             super().__init__(canvas, window, pack_toolbar=pack_toolbar)
+
+        def home(self, *args):
+            """Reset to full extent. The app callback is authoritative — the
+            matplotlib nav-stack home can hold a zoomed view after the canvas
+            was rebuilt while zoomed, so it runs last and wins."""
+            super().home(*args)
+            if self._on_home is not None:
+                self._on_home()
 
         def set_message(self, s):
             if self._ltrans is not None and s and "x=" in s:
@@ -100,76 +108,3 @@ if _HAS_MPL:
             return safe.strip("_")
 
     _CompactToolbar = _CompactToolbarCls
-
-
-# ── Range slider widget ───────────────────────────────────────────────────────
-
-
-class _RangeSlider(tk.Canvas):
-    """Single-bar dual-handle range slider."""
-
-    _PAD = 10
-    _R = 7
-    _CY = 14
-
-    def __init__(self, parent, from_, to, lo_var, hi_var, fmt=".1f", **kw):
-        kw.setdefault("height", 28)
-        kw.setdefault("highlightthickness", 0)
-        super().__init__(parent, **kw)
-        self._from, self._to = from_, to
-        self._lo, self._hi = lo_var, hi_var
-        self._fmt = fmt
-        self._drag = None
-        self.bind("<Configure>", lambda _: self._draw())
-        self.bind("<ButtonPress-1>", self._on_press)
-        self.bind("<B1-Motion>", self._on_drag)
-        self.bind("<ButtonRelease-1>", lambda _: setattr(self, "_drag", None))
-        lo_var.trace_add("write", lambda *_: self._draw())
-        hi_var.trace_add("write", lambda *_: self._draw())
-
-    def _tw(self):
-        return max(self.winfo_width(), 160) - 2 * self._PAD
-
-    def _v2x(self, v):
-        ratio = (v - self._from) / (self._to - self._from)
-        return self._PAD + max(0.0, min(1.0, ratio)) * self._tw()
-
-    def _x2v(self, x):
-        ratio = (x - self._PAD) / self._tw()
-        return self._from + max(0.0, min(1.0, ratio)) * (self._to - self._from)
-
-    def _draw(self):
-        self.delete("all")
-        w = self._PAD + self._tw() + self._PAD
-        cy = self._CY
-        lx = self._v2x(self._lo.get())
-        hx = self._v2x(self._hi.get())
-        r = self._R
-        self.create_line(
-            self._PAD, cy, w - self._PAD, cy, fill="#cccccc", width=4, capstyle="round"
-        )
-        self.create_line(lx, cy, hx, cy, fill="#4a9eca", width=4, capstyle="round")
-        for x, tag in ((lx, "lo"), (hx, "hi")):
-            self.create_oval(
-                x - r,
-                cy - r,
-                x + r,
-                cy + r,
-                fill="#2980b9",
-                outline="#1a5276",
-                width=1,
-                tags=tag,
-            )
-
-    def _on_press(self, event):
-        lx = self._v2x(self._lo.get())
-        hx = self._v2x(self._hi.get())
-        self._drag = "lo" if abs(event.x - lx) <= abs(event.x - hx) else "hi"
-
-    def _on_drag(self, event):
-        val = self._x2v(event.x)
-        if self._drag == "lo":
-            self._lo.set(min(val, self._hi.get()))
-        else:
-            self._hi.set(max(val, self._lo.get()))
-        self.event_generate("<<RangeChanged>>")

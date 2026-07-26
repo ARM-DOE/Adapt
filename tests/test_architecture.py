@@ -220,7 +220,7 @@ _DEP_HOMES = {
     "contextily": ("visualization/", "consumers/"),
     "tkinter": ("consumers/",),
     "cv2": ("modules/projection/",),
-    "pyart": ("modules/ingest/",),
+    "pyart": ("modules/ingest/", "modules/detection/"),
     "boto3": ("downloaders/",),
     "botocore": ("downloaders/",),
     "networkx": ("modules/tracking/",),

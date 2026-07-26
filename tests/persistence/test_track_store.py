@@ -66,13 +66,12 @@ CREATE TABLE IF NOT EXISTS cell_events (
     cost              REAL,
     is_dominant       INTEGER NOT NULL DEFAULT 0,
     event_group_id    TEXT NOT NULL,
-    candidate_overlap                  REAL,
-    candidate_iou                      REAL,
+    candidate_opc                      REAL,
+    candidate_ocp                      REAL,
     candidate_centroid_distance_m      REAL,
     candidate_speed_ms                 REAL,
     candidate_heading_change_deg       REAL,
     candidate_area_ratio               REAL,
-    candidate_reflectivity_difference  REAL,
     candidate_final_cost               REAL,
     match_method                       TEXT
 );
@@ -702,6 +701,25 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
     count = reader._connect().execute("SELECT count(*) FROM cells_by_scan").fetchone()[0]
     reader.close()
     assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# Deterministic close — Bug: dashboard leaks a connection per read call
+# (RepositoryClient builds a throwaway TrackStore per call and never closes it,
+# so the FD is released only when GC happens to run → "Too many open files").
+# ---------------------------------------------------------------------------
+
+
+def test_trackstore_context_manager_closes_connection_on_exit(db_path):
+    """A TrackStore used as a context manager releases its SQLite connection at
+    block exit, so a per-call reader frees its file descriptor deterministically
+    instead of waiting for garbage collection."""
+    with TrackStore(db_path, readonly=True) as store:
+        conn = store._connect()
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")  # connection is closed after the with-block
 
 
 # ---------------------------------------------------------------------------

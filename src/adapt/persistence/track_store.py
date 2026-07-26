@@ -92,6 +92,12 @@ class TrackStore:
     # Connection
     # ------------------------------------------------------------------
 
+    def __enter__(self) -> TrackStore:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def _connect(self) -> sqlite3.Connection:
         if self._conn is None:
             if self._readonly:
@@ -528,13 +534,12 @@ class TrackStore:
         ]
         # Per-match diagnostics carried through verbatim when the tracker emits them.
         diagnostic_cols = [
-            "candidate_overlap",
-            "candidate_iou",
+            "candidate_opc",
+            "candidate_ocp",
             "candidate_centroid_distance_m",
             "candidate_speed_ms",
             "candidate_heading_change_deg",
             "candidate_area_ratio",
-            "candidate_reflectivity_difference",
             "candidate_final_cost",
             "match_method",
         ]
@@ -579,13 +584,12 @@ class TrackStore:
                     float(ev["cost"]) if pd.notna(ev.get("cost")) else None,
                     int(bool(ev.get("is_dominant", False))),
                     str(ev["event_group_id"]),
-                    _num(ev, "candidate_overlap"),
-                    _num(ev, "candidate_iou"),
+                    _num(ev, "candidate_opc"),
+                    _num(ev, "candidate_ocp"),
                     _num(ev, "candidate_centroid_distance_m"),
                     _num(ev, "candidate_speed_ms"),
                     _num(ev, "candidate_heading_change_deg"),
                     _num(ev, "candidate_area_ratio"),
-                    _num(ev, "candidate_reflectivity_difference"),
                     _num(ev, "candidate_final_cost"),
                     str(method) if pd.notna(method) else None,
                 )

@@ -24,12 +24,15 @@ def make_analysis_ds(
     cell_uids: list[str],
     minute_labels: dict[str, np.ndarray] | None = None,
     registration_uids: list[str] | None = None,
+    projection_labels: dict[str, np.ndarray] | None = None,
 ) -> xr.Dataset:
     """Analysis dataset as the processor persists it.
 
     ``minute_labels`` maps ISO minute → 2D prev-label mask; ``registration_uids``
     is the prev-scan label→uid LUT (index 1..n). Omit it to simulate the first
-    scan pair of a run (no previous tracking).
+    scan pair of a run (no previous tracking). ``projection_labels`` maps ISO
+    minute → 2D current-label mask for the forward-projection product (resolved
+    by the scan's own ``cell_uid`` LUT).
     """
     ds = xr.Dataset(
         {
@@ -39,10 +42,10 @@ def make_analysis_ds(
         },
         coords={"x": GRID, "y": GRID, "cell_label": np.arange(len(cell_uids) + 1)},
     )
+    t_prev = pd.Timestamp(prev_scan_time) if prev_scan_time is not None else None
+    t_curr = pd.Timestamp(scan_time)
     if minute_labels is not None:
         minutes = np.array(sorted(minute_labels), dtype="datetime64[ns]")
-        t_prev = pd.Timestamp(prev_scan_time)
-        t_curr = pd.Timestamp(scan_time)
         fractions = ((pd.DatetimeIndex(minutes) - t_prev) / (t_curr - t_prev)).to_numpy()
         ds["registration_minutes"] = xr.DataArray(
             np.stack([minute_labels[m] for m in sorted(minute_labels)]),
@@ -51,6 +54,18 @@ def make_analysis_ds(
         )
         ds = ds.assign_coords(interpolation_fraction=("minute", fractions.astype(np.float32)))
         ds.attrs["registration_source_scan_time"] = t_prev.isoformat()
+        ds.attrs["registration_target_scan_time"] = t_curr.isoformat()
+    if projection_labels is not None:
+        proj_minutes = np.array(sorted(projection_labels), dtype="datetime64[ns]")
+        proj_fractions = ((pd.DatetimeIndex(proj_minutes) - t_curr) / (t_curr - t_prev)).to_numpy()
+        ds["projection_minutes"] = xr.DataArray(
+            np.stack([projection_labels[m] for m in sorted(projection_labels)]),
+            dims=("projection_minute", "y", "x"),
+            coords={"projection_minute": proj_minutes, "y": GRID, "x": GRID},
+        )
+        ds = ds.assign_coords(
+            projection_fraction=("projection_minute", proj_fractions.astype(np.float32))
+        )
         ds.attrs["registration_target_scan_time"] = t_curr.isoformat()
     if registration_uids is not None:
         ds["registration_cell_uid"] = xr.DataArray(

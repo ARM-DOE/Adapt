@@ -17,6 +17,26 @@ from adapt.execution.nodes.detection import DetectModule
 from adapt.execution.nodes.ingest import LoadModule
 from adapt.execution.nodes.projection import ProjectionModule
 from adapt.execution.nodes.tracking import TrackingModule
+from adapt.persistence.registry import RepositoryRegistry
+
+# =============================================================================
+# Resource isolation
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _reset_repository_registry():
+    """Release the process-global registry cache after every test.
+
+    ``RepositoryRegistry.get_instance`` caches one WAL connection per repository
+    root for the process lifetime. Each test uses a fresh root, so without this
+    reset the cache accumulates open descriptors across the suite and exhausts a
+    low ``ulimit -n`` (macOS default 256). Closing per test keeps descriptors
+    flat and isolates registry state between tests.
+    """
+    yield
+    RepositoryRegistry.close_all()
+
 
 # =============================================================================
 # Configuration Fixtures (Pydantic-based)
@@ -50,7 +70,7 @@ def internal_config(param_config, temp_dir):
     --------
     >>> def test_segmenter_init(internal_config):
     ...     seg = RadarCellSegmenter(internal_config)
-    ...     assert seg.method == "threshold"
+    ...     assert seg.method == "conv_strat_raut"  # expert default
     """
     user = UserConfig(base_dir=str(temp_dir))
     return resolve_config(param_config, user, None)
@@ -102,8 +122,10 @@ def temp_dir():
 
 
 @pytest.fixture
-def detection_module_config(internal_config):
-    return DetectModule.build_config(internal_config)
+def detection_module_config(make_detection_config):
+    # Threshold segmenter: the pyart methods (now the default) need a 3D grid
+    # NetCDF, which these unit fixtures don't produce. Override method per-test.
+    return make_detection_config()
 
 
 @pytest.fixture
@@ -129,7 +151,19 @@ def ingest_module_config(internal_config):
 @pytest.fixture
 def make_detection_config(make_config):
     def _make(**kw):
-        return DetectModule.build_config(make_config(**kw))
+        # Default to the threshold method: unit fixtures build a 2D dataset
+        # only, while the pyart methods (the new expert default) classify the
+        # 3D grid NetCDF. Tests exercising pyart pass segmentation_method=...
+        kw.setdefault("segmentation_method", "threshold")
+        # `threshold` is no longer a user-facing field; apply it directly to the
+        # built config's method_params so existing call sites keep working.
+        threshold = kw.pop("threshold", None)
+        cfg = DetectModule.build_config(make_config(**kw))
+        if threshold is not None:
+            cfg = cfg.model_copy(
+                update={"method_params": {**cfg.method_params, "threshold": float(threshold)}}
+            )
+        return cfg
 
     return _make
 

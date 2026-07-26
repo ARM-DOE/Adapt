@@ -17,6 +17,26 @@ from adapt.execution.nodes.detection import DetectModule
 from adapt.execution.nodes.ingest import LoadModule
 from adapt.execution.nodes.projection import ProjectionModule
 from adapt.execution.nodes.tracking import TrackingModule
+from adapt.persistence.registry import RepositoryRegistry
+
+# =============================================================================
+# Resource isolation
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _reset_repository_registry():
+    """Release the process-global registry cache after every test.
+
+    ``RepositoryRegistry.get_instance`` caches one WAL connection per repository
+    root for the process lifetime. Each test uses a fresh root, so without this
+    reset the cache accumulates open descriptors across the suite and exhausts a
+    low ``ulimit -n`` (macOS default 256). Closing per test keeps descriptors
+    flat and isolates registry state between tests.
+    """
+    yield
+    RepositoryRegistry.close_all()
+
 
 # =============================================================================
 # Configuration Fixtures (Pydantic-based)

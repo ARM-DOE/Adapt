@@ -82,6 +82,20 @@ class RepositoryRegistry(SqliteStore):
                 _registry_cache[root_path] = cls(root_dir)
             return _registry_cache[root_path]
 
+    @classmethod
+    def close_all(cls) -> None:
+        """Close every cached registry connection and empty the cache.
+
+        Deterministic teardown for the per-root singleton: ``get_instance`` keeps
+        one WAL connection open per repository root for the process lifetime, so
+        without an explicit release the descriptors (db/wal/shm) accumulate. Call
+        at process shutdown, or between tests, to keep descriptor use flat.
+        """
+        with _cache_lock:
+            for registry in _registry_cache.values():
+                registry.close()
+            _registry_cache.clear()
+
     # =========================================================================
     # Radar Management
     # =========================================================================

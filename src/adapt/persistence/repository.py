@@ -977,9 +977,11 @@ class DataRepository:
         logger.info("Run %s finalized with status: %s", self.run_id, status)
 
     def close(self) -> None:
-        """Close catalog connections."""
+        """Close the catalog and execution-history connections it owns."""
         if self.catalog:
             self.catalog.close()
+        if self.history:
+            self.history.close()
         logger.debug("DataRepository closed")
 
     def __enter__(self):

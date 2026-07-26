@@ -64,6 +64,7 @@ from adapt.consumers.live._context import AppContext  # noqa: E402
 from adapt.consumers.live._movie_dialog import MovieDialog  # noqa: E402
 from adapt.consumers.live._pipeline import PipelineController  # noqa: E402
 from adapt.consumers.live._scan_view import ScanViewTab  # noqa: E402
+from adapt.consumers.live._timers import AfterHandles  # noqa: E402
 from adapt.consumers.live._tse_view import TargetSelectionTab  # noqa: E402
 
 # ── Main dashboard window ─────────────────────────────────────────────────────
@@ -99,8 +100,9 @@ class AdaptDashboard(tk.Tk):
         self._recent_repos: list[str] = _load_recent_repos()
         self._pipeline_badge: tk.Label | None = None
 
-        # Pending after() IDs — cancelled on close to prevent post-destroy callbacks
-        self._after_ids: list[str] = []
+        # after() ids — recurring timers keep one live id each (never accumulate);
+        # cancelled on close to prevent post-destroy callbacks.
+        self._timers = AfterHandles(self.after, self.after_cancel)
 
         # Status bar state
         self._status_base = "Idle"
@@ -118,8 +120,8 @@ class AdaptDashboard(tk.Tk):
         self.bind("<Control-o>", lambda _: self._browse_repo())
 
         # Start auto-refresh and status countdown ticker
-        self._after_ids.append(self.after(500, self._schedule_refresh))
-        self._after_ids.append(self.after(1000, self._status_tick))
+        self._timers.recurring("refresh", 500, self._schedule_refresh)
+        self._timers.recurring("status", 1000, self._status_tick)
 
         if repo:
             self.after(200, self._on_repo_changed)
@@ -352,7 +354,8 @@ class AdaptDashboard(tk.Tk):
         # Select radar with most recent run activity
         latest_radar = None
         if radars and repo.exists():
-            runs_all = RepositoryClient(repo).runs()
+            with contextlib.closing(RepositoryClient(repo)) as client:
+                runs_all = client.runs()
             if runs_all:
                 latest = max(runs_all, key=lambda r: r.start_time or datetime.min)
                 if latest.radar_id in radars:
@@ -488,7 +491,7 @@ class AdaptDashboard(tk.Tk):
         # adapt_registry.db is created by the pipeline on first run, so retry
         # until it appears (3 s, 8 s, 15 s, 25 s after launch).
         for delay_ms in (3000, 5000, 7000, 10000):
-            self._after_ids.append(self.after(delay_ms, self._on_repo_changed))
+            self._timers.oneshot(delay_ms, self._on_repo_changed)
 
     def _report_scan_time(self, dt) -> None:
         """Status-bar hook: tabs report the timestamp of the scan they rendered."""
@@ -499,18 +502,15 @@ class AdaptDashboard(tk.Tk):
         self._scan_view.on_close()
         self._tse_view.on_close()
         self._refresh_active = False
-        for after_id in self._after_ids:
-            with contextlib.suppress(Exception):
-                self.after_cancel(after_id)
-        self._after_ids.clear()
+        self._timers.cancel_all()
 
         plt.close("all")
 
         if not self._pipeline.confirm_close():
             # User cancelled — restore refresh loop and stay open.
             self._refresh_active = True
-            self._after_ids.append(self.after(POLL_MS, self._schedule_refresh))
-            self._after_ids.append(self.after(1000, self._status_tick))
+            self._timers.recurring("refresh", POLL_MS, self._schedule_refresh)
+            self._timers.recurring("status", 1000, self._status_tick)
             return
 
         self._pipeline.shutdown()
@@ -522,7 +522,7 @@ class AdaptDashboard(tk.Tk):
     def _schedule_refresh(self):
         if self._auto_refresh_var.get():
             self._refresh_all()
-        self._after_ids.append(self.after(POLL_MS, self._schedule_refresh))
+        self._timers.recurring("refresh", POLL_MS, self._schedule_refresh)
 
     def _status_tick(self):
         """Update status bar every second: scan time + countdown to next check."""
@@ -534,7 +534,7 @@ class AdaptDashboard(tk.Tk):
             f"{self._status_base}  |  Last scan: {scan_str}  |  Next check: {secs}s"
         )
         self._pipeline.update_badge()
-        self._after_ids.append(self.after(1000, self._status_tick))
+        self._timers.recurring("status", 1000, self._status_tick)
 
     def _refresh_all(self):
         repo = self._ctx.repo()

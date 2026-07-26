@@ -704,6 +704,25 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Deterministic close — Bug: dashboard leaks a connection per read call
+# (RepositoryClient builds a throwaway TrackStore per call and never closes it,
+# so the FD is released only when GC happens to run → "Too many open files").
+# ---------------------------------------------------------------------------
+
+
+def test_trackstore_context_manager_closes_connection_on_exit(db_path):
+    """A TrackStore used as a context manager releases its SQLite connection at
+    block exit, so a per-call reader frees its file descriptor deterministically
+    instead of waiting for garbage collection."""
+    with TrackStore(db_path, readonly=True) as store:
+        conn = store._connect()
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")  # connection is closed after the with-block
+
+
+# ---------------------------------------------------------------------------
 # Lifecycle duration
 # ---------------------------------------------------------------------------
 

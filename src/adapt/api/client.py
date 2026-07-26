@@ -166,12 +166,14 @@ class RepositoryClient:
     def tracks(self, run_id: str, radar: str | None = None) -> pd.DataFrame:
         """Return the full cell_tracks lifecycle-summary table for a run."""
         radar = self._resolve_radar(radar)
-        return self._track_store(radar).get_cell_tracks(run_id)
+        with self._track_store(radar) as store:
+            return store.get_cell_tracks(run_id)
 
     def track(self, run_id: str, cell_uid: str, radar: str | None = None) -> Track:
         """Return the lifecycle summary for a single track as a domain object."""
         radar = self._resolve_radar(radar)
-        df = self._track_store(radar).get_cell_tracks(run_id)
+        with self._track_store(radar) as store:
+            df = store.get_cell_tracks(run_id)
         row_df = df[df["cell_uid"] == cell_uid]
         if row_df.empty:
             raise ValueError(f"Track '{cell_uid}' not found in run '{run_id}'")
@@ -195,19 +197,22 @@ class RepositoryClient:
     def track_history(self, run_id: str, cell_uid: str, radar: str | None = None) -> pd.DataFrame:
         """Return all scan rows for one track, ordered by scan_time."""
         radar = self._resolve_radar(radar)
-        return self._track_store(radar).get_track_history(run_id, cell_uid)
+        with self._track_store(radar) as store:
+            return store.get_track_history(run_id, cell_uid)
 
     def track_events(self, run_id: str, cell_uid: str, radar: str | None = None) -> pd.DataFrame:
         """Return lineage events for one track."""
         radar = self._resolve_radar(radar)
-        return self._track_store(radar).get_cell_events(run_id, cell_uid)
+        with self._track_store(radar) as store:
+            return store.get_cell_events(run_id, cell_uid)
 
     def cells_at_scan(
         self, run_id: str, scan_time: datetime, radar: str | None = None
     ) -> pd.DataFrame:
         """Return all cells_by_scan rows for one scan of a run."""
         radar = self._resolve_radar(radar)
-        return self._track_store(radar).get_cells_by_scan(run_id, scan_time)
+        with self._track_store(radar) as store:
+            return store.get_cells_by_scan(run_id, scan_time)
 
     # =========================================================================
     # Generic table access (catalog-driven discovery)
@@ -375,8 +380,6 @@ class RepositoryClient:
             return self.tracks(run_id, radar=radar)
 
         radar = self._resolve_radar(radar)
-        store = self._track_store(radar)
-        conn = store._connect()
 
         where_clause, params = criteria.to_sql_where()
 
@@ -401,8 +404,8 @@ class RepositoryClient:
                 )
                 all_params.append(tag)
 
-        with store._lock:
-            rows = conn.execute(sql, all_params).fetchall()
+        with self._track_store(radar) as store, store._lock:
+            rows = store._connect().execute(sql, all_params).fetchall()
 
         if not rows:
             return pd.DataFrame()
@@ -510,8 +513,8 @@ class RepositoryClient:
         tracks: list[Track] = []
         run_id = scan_record.get("run_id")
         if run_id:
-            store = self._track_store(radar)
-            scan_cells = store.get_cells_by_scan(run_id, scan_time)
+            with self._track_store(radar) as store:
+                scan_cells = store.get_cells_by_scan(run_id, scan_time)
             for uid in scan_cells["cell_uid"].dropna().unique() if not scan_cells.empty else []:
                 with contextlib.suppress(Exception):
                     tracks.append(self.track(run_id, str(uid), radar=radar))

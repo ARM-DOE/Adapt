@@ -17,6 +17,7 @@ from matplotlib.quiver import Quiver
 from adapt.consumers.live._renderer import (
     OverlayData,
     ViewState,
+    data_extent_km,
     render_scan,
 )
 from adapt.consumers.live._renderer import (
@@ -186,6 +187,17 @@ def test_draw_track_overlays_uses_cell_df_when_history_empty():
     assert result["u1"]  # track drawn from cell_df rows
 
 
+# ── data_extent_km (toolbar Home → full extent) ──────────────────────────────
+
+
+def test_data_extent_km_returns_full_grid_bounds():
+    """The Home reset uses the dataset's own grid bounds (km) for full extent."""
+    ds = _make_ds()  # x, y = arange(10) * 1000 metres
+    (x0, x1), (y0, y1) = data_extent_km(ds)
+    assert (x0, x1) == (0.0, 9.0)
+    assert (y0, y1) == (0.0, 9.0)
+
+
 # ── add_basemap ─────────────────────────────────────────────────────────────
 
 
@@ -195,3 +207,111 @@ def test_add_basemap_is_no_op_when_contextily_unavailable(monkeypatch):
     monkeypatch.setattr(renderer_mod, "HAS_CTX", False)
     _, ax, _ = _fig_axes()
     renderer_mod.add_basemap(ax, ds=None, x_km=None, y_km=None)  # must not raise
+
+
+def _located_ds():
+    ds = _make_ds()
+    ds.attrs["radar_latitude"] = 35.0
+    ds.attrs["radar_longitude"] = -97.0
+    return ds
+
+
+def test_add_basemap_reuses_cached_tiles_for_unchanged_extent(monkeypatch):
+    """A redraw at the same extent must not re-fetch tiles (the loop hammered the
+    network every frame → socket exhaustion + UI hangs), yet the basemap must
+    still be drawn from cache after the axes is cleared."""
+    import adapt.consumers.live._renderer as renderer_mod
+
+    class _OneShotCtx:
+        class providers:
+            class OpenStreetMap:
+                Mapnik = "osm"
+
+        used = False
+
+        @classmethod
+        def add_basemap(cls, ax, **kw):
+            if cls.used:
+                raise AssertionError("basemap re-fetched for an unchanged extent")
+            cls.used = True
+            ax.imshow(np.zeros((2, 2, 4)), extent=(0.0, 9.0, 0.0, 9.0), zorder=0)
+
+    monkeypatch.setattr(renderer_mod, "HAS_CTX", True)
+    monkeypatch.setattr(renderer_mod, "ctx", _OneShotCtx)
+
+    _, ax, _ = _fig_axes()
+    x_km = np.arange(10.0)
+    y_km = np.arange(10.0)
+    ds = _located_ds()
+
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)
+    ax.clear()  # every render_scan frame clears the axes, wiping all artists
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)  # must reuse cache, never re-fetch
+
+    assert len(ax.images) == 1  # basemap still present on the redrawn frame
+
+
+def test_add_basemap_refetches_when_extent_changes(monkeypatch):
+    """A zoom (new extent) must fetch fresh tiles — the cache is keyed on extent,
+    so a changed view is never served stale tiles."""
+    import adapt.consumers.live._renderer as renderer_mod
+
+    fetched_extents = []
+
+    class _RecordingCtx:
+        class providers:
+            class OpenStreetMap:
+                Mapnik = "osm"
+
+        @staticmethod
+        def add_basemap(ax, **kw):
+            fetched_extents.append((ax.get_xlim(), ax.get_ylim()))
+            ax.imshow(np.zeros((2, 2, 4)), extent=(0.0, 1.0, 0.0, 1.0), zorder=0)
+
+    monkeypatch.setattr(renderer_mod, "HAS_CTX", True)
+    monkeypatch.setattr(renderer_mod, "ctx", _RecordingCtx)
+
+    _, ax, _ = _fig_axes()
+    ds = _located_ds()
+
+    renderer_mod.add_basemap(ax, ds, np.arange(10.0), np.arange(10.0))
+    renderer_mod.add_basemap(ax, ds, np.arange(10.0) * 2.0, np.arange(10.0))
+
+    assert len(fetched_extents) == 2  # each distinct extent fetched its own tiles
+
+
+def test_cached_basemap_replay_preserves_axes_aspect(monkeypatch):
+    """The map panel must not resize on redraw (loop / back / zoom). The cached
+    replay must keep the axes aspect exactly as the initial contextily fetch left
+    it — a bare imshow would force aspect='equal' and squash the radar panel."""
+    import adapt.consumers.live._renderer as renderer_mod
+
+    class _AspectPreservingCtx:  # mimics contextily add_basemap (GH251)
+        class providers:
+            class OpenStreetMap:
+                Mapnik = "osm"
+
+        @staticmethod
+        def add_basemap(ax, **kw):
+            ax.imshow(
+                np.zeros((2, 2, 4)),
+                extent=(0.0, 9.0, 0.0, 9.0),
+                aspect=ax.get_aspect(),  # contextily preserves the axes aspect
+                zorder=0,
+            )
+
+    monkeypatch.setattr(renderer_mod, "HAS_CTX", True)
+    monkeypatch.setattr(renderer_mod, "ctx", _AspectPreservingCtx)
+
+    _, ax, _ = _fig_axes()
+    ax.set_aspect("auto")  # the radar panel is auto (fills its GridSpec cell)
+    ds = _located_ds()
+    x_km = np.arange(10.0)
+    y_km = np.arange(10.0)
+
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)  # initial fetch
+    aspect_after_fetch = ax.get_aspect()
+    ax.clear()  # a redraw (loop step / back / zoom) clears the axes first
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)  # cached replay
+
+    assert ax.get_aspect() == aspect_after_fetch

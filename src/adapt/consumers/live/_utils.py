@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 _PID_FILE = Path.home() / ".adapt" / "pipeline.pid"
 _N_COLOR_SLOTS = 7
+
+
+def safe_close(resource, description: str, log: logging.Logger) -> None:
+    """Close *resource*, logging (not swallowing silently) any failure.
+
+    A close that raises must never abort the surrounding teardown/redraw, but a
+    silently-swallowed failure hides a leaked file/connection — the exact class
+    of bug behind the dashboard's "Too many open files". Log it so it is visible.
+    """
+    try:
+        resource.close()
+    except Exception:
+        log.warning("Failed to close %s", description, exc_info=True)
 
 
 @contextlib.contextmanager
@@ -170,13 +184,23 @@ def _visible_uids_in_scan(
     return {uid_map[lbl] for lbl in unique if lbl in uid_map}
 
 
+def format_run_labels(runs: Iterable) -> list[str]:
+    """Format run records as ``"run_id  (MM-DD HH:MM)"`` toolbar labels."""
+    labels = []
+    for run in runs:
+        mtime = run.start_time.strftime("%m-%d %H:%M") if run.start_time else "?"
+        labels.append(f"{run.run_id}  ({mtime})")
+    return labels
+
+
 def _list_radars(repo: Path) -> list:
     """Return all registered radar IDs from the repository registry."""
     if not (repo / "adapt_registry.db").exists():
         return []
     from adapt.api.client import RepositoryClient
 
-    return sorted(RepositoryClient(repo).radars())
+    with contextlib.closing(RepositoryClient(repo)) as client:
+        return sorted(client.radars())
 
 
 def _list_runs(repo: Path, radar: str | None = None) -> list:
@@ -191,9 +215,5 @@ def _list_runs(repo: Path, radar: str | None = None) -> list:
         return []
     from adapt.api.client import RepositoryClient
 
-    runs = RepositoryClient(repo).runs(radar=radar)
-    result = []
-    for run in runs:
-        mtime = run.start_time.strftime("%m-%d %H:%M") if run.start_time else "?"
-        result.append(f"{run.run_id}  ({mtime})")
-    return result
+    with contextlib.closing(RepositoryClient(repo)) as client:
+        return format_run_labels(client.runs(radar=radar))

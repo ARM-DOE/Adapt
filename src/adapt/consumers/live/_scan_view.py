@@ -27,10 +27,12 @@ from adapt.consumers.live._renderer import (
     _VAR_DEFAULTS,
     OverlayData,
     ViewState,
+    data_extent_km,
     draw_track_overlays,
     render_scan,
     scan_frame_drawer,
 )
+from adapt.consumers.live._timers import AfterHandles
 from adapt.consumers.live._timeseries import (
     apply_time_axis as _apply_time_axis_fn,
 )
@@ -53,7 +55,9 @@ from adapt.consumers.live._utils import (
     _apply_overflow_action,
     _cell_uid_disp,
     _next_free_color_slot,
+    safe_close,
 )
+from adapt.consumers.live._view_mode import Camera, ScanViewState
 from adapt.consumers.live._volume_stats import (
     load_track_volume_stats as _load_track_volume_stats_fn,
 )
@@ -117,7 +121,9 @@ class ScanViewTab:
         self._current_scan_ts = None  # pd.Timestamp of current displayed scan
         self._cell_contours: dict[int, object] = {}  # cell_id → contour set
         self._hover_canvas = None
-        self._saved_zoom: tuple | None = None  # (xlim, ylim) preserved across redraws
+
+        # Viewing mode + loop + camera — the single source of truth for this tab.
+        self._state = ScanViewState()
 
         # Multi-cell selection: uid → color_slot_index; persists across scan changes
         self._selected_cells: dict[str, int] = {}
@@ -132,14 +138,13 @@ class ScanViewTab:
         self._ts_axes: tuple | None = None  # (ax_area, ax_dbz, ax_reserved)
         self._cbar_ax: object | None = None  # pre-allocated colorbar axes
 
-        # NC loop animation state
-        self._nc_loop_running = False
+        # NC loop animation state (loop on/off lives in self._state)
         self._nc_loop_index = 0
         self._nc_loop_files: list = []
 
         self._last_rendered_nc = None  # path of last auto-rendered NC file
         self._all_nc_files: list = []  # full sorted NC list, updated every refresh
-        self._after_ids: list[str] = []
+        self._timers = AfterHandles(self.frame.after, self.frame.after_cancel)
 
         self._build_scan_tab(self.frame)
 
@@ -162,7 +167,7 @@ class ScanViewTab:
             self.scan_var.set(labels[-1])
 
         # Auto-update the live canvas when a new NC file appears
-        if not self._nc_loop_running and all_nc:
+        if not self._state.loop_running and all_nc:
             latest = all_nc[-1]
             repo = self.ctx.repo()
             radar = self.ctx.radar()
@@ -196,21 +201,20 @@ class ScanViewTab:
         return len(all_nc)
 
     def on_run_changed(self) -> None:
-        """Radar or run changed: drop the zoom so the next render shows full extent."""
-        self._saved_zoom = None
+        """Radar or run/pipeline changed: reset to the new area (full extent) and
+        drop the old run's tracks, so the pending refresh renders the new radar's
+        latest scan centered on it (never the previous radar's zoom)."""
+        self._clear_canvas(clear_selection=True, reset_camera=True)
 
     def show_latest_soon(self) -> None:
         """Render the newest scan shortly after the pending refresh settles."""
         if self._all_nc_files:
-            self._after_ids.append(self.frame.after(100, self.show_latest))
+            self._timers.oneshot(100, self.show_latest)
 
     def on_close(self) -> None:
         """Stop the loop and cancel pending callbacks before teardown."""
-        self._nc_loop_running = False
-        for after_id in self._after_ids:
-            with contextlib.suppress(Exception):
-                self.frame.after_cancel(after_id)
-        self._after_ids.clear()
+        self._state.loop_running = False
+        self._timers.cancel_all()
 
     def _build_scan_tab(self, tab: ttk.Frame) -> None:
 
@@ -232,21 +236,21 @@ class ScanViewTab:
 
         ttk.Label(ctrl1, text="Min:", font=("", 10)).pack(side="left", padx=(10, 0))
         self._plot_vmin = tk.StringVar(value="10")
-        ttk.Entry(ctrl1, textvariable=self._plot_vmin, width=6, font=("Courier", 10)).pack(
-            side="left", padx=2
-        )
+        vmin_entry = ttk.Entry(ctrl1, textvariable=self._plot_vmin, width=6, font=("Courier", 10))
+        vmin_entry.pack(side="left", padx=2)
+        vmin_entry.bind("<Return>", lambda _: self._redraw())  # apply range (replaces Update)
         ttk.Label(ctrl1, text="Max:", font=("", 10)).pack(side="left", padx=(4, 0))
         self._plot_vmax = tk.StringVar(value="60")
-        ttk.Entry(ctrl1, textvariable=self._plot_vmax, width=6, font=("Courier", 10)).pack(
-            side="left", padx=2
-        )
+        vmax_entry = ttk.Entry(ctrl1, textvariable=self._plot_vmax, width=6, font=("Courier", 10))
+        vmax_entry.pack(side="left", padx=2)
+        vmax_entry.bind("<Return>", lambda _: self._redraw())  # apply range (replaces Update)
 
         ttk.Separator(ctrl1, orient="vertical").pack(side="left", fill="y", padx=8)
         ttk.Button(ctrl1, text="Show Latest", command=self.show_latest).pack(side="left", padx=2)
         self.btn_loop = ttk.Button(ctrl1, text="Show Loop", command=self.toggle_loop)
         self.btn_loop.pack(side="left", padx=2)
-        ttk.Button(ctrl1, text="Update", command=self._redraw).pack(side="left", padx=2)
         ttk.Button(ctrl1, text="Clear Tracks", command=self._clear_canvas).pack(side="left", padx=2)
+        ttk.Button(ctrl1, text="Reset", command=self.reset_view).pack(side="left", padx=2)
         ttk.Button(ctrl1, text="⚙ Plot settings", command=self.open_plot_settings).pack(
             side="left", padx=(8, 2)
         )
@@ -379,12 +383,14 @@ class ScanViewTab:
         return p.stem
 
     def _on_var_changed(self):
-        """Update vmin/vmax defaults when variable selector changes."""
+        """Apply a variable change: refresh its vmin/vmax defaults and re-render
+        the current scan (replaces the removed Update button). Keeps zoom."""
         var = self._plot_var.get()
         if var in _VAR_DEFAULTS:
             vmin, vmax, _, _ = _VAR_DEFAULTS[var]
             self._plot_vmin.set(str(vmin))
             self._plot_vmax.set(str(vmax))
+        self._redraw()
 
     def _current_scan_idx(self) -> int:
         """Return index of the currently selected scan in _all_nc_files, or -1."""
@@ -429,6 +435,9 @@ class ScanViewTab:
                 parent=self.frame,
             )
             return
+        # Take ownership of the display: stop any running loop first.
+        self._state.enter_latest_scan()
+        self._sync_loop_button()
         self._load_cells_data(repo, radar)
         # Sync scan selector
         labels = [self._nc_label(p) for p in nc_files]
@@ -447,6 +456,34 @@ class ScanViewTab:
                 self._update_time_series_all()
         else:
             self._render_nc(nc_files[-1])
+
+    def _sync_loop_button(self) -> None:
+        """Make the loop button show the action it will perform, from view state."""
+        if hasattr(self, "btn_loop"):
+            self.btn_loop.config(text=self._state.loop_button_label())
+
+    def reset_view(self) -> None:
+        """Reset the Latest Scan view: stop the loop, clear selected tracks and
+        overlays, reset the camera to full extent, and re-render the newest scan.
+        Keeps the selected repo, radar, run, and variable."""
+        # reset_camera=True clears the zoom; clear_selection=True drops tracks;
+        # the teardown makes show_latest re-render fresh at full extent.
+        self._clear_canvas(clear_selection=True, reset_camera=True)
+        self.show_latest()
+
+    def home_view(self) -> None:
+        """Toolbar Home: reset the map zoom to full extent, keeping tracks and any
+        running loop. Sets the axes to the dataset's own bounds (authoritative)
+        so it works even when matplotlib's nav-stack home is a stale zoomed view."""
+        self._state.camera = Camera()
+        if self._current_nc_ds is None or self._canvas_refs is None:
+            return
+        (x0, x1), (y0, y1) = data_extent_km(self._current_nc_ds)
+        canvas, fig, _, _ = self._canvas_refs
+        ax = fig.axes[0]
+        ax.set_xlim(x0, x1)
+        ax.set_ylim(y0, y1)
+        canvas.draw_idle()
 
     # ── Live render (single frame) ────────────────────────────────────────────
 
@@ -473,6 +510,9 @@ class ScanViewTab:
         stem = sel.split("(")[-1].rstrip(")") if "(" in sel else ""
         nc_path = next((p for p in nc_files if p.stem == stem), nc_files[-1])
 
+        # Browsing to a chosen scan takes ownership of the display: stop any loop.
+        self._state.enter_selected_scan()
+        self._sync_loop_button()
         self._load_cells_data(repo, radar)
         if self._canvas_refs is not None:
             # Reuse existing canvas — preserves zoom and cell selection
@@ -530,9 +570,9 @@ class ScanViewTab:
     # ── NC loop render (cycle through N frames) ───────────────────────────────
 
     def toggle_loop(self):
-        if self._nc_loop_running:
-            self._nc_loop_running = False
-            self.btn_loop.config(text="Show Loop")
+        if self._state.loop_running:
+            self._state.enter_latest_scan()  # stop the loop
+            self._sync_loop_button()
             return
         repo = self.ctx.repo()
         radar = self.ctx.radar()
@@ -546,16 +586,16 @@ class ScanViewTab:
         self._load_cells_data(repo, radar)
         self._nc_loop_files = nc_files
         self._nc_loop_index = 0
-        self.btn_loop.config(text="Stop Loop")
         self._clear_canvas(clear_selection=False)  # keep selected cells so timeline stays populated
-        self._nc_loop_running = True  # set AFTER clear so _clear_canvas doesn't kill it
+        self._state.enter_loop()  # AFTER clear (which stops the loop) so the loop stays on
+        self._sync_loop_button()  # AFTER enter_loop → button reads "Stop Loop"
         self._render_nc(nc_files[0])
         self._nc_loop_index = 1
         dt = max(100, self._loop_dt_var.get())
-        self._after_ids.append(self.frame.after(dt, self._nc_loop_step))
+        self._timers.recurring("loop", dt, self._nc_loop_step)
 
     def _nc_loop_step(self):
-        if not self._nc_loop_running or not self._nc_loop_files:
+        if not self._state.loop_running or not self._nc_loop_files:
             return
         path = self._nc_loop_files[self._nc_loop_index % len(self._nc_loop_files)]
         self._nc_loop_index += 1
@@ -570,12 +610,17 @@ class ScanViewTab:
         else:
             self._render_nc(path)
         dt = max(100, self._loop_dt_var.get())
-        self._after_ids.append(self.frame.after(dt, self._nc_loop_step))
+        self._timers.recurring("loop", dt, self._nc_loop_step)
 
     # ── Core matplotlib rendering ─────────────────────────────────────────────
 
     def _render_nc(self, nc_path):
         """Create canvas + bottom strip, then render nc_path into a new figure."""
+        # Never build a second canvas over a live one — that would orphan the
+        # previous figure, toolbar, and Tk widgets. Callers enter here only with
+        # no canvas; this guard keeps that invariant even if a caller changes.
+        if self._canvas_refs is not None:
+            self._clear_canvas(clear_selection=False)
         ds_tmp = xr.open_dataset(nc_path)
         lat0 = ds_tmp.attrs.get("radar_latitude", ds_tmp.attrs.get("origin_latitude"))
         lon0 = ds_tmp.attrs.get("radar_longitude", ds_tmp.attrs.get("origin_longitude"))
@@ -618,7 +663,9 @@ class ScanViewTab:
         canvas.get_tk_widget().pack(fill="both", expand=True)
         canvas.draw()
 
-        toolbar = _CompactToolbar(canvas, bottom, pack_toolbar=False, lat0=lat0, lon0=lon0)
+        toolbar = _CompactToolbar(
+            canvas, bottom, pack_toolbar=False, lat0=lat0, lon0=lon0, on_home=self.home_view
+        )
         toolbar.update()
         toolbar.pack(side="left")
 
@@ -657,15 +704,14 @@ class ScanViewTab:
             ax = fig.axes[0]
 
         # Save zoom before render_scan's ax.clear() wipes it
-        if self._saved_zoom is not None or (ax.lines or ax.collections):
+        if self._state.camera.xlim is not None or (ax.lines or ax.collections):
             xlim, ylim = ax.get_xlim(), ax.get_ylim()
             if xlim != (0.0, 1.0) or ylim != (0.0, 1.0):
-                self._saved_zoom = (xlim, ylim)
+                self._state.save_camera(xlim, ylim)
 
         # Close previous dataset
         if self._current_nc_ds is not None and self._current_nc_ds is not ds:
-            with contextlib.suppress(Exception):
-                self._current_nc_ds.close()
+            safe_close(self._current_nc_ds, "scan dataset", logger)
         self._current_nc_ds = ds
         for var in self._hv.values():
             var.set("\u2014")
@@ -711,7 +757,8 @@ class ScanViewTab:
                 xlim, ylim = fig.axes[0].get_xlim(), fig.axes[0].get_ylim()
                 if xlim != (0.0, 1.0) or ylim != (0.0, 1.0):
                     return (xlim, ylim)
-        return self._saved_zoom
+        cam = self._state.camera
+        return (cam.xlim, cam.ylim) if cam.xlim is not None else None
 
     def _current_overlays(self) -> OverlayData:
         """Freeze the cell table + per-uid track histories for selected cells."""
@@ -1142,11 +1189,19 @@ class ScanViewTab:
             _, fig, _, _ = self._canvas_refs
             fig.canvas.draw_idle()
 
-    def _clear_canvas(self, clear_selection: bool = True):
-        self._nc_loop_running = False
+    def _clear_canvas(self, clear_selection: bool = True, reset_camera: bool = False):
+        # Zoom is sticky: only Reset and the toolbar Home reset the camera. Any
+        # other teardown (Clear Tracks, starting the loop) re-captures the live
+        # zoom first so rebuilding the canvas keeps the user's current view.
+        if reset_camera:
+            self._state.camera = Camera()
+        else:
+            zoom = self._current_zoom()
+            if zoom is not None:
+                self._state.save_camera(*zoom)
+        self._state.loop_running = False
         self._last_rendered_nc = None
-        if hasattr(self, "btn_loop"):
-            self.btn_loop.config(text="Show Loop")
+        self._sync_loop_button()
 
         if clear_selection:
             self._selected_cells = {}
@@ -1163,8 +1218,7 @@ class ScanViewTab:
             self._canvas_refs = None
             self._hover_canvas = None
         if self._current_nc_ds is not None:
-            with contextlib.suppress(Exception):
-                self._current_nc_ds.close()
+            safe_close(self._current_nc_ds, "scan dataset", logger)
             self._current_nc_ds = None
         self._cell_contours = {}
         for var in self._hv.values():

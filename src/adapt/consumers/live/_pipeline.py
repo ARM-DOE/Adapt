@@ -20,10 +20,12 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import IO
 
 from adapt.consumers.live._context import AppContext
+from adapt.consumers.live._timers import AfterHandles
 from adapt.consumers.live._utils import (
     _find_adapt_exe,
     _pipeline_pid_from_file,
     _pipeline_running,
+    safe_close,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,7 @@ class PipelineController:
         self._log_lines: list[str] = []
         self._log_file_handle: IO[str] | None = None
         self._active = True  # tail threads exit when this goes False
-        self._after_ids: list[str] = []
+        self._timers = AfterHandles(self.app.after, self.app.after_cancel)
         self._build_log_tab(nb)
 
     # ── Log tab ───────────────────────────────────────────────────────────────
@@ -517,8 +519,7 @@ class PipelineController:
         def _watch():
             proc.wait()
             if self._log_file_handle is not None:
-                with contextlib.suppress(Exception):
-                    self._log_file_handle.close()
+                safe_close(self._log_file_handle, "pipeline log file", logger)
                 self._log_file_handle = None
             self.app.after(0, self._on_proc_ended)
 
@@ -603,14 +604,14 @@ class PipelineController:
         self.update_badge()
         if LOG_FILE.exists():
             self._start_log_tail_from_end(LOG_FILE, last_n=200)
-        self._after_ids.append(self.app.after(2000, lambda: self._poll_external_pid(pid)))
+        self._timers.recurring("poll", 2000, lambda: self._poll_external_pid(pid))
 
     def _poll_external_pid(self, pid: int) -> None:
         """Poll every 2 s for death of an external (PID-file-only) pipeline."""
         if not _pipeline_running():
             self._on_proc_ended()
             return
-        self._after_ids.append(self.app.after(2000, lambda: self._poll_external_pid(pid)))
+        self._timers.recurring("poll", 2000, lambda: self._poll_external_pid(pid))
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
 
@@ -643,11 +644,7 @@ class PipelineController:
     def shutdown(self) -> None:
         """Stop tail threads, cancel polls, release the log handle."""
         self._active = False
-        for after_id in self._after_ids:
-            with contextlib.suppress(Exception):
-                self.app.after_cancel(after_id)
-        self._after_ids.clear()
+        self._timers.cancel_all()
         if self._log_file_handle is not None:
-            with contextlib.suppress(Exception):
-                self._log_file_handle.close()
+            safe_close(self._log_file_handle, "pipeline log file", logger)
             self._log_file_handle = None

@@ -35,19 +35,34 @@ logger = logging.getLogger(__name__)
 import tkinter as tk  # noqa: E402
 from tkinter import filedialog, messagebox, simpledialog, ttk  # noqa: E402
 
-# ── Matplotlib — the Tk backend must be selected before the tab modules import it
-import matplotlib  # noqa: E402
+# Matplotlib state is configured lazily to avoid importing the TkAgg backend at
+# module import time. That keeps headless CI and non-GUI code paths importable.
+plt: Any = None
+ScanViewTab: Any = None
+TargetSelectionTab: Any = None
 
-from adapt.consumers.live._utils import (  # noqa: E402
-    _list_radars,
-    _list_runs,
-    _pipeline_running,
-    _suppress_osx_stderr,
-)
 
-matplotlib.use("TkAgg")
-import cmweather  # noqa: E402, F401 — registers ChaseSpectral and other radar colormaps — must follow use()
-import matplotlib.pyplot as plt  # noqa: E402
+def _ensure_tkagg_backend() -> None:
+    global plt, ScanViewTab, TargetSelectionTab
+
+    if plt is not None:
+        return
+
+    import matplotlib  # noqa: E402
+
+    matplotlib.use("TkAgg")
+    import cmweather  # noqa: E402, F401 — registers ChaseSpectral and other radar colormaps — must follow use()
+    import matplotlib.pyplot as _plt  # noqa: E402
+
+    from adapt.consumers.live._scan_view import ScanViewTab as _ScanViewTab  # noqa: E402
+    from adapt.consumers.live._tse_view import (
+        TargetSelectionTab as _TargetSelectionTab,  # noqa: E402
+    )
+
+    plt = _plt
+    ScanViewTab = _ScanViewTab
+    TargetSelectionTab = _TargetSelectionTab
+
 
 # ── Repository access (Ring 2 consumer via the public API) ───────────────────
 from adapt.api.client import RepositoryClient  # noqa: E402
@@ -63,9 +78,13 @@ from adapt.consumers.live._config import (  # noqa: E402, I001
 from adapt.consumers.live._context import AppContext  # noqa: E402
 from adapt.consumers.live._movie_dialog import MovieDialog  # noqa: E402
 from adapt.consumers.live._pipeline import PipelineController  # noqa: E402
-from adapt.consumers.live._scan_view import ScanViewTab  # noqa: E402
 from adapt.consumers.live._timers import AfterHandles  # noqa: E402
-from adapt.consumers.live._tse_view import TargetSelectionTab  # noqa: E402
+from adapt.consumers.live._utils import (  # noqa: E402
+    _list_radars,
+    _list_runs,
+    _pipeline_running,
+    _suppress_osx_stderr,
+)
 
 # ── Main dashboard window ─────────────────────────────────────────────────────
 
@@ -84,6 +103,8 @@ class AdaptDashboard(tk.Tk):
 
         # Config — loaded from bundled JSON, optionally overridden by user-saved config
         self._cfg: dict = _load_default_config()
+
+        _ensure_tkagg_backend()
 
         # Session facts shared with tabs — tabs depend on this, never on the shell
         self._ctx = AppContext(

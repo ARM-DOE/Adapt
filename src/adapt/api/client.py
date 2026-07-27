@@ -46,6 +46,7 @@ from adapt.persistence.catalog import RadarCatalog
 from adapt.persistence.registry import RepositoryRegistry
 from adapt.persistence.tables import CORE_DATA_TABLES
 from adapt.persistence.track_store import TrackStore
+from adapt.utils.process import process_alive
 
 __all__ = ["RepositoryClient"]
 
@@ -671,13 +672,11 @@ class RepositoryClient:
         pid_file = Path.home() / ".adapt" / "pipeline.pid"
         if pid_file.exists():
             try:
-                import os
-
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)
+                pid = int(pid_file.read_text(encoding="utf-8").strip())
+            except (ValueError, OSError):
+                pid = None
+            if pid is not None and process_alive(pid):
                 return True
-            except (ValueError, OSError, ProcessLookupError):
-                pass
 
         try:
             radar = self._resolve_radar(radar)

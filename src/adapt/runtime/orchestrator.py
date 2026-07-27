@@ -341,7 +341,7 @@ class PipelineOrchestrator:
             root.removeHandler(handler)
 
         # File handler
-        fh = logging.FileHandler(log_path)
+        fh = logging.FileHandler(log_path, encoding="utf-8")
         fh.setLevel(log_level)
         fh.setFormatter(formatter)
         root.addHandler(fh)

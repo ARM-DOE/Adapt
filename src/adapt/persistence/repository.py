@@ -17,7 +17,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import sqlite3
 import tempfile
 import threading
@@ -928,8 +927,9 @@ class DataRepository:
             encoding = {var: {"zlib": True, "complevel": 4} for var in ds.data_vars}
             ds.to_netcdf(temp_path, encoding=encoding, engine="netcdf4")
 
-            # Atomic rename
-            shutil.move(temp_path, output_path)
+            # Atomic rename. os.replace (not shutil.move) — it is the only form
+            # that silently overwrites an existing destination on every platform.
+            os.replace(temp_path, output_path)
             logger.debug(f"Wrote NetCDF: {output_path}")
 
         except Exception:

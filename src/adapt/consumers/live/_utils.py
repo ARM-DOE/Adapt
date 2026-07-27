@@ -8,11 +8,12 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import shutil
 import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from adapt.utils.process import process_alive
 
 if TYPE_CHECKING:
     import numpy as np
@@ -44,7 +45,14 @@ def _suppress_osx_stderr():
     macOS ObjC runtime prints NSOpenPanel/NSWindow warnings directly to
     file-descriptor 2, bypassing Python's sys.stderr.  Only an OS-level
     dup2 can suppress them.
+
+    A no-op elsewhere: there is nothing to suppress, and under a GUI launcher
+    with no console (pythonw.exe) fd 2 may not exist, so os.dup(2) would raise.
     """
+    if sys.platform != "darwin":
+        yield
+        return
+
     devnull = os.open(os.devnull, os.O_WRONLY)
     saved = os.dup(2)
     os.dup2(devnull, 2)
@@ -80,14 +88,14 @@ def _cell_uid_disp(uid) -> str:
     return str(uid)[:4]
 
 
-def _find_adapt_exe() -> list:
-    """Return command list for adapt run-nexrad."""
-    candidate = Path(sys.executable).parent / "adapt"
-    if candidate.exists():
-        return [str(candidate)]
-    found = shutil.which("adapt")
-    if found:
-        return [found]
+def adapt_cmd() -> list[str]:
+    """Return the command prefix that runs the Adapt CLI.
+
+    Always the current interpreter plus ``-m``. Locating the console script on
+    disk is platform-specific (``bin/adapt`` vs ``Scripts\\adapt.exe``) and can
+    hand the OS a file it refuses to execute; ``-m`` is unambiguous everywhere
+    and guarantees the pipeline runs in the same environment as the dashboard.
+    """
     return [sys.executable, "-m", "adapt.cli"]
 
 
@@ -96,7 +104,7 @@ def _pipeline_pid_from_file() -> int | None:
     if not _PID_FILE.exists():
         return None
     try:
-        text = _PID_FILE.read_text().strip()
+        text = _PID_FILE.read_text(encoding="utf-8").strip()
         return int(text) if text else None
     except (ValueError, OSError):
         return None
@@ -104,29 +112,19 @@ def _pipeline_pid_from_file() -> int | None:
 
 def _pipeline_running() -> bool:
     """Return True if a pipeline PID file exists and the process is alive."""
-    if not _PID_FILE.exists():
+    pid = _pipeline_pid_from_file()
+    if pid is None:
+        if _PID_FILE.exists():
+            with contextlib.suppress(OSError):
+                _PID_FILE.unlink()  # empty or malformed — stale
         return False
-    try:
-        pid_text = _PID_FILE.read_text().strip()
-        if not pid_text:
-            _PID_FILE.unlink(missing_ok=True)
-            return False
-        pid = int(pid_text)
-        os.kill(pid, 0)
+
+    if process_alive(pid):
         return True
-    except ProcessLookupError:
-        with contextlib.suppress(OSError):
-            _PID_FILE.unlink()
-        return False
-    except PermissionError:
-        return True  # process exists, we just cannot signal it
-    except (ValueError, OSError):
-        with contextlib.suppress(OSError):
-            _PID_FILE.unlink()
-        return False
-    except Exception:
-        logger.exception("Failed to verify pipeline PID status")
-        return False
+
+    with contextlib.suppress(OSError):
+        _PID_FILE.unlink()
+    return False
 
 
 def _next_free_color_slot(selected: dict[str, int]) -> int | None:

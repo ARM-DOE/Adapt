@@ -225,7 +225,7 @@ class ExecutionHistory:
             "warnings": self.query_warnings(run_id=run_id),
             "errors": self.query_errors(run_id=run_id),
         }
-        Path(path).write_text(json.dumps(report, indent=2, default=str))
+        Path(path).write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
 
     # ── reads ─────────────────────────────────────────────────────────────────
     def query_runs(self, *, site: str | None = None, status: str | None = None) -> list[dict]:

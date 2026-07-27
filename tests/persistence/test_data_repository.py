@@ -246,6 +246,38 @@ class TestWriteOperations:
         assert "analysis" in filename
         assert filename.endswith(".nc")
 
+    def test_write_netcdf_replaces_existing_file(self, repository, sample_dataset):
+        """Re-writing the same output path must overwrite it, not fail.
+
+        The atomic write renames a temp file onto the destination. A rename that
+        refuses an existing destination (the Windows semantics of os.rename, which
+        shutil.move attempts first) makes every re-run of a scan fail.
+        """
+        scan_time = datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC)
+        first = repository.write_netcdf(
+            ds=sample_dataset,
+            product_type=ProductType.GRIDDED_NC,
+            scan_time=scan_time,
+            producer="loader",
+            filename_stem="same_stem",
+        )
+        path = Path(repository.get_artifact(first)["file_path"])
+
+        updated = sample_dataset.copy(deep=True)
+        updated["reflectivity"] += 100.0
+        repository.write_netcdf(
+            ds=updated,
+            product_type=ProductType.GRIDDED_NC,
+            scan_time=scan_time,
+            producer="loader",
+            filename_stem="same_stem",
+        )
+
+        with xr.open_dataset(path) as ds:
+            assert float(ds["reflectivity"].min()) == pytest.approx(
+                float(updated["reflectivity"].min()), abs=1e-3
+            )
+
     def test_write_netcdf_gridded(self, repository, sample_dataset):
         """Should write gridded NetCDF with correct path."""
         artifact_id = repository.write_netcdf(

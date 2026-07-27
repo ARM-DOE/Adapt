@@ -107,7 +107,7 @@ class TSEConfig(BaseModel):
 
 def load_config(path: str | Path) -> TSEConfig:
     """Load and validate a TSE YAML config. Raises on any invalid content."""
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     if not isinstance(raw, dict):
         raise ValueError(f"Config file {path} is empty or not a mapping")

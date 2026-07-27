@@ -44,6 +44,18 @@ def test_appends_jsonl(tmp_path):
     }
 
 
+def test_lines_are_separated_by_a_bare_newline(tmp_path):
+    """The selection log is a data product — its bytes must not vary by platform.
+
+    Text mode on Windows translates "\\n" to "\\r\\n", so the same run would emit a
+    different file there.
+    """
+    path = tmp_path / "selections.jsonl"
+    append_selection(path, _selection())
+    append_selection(path, _selection())
+    assert b"\r\n" not in path.read_bytes()
+
+
 def test_missing_parent_dir_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         append_selection(tmp_path / "no_such_dir" / "selections.jsonl", _selection())

@@ -28,5 +28,7 @@ def append_selection(path: str | Path, selection: TargetSelection) -> None:
         "observation_window": [to_scan_iso(t) for t in selection.observation_window],
         "predicted_hulls": selection.predicted_hulls,
     }
-    with open(path, "a") as f:
+    # newline="\n": the log is a data product, so its bytes must not depend on the
+    # platform's line-ending translation.
+    with open(path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(record) + "\n")

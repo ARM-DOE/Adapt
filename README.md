@@ -75,6 +75,13 @@ pip install arm-adapt
 adapt --help
 ```
 
+The environment must be **fresh**. Adapt's compiled dependencies (netCDF4, h5py,
+opencv, Py-ART) ship both conda and pip builds of the same native libraries;
+installing the pip wheels over existing conda builds mixes incompatible binaries
+and fails at import with a DLL error — on Windows, `[WinError 11] An attempt was
+made to load a program with an incorrect format`. On Windows, use 64-bit x86
+Python: several of these dependencies publish no ARM64 wheels.
+
 ---
 
 ## Quickstart

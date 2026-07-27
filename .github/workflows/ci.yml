@@ -7,6 +7,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:  # run the matrix on any branch without opening a PR
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
-        os: [ubuntu, macOS]
+        os: [ubuntu, macOS, windows]
 
     steps:
       - name: Checkout repository

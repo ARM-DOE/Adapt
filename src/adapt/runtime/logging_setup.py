@@ -132,7 +132,7 @@ def configure_logging(
         if log_path is None:
             raise ValueError("json_logs=True requires a log_path")
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_path)
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setFormatter(JsonFormatter())
         file_handler.addFilter(context_filter)
         root.addHandler(file_handler)

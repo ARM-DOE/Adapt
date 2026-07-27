@@ -4,12 +4,14 @@
 """Unit tests for dashboard pure helpers."""
 
 import logging
+import subprocess
+import sys
 from datetime import UTC, datetime
 
 import pytest
 
 from adapt.api.domain import Run
-from adapt.consumers.live._utils import format_run_labels, safe_close
+from adapt.consumers.live._utils import adapt_cmd, format_run_labels, safe_close
 
 pytestmark = pytest.mark.unit
 
@@ -34,6 +36,18 @@ def test_format_run_labels_shows_run_id_and_month_day_time():
 
 def test_format_run_labels_marks_missing_start_time():
     assert format_run_labels([_run("R1", None)]) == ["R1  (?)"]
+
+
+def test_adapt_cmd_is_runnable_on_this_interpreter():
+    """The dashboard must launch the pipeline with a command the OS can execute.
+
+    Resolving a bare, extensionless ``adapt`` next to the interpreter is a POSIX
+    assumption: on Windows console scripts are ``Scripts\\adapt.exe``, and handing
+    CreateProcess a non-executable file fails with WinError 11 (bad format).
+    Running the module through the current interpreter is correct everywhere.
+    """
+    assert adapt_cmd() == [sys.executable, "-m", "adapt.cli"]
+    assert subprocess.run([*adapt_cmd(), "--help"], capture_output=True).returncode == 0
 
 
 def test_safe_close_closes_an_open_resource(tmp_path):

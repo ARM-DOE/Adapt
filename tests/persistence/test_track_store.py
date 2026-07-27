@@ -622,7 +622,10 @@ def test_cell_uid_fields_are_persisted_and_returned(store):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(os.getuid() == 0, reason="chmod has no effect as root")
+@pytest.mark.skipif(
+    not hasattr(os, "getuid") or os.getuid() == 0,
+    reason="needs POSIX directory permissions (no getuid on Windows; chmod is a no-op as root)",
+)
 def test_trackstore_readonly_connects_without_write_access(db_path):
     """Dashboard opens TrackStore(db_path, readonly=True) on a directory it
     cannot write to. Must not raise OperationalError from WAL sidecar creation."""

@@ -10,6 +10,7 @@ import contextlib
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -22,9 +23,9 @@ from typing import IO
 from adapt.consumers.live._context import AppContext
 from adapt.consumers.live._timers import AfterHandles
 from adapt.consumers.live._utils import (
-    _find_adapt_exe,
     _pipeline_pid_from_file,
     _pipeline_running,
+    adapt_cmd,
     safe_close,
 )
 
@@ -32,6 +33,33 @@ logger = logging.getLogger(__name__)
 
 LOG_MAX = 500
 LOG_FILE = Path.home() / ".adapt" / "pipeline.log"
+
+
+def _detached_kwargs() -> dict:
+    """Popen kwargs that put the pipeline in its own signal group.
+
+    The dashboard must be able to stop the pipeline without stopping itself.
+    POSIX gets a new session; Windows has no sessions, so it gets a new process
+    group instead (``start_new_session`` is silently ignored there).
+    """
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _terminate_group(proc: subprocess.Popen, *, force: bool) -> None:
+    """Stop *proc* and its children; ``force`` escalates to an unblockable kill.
+
+    ``os.killpg``/``os.getpgid`` do not exist on Windows — calling them there
+    raises AttributeError, which an ``except OSError`` guard would not catch.
+    """
+    if sys.platform == "win32":
+        proc.kill() if force else proc.terminate()
+        return
+    try:
+        os.killpg(os.getpgid(proc.pid), 9 if force else 15)
+    except OSError:
+        proc.kill() if force else proc.terminate()
 
 
 class PipelineController:
@@ -284,9 +312,10 @@ class PipelineController:
             return
         try:
             result = subprocess.run(
-                [*_find_adapt_exe(), "config", str(config_file)],
+                [*adapt_cmd(), "config", str(config_file)],
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=15,
                 check=False,
             )
@@ -363,7 +392,7 @@ class PipelineController:
                     "Not found", f"Path does not exist:\n{path}", parent=wizard_win
                 )
                 return
-            cmd = [*_find_adapt_exe(), "run-nexrad", str(config_file)]
+            cmd = [*adapt_cmd(), "run-nexrad", str(config_file)]
             if radar:
                 cmd += ["--radar", radar]
             if mode == "historical":
@@ -388,7 +417,7 @@ class PipelineController:
                 )
                 return
             cmd = [
-                *_find_adapt_exe(),
+                *adapt_cmd(),
                 "run-nexrad",
                 str(config_file),
                 "--base-dir",
@@ -424,14 +453,16 @@ class PipelineController:
         """Launch adapt pipeline, redirect all output to LOG_FILE, start watcher threads."""
         self._log_lines = []
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = LOG_FILE.open("w", buffering=1)
+        # errors="replace": this handle receives a subprocess's raw output, which
+        # we do not control — an undecodable byte must not abort the launch.
+        log_handle = LOG_FILE.open("w", buffering=1, encoding="utf-8", errors="replace")
         self._log_file_handle = log_handle
         try:
             self._proc = subprocess.Popen(
                 cmd,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
-                start_new_session=True,
+                **_detached_kwargs(),
             )
         except Exception as exc:
             logger.exception("Failed to launch pipeline: %s", cmd)
@@ -452,7 +483,7 @@ class PipelineController:
 
         def _tail():
             try:
-                with log_path.open("r") as f:
+                with log_path.open("r", encoding="utf-8", errors="replace") as f:
                     f.seek(0, 2)  # start at end — don't replay old content
                     while self._active:
                         line = f.readline()
@@ -483,7 +514,7 @@ class PipelineController:
 
         def _tail_reconnect():
             try:
-                with log_path.open("r") as f:
+                with log_path.open("r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
                     for ln in lines[-last_n:]:
                         ln = ln.rstrip()
@@ -526,7 +557,7 @@ class PipelineController:
         threading.Thread(target=_watch, daemon=True, name="ProcWatcher").start()
 
     def stop(self) -> None:
-        """Send SIGTERM to the pipeline process group; SIGKILL after 5 s timeout."""
+        """Terminate the pipeline process group; escalate to a hard kill after 5 s."""
         if self._proc is None or self._proc.poll() is not None:
             # No owned process — try PID-file-only external process
             pid = _pipeline_pid_from_file()
@@ -539,17 +570,11 @@ class PipelineController:
         proc = self._proc
 
         def _do_kill():
-            try:
-                os.killpg(os.getpgid(proc.pid), 15)
-            except OSError:
-                proc.terminate()
+            _terminate_group(proc, force=False)
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(os.getpgid(proc.pid), 9)
-                except OSError:
-                    proc.kill()
+                _terminate_group(proc, force=True)
 
         threading.Thread(target=_do_kill, daemon=True).start()
 
@@ -633,10 +658,7 @@ class PipelineController:
             if choice is None:
                 return False
             if choice:
-                try:
-                    os.killpg(os.getpgid(self._proc.pid), 15)
-                except OSError:
-                    self._proc.terminate()
+                _terminate_group(self._proc, force=False)
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     self._proc.wait(timeout=3)
         return True

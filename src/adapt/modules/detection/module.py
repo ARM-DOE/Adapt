@@ -10,8 +10,9 @@ integer ID.
 Two families of methods build the *convective mask* that a shared watershed +
 size-filtering backend then labels into cells:
 
-- ``threshold`` — reflectivity above a fixed dBZ threshold (the original method).
-- pyart convective/stratiform classifiers — ``conv_strat_raut`` (default),
+- ``threshold`` (default) — reflectivity above a fixed dBZ threshold. Needs only
+  the 2D CAPPI, so it works on any run out of the box.
+- pyart convective/stratiform classifiers — ``conv_strat_raut``,
   ``conv_strat_yuter``, ``feature_detection``, ``steiner_conv_strat`` — the
   convective class(es) of a per-pixel classification, computed over the full 3D
   grid via ``pyart.xradar.Xgrid``.
@@ -156,8 +157,8 @@ class RadarCellSegmenter:
     Reads from a validated ``DetectionConfig``:
 
     - `method` : str
-        ``conv_strat_raut`` (default), ``conv_strat_yuter``,
-        ``feature_detection``, ``steiner_conv_strat`` or ``threshold``.
+        ``threshold`` (default), ``conv_strat_raut``, ``conv_strat_yuter``,
+        ``feature_detection`` or ``steiner_conv_strat``.
         The pyart methods require the 3D gridded NetCDF (``grid_nc_path``).
     - `method_params` : dict
         Resolved parameters for the selected method. For ``threshold`` this is

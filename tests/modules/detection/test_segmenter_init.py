@@ -18,11 +18,16 @@ def test_threshold_fixture_config(detection_module_config):
     assert seg.filter_by_size is True
 
 
-def test_expert_default_method_is_conv_strat_raut():
-    """The unconfigured expert default segmentation method is conv_strat_raut."""
+def test_expert_default_method_is_threshold():
+    """The unconfigured default segmentation method is threshold.
+
+    Threshold needs only the 2D CAPPI the pipeline always produces, so a plain
+    `adapt run-nexrad --radar KLOT` works with no further setup. The pyart
+    convective/stratiform classifiers stay available via `segmenter.method`.
+    """
     from adapt.configuration.schemas.param import ParamConfig
 
-    assert ParamConfig().segmenter.method == "conv_strat_raut"
+    assert ParamConfig().segmenter.method == "threshold"
 
 
 def test_custom_config(make_detection_config):

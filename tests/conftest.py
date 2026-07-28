@@ -70,7 +70,7 @@ def internal_config(param_config, temp_dir):
     --------
     >>> def test_segmenter_init(internal_config):
     ...     seg = RadarCellSegmenter(internal_config)
-    ...     assert seg.method == "conv_strat_raut"  # expert default
+    ...     assert seg.method == "threshold"  # expert default
     """
     user = UserConfig(base_dir=str(temp_dir))
     return resolve_config(param_config, user, None)
@@ -123,8 +123,8 @@ def temp_dir():
 
 @pytest.fixture
 def detection_module_config(make_detection_config):
-    # Threshold segmenter: the pyart methods (now the default) need a 3D grid
-    # NetCDF, which these unit fixtures don't produce. Override method per-test.
+    # Threshold segmenter (the default): the pyart methods need a 3D grid NetCDF,
+    # which these unit fixtures don't produce. Override method per-test for those.
     return make_detection_config()
 
 

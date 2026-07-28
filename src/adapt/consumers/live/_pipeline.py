@@ -9,8 +9,8 @@ pipeline concern here; this controller never touches the map tabs.
 import contextlib
 import logging
 import os
+import platform
 import subprocess
-import sys
 import threading
 import time
 import tkinter as tk
@@ -28,38 +28,12 @@ from adapt.consumers.live._utils import (
     adapt_cmd,
     safe_close,
 )
+from adapt.utils.process import detached_process_kwargs, terminate_process_tree
 
 logger = logging.getLogger(__name__)
 
 LOG_MAX = 500
 LOG_FILE = Path.home() / ".adapt" / "pipeline.log"
-
-
-def _detached_kwargs() -> dict:
-    """Popen kwargs that put the pipeline in its own signal group.
-
-    The dashboard must be able to stop the pipeline without stopping itself.
-    POSIX gets a new session; Windows has no sessions, so it gets a new process
-    group instead (``start_new_session`` is silently ignored there).
-    """
-    if sys.platform == "win32":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    return {"start_new_session": True}
-
-
-def _terminate_group(proc: subprocess.Popen, *, force: bool) -> None:
-    """Stop *proc* and its children; ``force`` escalates to an unblockable kill.
-
-    ``os.killpg``/``os.getpgid`` do not exist on Windows — calling them there
-    raises AttributeError, which an ``except OSError`` guard would not catch.
-    """
-    if sys.platform == "win32":
-        proc.kill() if force else proc.terminate()
-        return
-    try:
-        os.killpg(os.getpgid(proc.pid), 9 if force else 15)
-    except OSError:
-        proc.kill() if force else proc.terminate()
 
 
 class PipelineController:
@@ -462,13 +436,24 @@ class PipelineController:
                 cmd,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
-                **_detached_kwargs(),
+                **detached_process_kwargs(),
             )
         except Exception as exc:
             logger.exception("Failed to launch pipeline: %s", cmd)
             log_handle.close()
             self._log_file_handle = None
-            messagebox.showerror("Launch failed", str(exc), parent=self.app)
+            # Show the command and the environment, not just the exception: this
+            # is where an OS-level launch failure surfaces (on Windows a bad
+            # interpreter or dependency reads as a bare "[WinError N]"), and the
+            # command plus platform is what makes such a report actionable.
+            messagebox.showerror(
+                "Launch failed",
+                f"{type(exc).__name__}: {exc}\n\n"
+                f"Command: {' '.join(str(part) for part in cmd)}\n"
+                f"Platform: {platform.platform()} · Python {platform.python_version()}\n\n"
+                f"Full traceback in {LOG_FILE}",
+                parent=self.app,
+            )
             return
         self._append_log(
             f"[{datetime.now():%H:%M:%S}] Pipeline started (PID {self._proc.pid})", "info"
@@ -570,11 +555,11 @@ class PipelineController:
         proc = self._proc
 
         def _do_kill():
-            _terminate_group(proc, force=False)
+            terminate_process_tree(proc, force=False)
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                _terminate_group(proc, force=True)
+                terminate_process_tree(proc, force=True)
 
         threading.Thread(target=_do_kill, daemon=True).start()
 
@@ -658,7 +643,7 @@ class PipelineController:
             if choice is None:
                 return False
             if choice:
-                _terminate_group(self._proc, force=False)
+                terminate_process_tree(self._proc, force=False)
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     self._proc.wait(timeout=3)
         return True

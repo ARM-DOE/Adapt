@@ -94,5 +94,11 @@ def _scalar(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, str):
-        return value if _PLAIN.match(value) else f'"{value}"'
+        if _PLAIN.match(value):
+            return value
+        # Single-quoted, not double-quoted: YAML processes escape sequences inside
+        # double quotes, so a backslash would corrupt the value (and "\U" in a
+        # Windows path is a hard parse error). In single quotes the only escape is
+        # '' for a literal quote, so any path or free text round-trips verbatim.
+        return "'" + value.replace("'", "''") + "'"
     return str(value)

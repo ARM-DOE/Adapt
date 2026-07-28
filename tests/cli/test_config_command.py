@@ -5,6 +5,7 @@ from argparse import Namespace
 from pathlib import Path
 
 import pytest
+import yaml
 
 from adapt.cli import _config_cmd
 
@@ -46,10 +47,10 @@ def test_adapt_config_writes_absolute_path_when_cwd_is_missing(tmp_path, restore
     out = tmp_path / "config.yaml"
     _config_cmd(Namespace(output=str(out)))
 
-    text = out.read_text(encoding="utf-8")
-    assert f"base_dir: {tmp_path}" in text
+    cfg = yaml.safe_load(out.read_text(encoding="utf-8"))
+    assert cfg["base_dir"] == str(tmp_path)
     # Full generated config carries every core section.
-    assert "tracker:" in text and "segmenter:" in text
+    assert {"tracker", "segmenter"} <= cfg.keys()
 
 
 def test_adapt_config_sets_base_dir_to_output_parent(tmp_path):
@@ -59,5 +60,5 @@ def test_adapt_config_sets_base_dir_to_output_parent(tmp_path):
     _config_cmd(args)
 
     assert out_path.exists()
-    text = out_path.read_text(encoding="utf-8")
-    assert f"base_dir: {str(out_dir)}" in text
+    cfg = yaml.safe_load(out_path.read_text(encoding="utf-8"))
+    assert cfg["base_dir"] == str(out_dir)

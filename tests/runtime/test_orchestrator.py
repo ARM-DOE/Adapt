@@ -84,11 +84,13 @@ def test_orchestrator_initialization(pipeline_config):
 
 
 def test_orchestrator_logging_and_tracker(pipeline_config):
-    """Orchestrator sets up logging and file tracker."""
+    """Orchestrator sets up the file tracker."""
     orch = PipelineOrchestrator(pipeline_config)
-    orch._setup_logging()
-
-    assert orch.tracker is not None
+    orch._setup_tracker()
+    try:
+        assert orch.tracker is not None
+    finally:
+        orch.tracker.close()
 
 
 def test_orchestrator_builds_working_observability_from_config(pipeline_config):
@@ -147,15 +149,17 @@ def test_orchestrator_queue_types(pipeline_config):
 def test_orchestrator_tracker_database_path(pipeline_config):
     """Test orchestrator creates tracker with correct database path (after setup)."""
     orch = PipelineOrchestrator(pipeline_config)
-    orch._setup_logging()
-
-    assert orch.tracker is not None
-    # Database should be in RADAR_ID/analysis/ directory
-    radar_id = pipeline_config.downloader.radar
-    expected_db = (
-        orch.output_dirs["base"] / radar_id / "analysis" / f"{radar_id}_processing_tracker.db"
-    )
-    assert expected_db.exists()
+    orch._setup_tracker()
+    try:
+        assert orch.tracker is not None
+        # Database should be in RADAR_ID/analysis/ directory
+        radar_id = pipeline_config.downloader.radar
+        expected_db = (
+            orch.output_dirs["base"] / radar_id / "analysis" / f"{radar_id}_processing_tracker.db"
+        )
+        assert expected_db.exists()
+    finally:
+        orch.tracker.close()
 
 
 def test_orchestrator_mode_from_config(pipeline_config):

@@ -7,6 +7,7 @@ import json
 import shutil
 import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -92,7 +93,7 @@ class TestSqliteSchemaMigration:
         )
 
         artifact = repository.get_artifact(db_id)
-        with sqlite3.connect(artifact["file_path"]) as conn:
+        with closing(sqlite3.connect(artifact["file_path"])) as conn:
             info = {row[1]: row[2] for row in conn.execute("PRAGMA table_info('cells')")}
             stored = pd.read_sql("SELECT * FROM cells", conn)
 

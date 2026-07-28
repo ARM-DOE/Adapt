@@ -38,6 +38,21 @@ class TestRoundTrip:
         }
         assert loaded == expected
 
+    def test_roundtrip_preserves_backslashes(self):
+        r"""A Windows path must survive the round trip verbatim.
+
+        Every generated config carries base_dir, which on Windows looks like
+        C:\Users\...\run. Emitting that as a double-quoted YAML scalar makes the
+        backslash an escape character: the value is silently corrupted, and a
+        sequence like \U is a hard parse error — so `adapt config` would write a
+        config.yaml that `adapt run-nexrad` cannot read.
+        """
+        data = {
+            "base_dir": r"C:\Users\runneradmin\AppData\Local\Temp\nested",
+            "note": r"tab\there and a quote ' and a \"double\" quote",
+        }
+        assert yaml.safe_load(dump(data)) == data
+
 
 class TestComments:
     def test_scalar_description_becomes_inline_comment(self):

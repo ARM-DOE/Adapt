@@ -40,7 +40,9 @@ class FakeModule:
 
 @pytest.fixture
 def repo(tmp_path):
-    return DataRepository(run_id="testrun1", base_dir=tmp_path, radar="KTST")
+    repository = DataRepository(run_id="testrun1", base_dir=tmp_path, radar="KTST")
+    yield repository
+    repository.close()
 
 
 def _meta(repo):
@@ -210,7 +212,8 @@ def test_track_tables_write_happy_path(repo):
     OutputRouter(repo).persist(
         [mod], {"t": tracked, "e": events, "s": cell_stats, "a": adjacency}, _meta(repo)
     )
-    rows = TrackStore(repo.catalog.db_path).get_cells_by_scan(repo.run_id, SCAN_TIME)
+    with TrackStore(repo.catalog.db_path) as store:
+        rows = store.get_cells_by_scan(repo.run_id, SCAN_TIME)
     assert rows["cell_uid"].tolist() == ["U1"]
 
 

@@ -74,10 +74,29 @@ def _extend_catalog(db_path):
 
 
 @pytest.fixture
-def snapshot(tmp_path):
+def make_client():
+    """Build RepositoryClients and release every one at teardown.
+
+    A client holds catalog connections open; left unclosed they pin the
+    repository files, which on Windows blocks tmp_path cleanup.
+    """
+    clients = []
+
+    def _make(root):
+        client = RepositoryClient(root)
+        clients.append(client)
+        return client
+
+    yield _make
+    for client in clients:
+        client.close()
+
+
+@pytest.fixture
+def snapshot(tmp_path, make_client):
     root = build_synthetic_repo(tmp_path)
     _extend_catalog(root / RADAR / "catalog.db")
-    client = RepositoryClient(root)
+    client = make_client(root)
     return build_snapshot(client, RUN_ID, RADAR, growth_window_scans=4)
 
 
@@ -114,17 +133,17 @@ def test_single_scan_growth_zero(snapshot):
     assert _cell(snapshot, "uid_gamma").growth_rate_sqkm_per_min == 0.0
 
 
-def test_no_rows_raises(tmp_path):
+def test_no_rows_raises(tmp_path, make_client):
     root = build_synthetic_repo(tmp_path)
-    client = RepositoryClient(root)
+    client = make_client(root)
     with pytest.raises(ValueError, match="bogus"):
         build_snapshot(client, "bogus", RADAR, growth_window_scans=4)
 
 
-def test_at_replays_earlier_scan(tmp_path):
+def test_at_replays_earlier_scan(tmp_path, make_client):
     root = build_synthetic_repo(tmp_path)
     _extend_catalog(root / RADAR / "catalog.db")
-    client = RepositoryClient(root)
+    client = make_client(root)
     snap = build_snapshot(
         client,
         RUN_ID,
@@ -140,12 +159,12 @@ def test_at_replays_earlier_scan(tmp_path):
     assert beta.trajectory == ()
 
 
-def test_first_scan_projections_have_no_lead_times(tmp_path):
+def test_first_scan_projections_have_no_lead_times(tmp_path, make_client):
     # At the first scan of a run, projections exist but no scan cadence does:
     # the trajectory is empty (defined condition), not an error.
     root = build_synthetic_repo(tmp_path)
     _extend_catalog(root / RADAR / "catalog.db")
-    client = RepositoryClient(root)
+    client = make_client(root)
     snap = build_snapshot(
         client,
         RUN_ID,
@@ -156,10 +175,10 @@ def test_first_scan_projections_have_no_lead_times(tmp_path):
     assert _cell(snap, "uid_delta").trajectory == ()
 
 
-def test_at_before_first_scan_raises(tmp_path):
+def test_at_before_first_scan_raises(tmp_path, make_client):
     root = build_synthetic_repo(tmp_path)
     _extend_catalog(root / RADAR / "catalog.db")
-    client = RepositoryClient(root)
+    client = make_client(root)
     with pytest.raises(ValueError, match="2024-05-01"):
         build_snapshot(
             client,

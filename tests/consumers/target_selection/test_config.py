@@ -37,7 +37,7 @@ output:
 
 def _write(tmp_path, text):
     path = tmp_path / "tse.yaml"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return path
 
 

@@ -40,7 +40,7 @@ def test_contracts_persistence_imports_stdlib_only():
 
     import adapt.contracts.persistence as mod
 
-    with open(mod.__file__) as f:
+    with open(mod.__file__, encoding="utf-8") as f:
         tree = ast.parse(f.read())
     imported = set()
     for node in ast.walk(tree):

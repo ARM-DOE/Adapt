@@ -9,6 +9,7 @@ processor queue. AwsNexradDownloader (download) and LocalDirectorySource
 """
 
 import queue
+from pathlib import Path
 
 import pytest
 
@@ -86,7 +87,7 @@ class TestLocalDirectorySource:
             item = q.get()
             queued.append(item["path"] if isinstance(item, dict) else item)
 
-        assert [p.split("/")[-1] for p in queued] == [
+        assert [Path(p).name for p in queued] == [
             "KLOT20240101_120000_V06",
             "KLOT20240101_120500_V06",
         ]

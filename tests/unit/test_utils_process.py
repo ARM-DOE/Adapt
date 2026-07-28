@@ -30,6 +30,13 @@ def test_running_child_is_alive():
 
 
 def test_exited_process_is_not_alive():
+    """An exited process must read as gone even while its parent still holds it.
+
+    ``proc`` stays referenced on purpose: on Windows a process object survives
+    as long as any handle to it is open, so the Popen handle keeps the exited
+    child openable. A probe that only checks "can I open this PID?" answers
+    True forever, and the dashboard would never let a new pipeline start.
+    """
     proc = subprocess.Popen([sys.executable, "-c", ""])
     proc.wait(timeout=10)
     assert process_alive(proc.pid) is False

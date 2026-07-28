@@ -491,6 +491,35 @@ adapt<span class="w"> </span>--help
 </div>
 </section>
 <hr class="docutils" />
+<section id="developers-latest-source">
+<h2>Developers: latest source<a class="headerlink" href="#developers-latest-source" title="Link to this heading">#</a></h2>
+<p>To run the bleeding-edge version from <code class="docutils literal notranslate"><span class="pre">main</span></code> and have your edits take effect
+immediately, install the checkout in editable mode:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_dev<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
+conda<span class="w"> </span>activate<span class="w"> </span>adapt_dev
+git<span class="w"> </span>clone<span class="w"> </span>https://github.com/ARM-DOE/Adapt.git
+<span class="nb">cd</span><span class="w"> </span>Adapt
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+<p>Then generate a config, run the pipeline, and open the dashboard:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>config<span class="w">                              </span><span class="c1"># writes config.yaml in the current directory</span>
+adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w">             </span><span class="c1"># Ctrl-C to stop</span>
+adapt<span class="w"> </span>dashboard<span class="w">                           </span><span class="c1"># in a second terminal</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> with no argument writes <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> into the current directory
+and sets <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> to that same directory, so the three commands above work
+together with no paths to pass.</p>
+<blockquote>
+<div><p><strong>Use a fresh environment.</strong> Adapt’s compiled dependencies (netCDF4, h5py,
+opencv, Py-ART) ship both conda and pip builds of the same native libraries.
+Installing the pip wheels over existing conda builds mixes incompatible
+binaries and fails at import with a DLL error — on Windows,
+<code class="docutils literal notranslate"><span class="pre">[WinError</span> <span class="pre">11]</span> <span class="pre">An</span> <span class="pre">attempt</span> <span class="pre">was</span> <span class="pre">made</span> <span class="pre">to</span> <span class="pre">load</span> <span class="pre">a</span> <span class="pre">program</span> <span class="pre">with</span> <span class="pre">an</span> <span class="pre">incorrect</span> <span class="pre">format</span></code>.</p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
 <section id="optional-map-overlay-support">
 <h2>Optional: map overlay support<a class="headerlink" href="#optional-map-overlay-support" title="Link to this heading">#</a></h2>
 <p>By default Adapt installs without <code class="docutils literal notranslate"><span class="pre">contextily</span></code> and <code class="docutils literal notranslate"><span class="pre">pyproj</span></code>. The dashboard runs
@@ -602,6 +631,7 @@ and coordinate toolbar are disabled automatically).</p>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#requirements">Requirements</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#standard-installation">Standard installation</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#recommended-conda-environment">Recommended: conda environment</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#developers-latest-source">Developers: latest source</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#optional-map-overlay-support">Optional: map overlay support</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt-command-not-found"><code class="docutils literal notranslate"><span class="pre">adapt:</span> <span class="pre">command</span> <span class="pre">not</span> <span class="pre">found</span></code></a></li>

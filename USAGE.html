@@ -464,34 +464,33 @@ outputs, and configuring the system. For installation see <a class="reference in
 <hr class="docutils" />
 <section id="quick-start">
 <h2>Quick start<a class="headerlink" href="#quick-start" title="Link to this heading">#</a></h2>
-<p>Open <strong>two terminals</strong>, both with the conda environment active.</p>
-<p><strong>Terminal 1 — start the pipeline:</strong></p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output
+<p>Make a directory and work inside it — that directory becomes the repository.
+<code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> writes <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> there with <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> pointing at itself, and
+every other command reads it from the working directory, so there are no paths to
+pass:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mkdir<span class="w"> </span>my_case<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>my_case
+adapt<span class="w"> </span>config<span class="w">          </span><span class="c1"># skip if you already have a config.yaml here</span>
 </pre></div>
 </div>
-<p><strong>Terminal 2 — open the dashboard:</strong></p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>dashboard<span class="w"> </span>--repo<span class="w"> </span>~/adapt_output
-</pre></div>
-</div>
-<p>Click <strong>Show Latest</strong> in the dashboard to see the most recent processed scan.
-Press <code class="docutils literal notranslate"><span class="pre">Ctrl-C</span></code> in Terminal 1 to stop the pipeline.</p>
-</section>
-<hr class="docutils" />
-<section id="running-the-pipeline">
-<h2>Running the pipeline<a class="headerlink" href="#running-the-pipeline" title="Link to this heading">#</a></h2>
-<section id="real-time-mode">
-<h3>Real-time mode<a class="headerlink" href="#real-time-mode" title="Link to this heading">#</a></h3>
-<p>Continuously downloads and processes new scans as they are released:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output
+<p>Then, in <strong>two terminals</strong> with the conda environment active and both in that
+directory:</p>
+<p><strong>Terminal 1 — start the real-time pipeline:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT
 </pre></div>
 </div>
 <p>Replace <code class="docutils literal notranslate"><span class="pre">KLOT</span></code> with any 4-letter NEXRAD site code (e.g. <code class="docutils literal notranslate"><span class="pre">KDIX</span></code>, <code class="docutils literal notranslate"><span class="pre">KFTG</span></code>, <code class="docutils literal notranslate"><span class="pre">KAMX</span></code>).
 The pipeline runs until you press <code class="docutils literal notranslate"><span class="pre">Ctrl-C</span></code>.</p>
-</section>
+<p><strong>Terminal 2 — open the dashboard:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>dashboard
+</pre></div>
+</div>
+<p>Click <strong>Show Latest</strong> in the dashboard to see the most recent processed scan.
+Press <code class="docutils literal notranslate"><span class="pre">Ctrl-C</span></code> in Terminal 1 to stop the pipeline.</p>
+<hr class="docutils" />
 <section id="historical-mode">
 <h3>Historical mode<a class="headerlink" href="#historical-mode" title="Link to this heading">#</a></h3>
 <p>Process a fixed time window from the archive:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output<span class="w"> </span><span class="se">\</span>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--start-time<span class="w"> </span><span class="m">2025</span>-03-05T18:00:00<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--end-time<span class="w">   </span><span class="m">2025</span>-03-05T20:00:00
 </pre></div>
@@ -499,65 +498,54 @@ The pipeline runs until you press <code class="docutils literal notranslate"><sp
 <p>If <code class="docutils literal notranslate"><span class="pre">--start-time</span></code> or <code class="docutils literal notranslate"><span class="pre">--end-time</span></code> is provided, historical mode is selected
 automatically — you do not need <code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">historical</span></code>.</p>
 </section>
-<section id="using-a-custom-configuration">
-<h3>Using a custom configuration<a class="headerlink" href="#using-a-custom-configuration" title="Link to this heading">#</a></h3>
-<p>Generate a template, edit it, then pass it as the first argument:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>config<span class="w"> </span>my_config.yaml<span class="w">        </span><span class="c1"># generate template with all options</span>
-adapt<span class="w"> </span>run-nexrad<span class="w"> </span>my_config.yaml<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output
+<section id="using-a-configuration-from-elsewhere">
+<h3>Using a configuration from elsewhere<a class="headerlink" href="#using-a-configuration-from-elsewhere" title="Link to this heading">#</a></h3>
+<p>A <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> in the working directory is picked up automatically. A config
+kept anywhere else, or under another name, is passed as the first argument:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>config<span class="w"> </span>my_config.yaml<span class="w">        </span><span class="c1"># generate a template with all options</span>
+adapt<span class="w"> </span>run-nexrad<span class="w"> </span>my_config.yaml<span class="w"> </span>--radar<span class="w"> </span>KLOT
 </pre></div>
 </div>
 </section>
 <section id="verbose-logging">
 <h3>Verbose logging<a class="headerlink" href="#verbose-logging" title="Link to this heading">#</a></h3>
 <p>Add <code class="docutils literal notranslate"><span class="pre">-v</span></code> to see debug-level output, including per-scan timing and any errors:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output<span class="w"> </span>-v
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>-v
 </pre></div>
 </div>
 </section>
-</section>
-<hr class="docutils" />
-<section id="configuration">
-<h2>Configuration<a class="headerlink" href="#configuration" title="Link to this heading">#</a></h2>
-<p>Running without a config file uses built-in defaults. Key parameters:</p>
-<div class="pst-scrollable-table-container"><table class="table">
-<thead>
-<tr class="row-odd"><th class="head"><p>Parameter</p></th>
-<th class="head"><p>Default</p></th>
-<th class="head"><p>Description</p></th>
-</tr>
-</thead>
-<tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">regridder.grid_shape</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">[41,</span> <span class="pre">201,</span> <span class="pre">201]</span></code></p></td>
-<td><p>Grid points (nz, ny, nx)</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">regridder.grid_limits</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">±100</span> <span class="pre">km</span></code></p></td>
-<td><p>Horizontal extent from radar</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">segmenter.threshold</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">30</span> <span class="pre">dBZ</span></code></p></td>
-<td><p>Reflectivity threshold for cell detection</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">segmenter.min_cellsize_gridpoint</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">5</span></code></p></td>
-<td><p>Minimum cell size in grid points</p></td>
-</tr>
-</tbody>
-</table>
+<section id="all-options">
+<h3>All options<a class="headerlink" href="#all-options" title="Link to this heading">#</a></h3>
+<p>Each command lists its own flags:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>--help
+adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--help
+adapt<span class="w"> </span>config<span class="w"> </span>--help
+adapt<span class="w"> </span>dashboard<span class="w"> </span>--help
+</pre></div>
 </div>
-<p>Generate a fully documented template with all available options:</p>
+<hr class="docutils" />
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>config<span class="w"> </span>my_config.yaml
 </pre></div>
 </div>
+</section>
 </section>
 <hr class="docutils" />
 <section id="dashboard">
 <h2>Dashboard<a class="headerlink" href="#dashboard" title="Link to this heading">#</a></h2>
 <p>Launch in a second terminal while the pipeline is running:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>dashboard<span class="w"> </span>--repo<span class="w"> </span>~/adapt_output
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>dashboard
 </pre></div>
 </div>
+<p>With no arguments it opens the working directory’s repository if it is one, and
+otherwise the repository you used last. Either way the toolbar’s repository
+selector switches to any other, so <code class="docutils literal notranslate"><span class="pre">--repo</span></code> is never required — it just
+pre-populates that field:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>dashboard<span class="w"> </span>--repo<span class="w"> </span>/data/radar
+</pre></div>
+</div>
+<p>A directory only counts as a repository once the pipeline has run in it and
+created <code class="docutils literal notranslate"><span class="pre">adapt_registry.db</span></code>. Start the dashboard before that and it falls back
+to your previous repository; use the selector, or just wait for the first scan.</p>
 <p>The dashboard is <strong>read-only</strong> — it does not affect the pipeline.</p>
 <section id="controls">
 <h3>Controls<a class="headerlink" href="#controls" title="Link to this heading">#</a></h3>
@@ -603,8 +591,9 @@ internet and may take a few seconds.</p>
 <hr class="docutils" />
 <section id="outputs">
 <h2>Outputs<a class="headerlink" href="#outputs" title="Link to this heading">#</a></h2>
-<p>All pipeline artifacts are written under <code class="docutils literal notranslate"><span class="pre">--base-dir</span></code>:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>~/adapt_output/
+<p>All pipeline artifacts are written under <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> — the repository root,
+which is the working directory unless the config or <code class="docutils literal notranslate"><span class="pre">--base-dir</span></code> says otherwise:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>my_case/
 ├── KLOT/
 │   ├── nexrad/                        # raw Level-II files from AWS
 │   ├── gridnc/
@@ -633,7 +622,7 @@ internet and may take a few seconds.</p>
 use the <a class="reference internal" href="api/client.html"><span class="std std-doc">DataClient API</span></a>:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">adapt.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataClient</span>
 
-<span class="n">client</span> <span class="o">=</span> <span class="n">DataClient</span><span class="p">(</span><span class="s2">&quot;~/adapt_output&quot;</span><span class="p">)</span>
+<span class="n">client</span> <span class="o">=</span> <span class="n">DataClient</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>  <span class="c1"># or any repository path</span>
 <span class="n">df</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">latest</span><span class="p">(</span><span class="s2">&quot;cells_by_scan&quot;</span><span class="p">,</span> <span class="n">radar</span><span class="o">=</span><span class="s2">&quot;KLOT&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
@@ -663,7 +652,7 @@ new area is slow. Check your network connection. Install if missing:</p>
 <section id="pipeline-error-on-first-scan">
 <h3>Pipeline error on first scan<a class="headerlink" href="#pipeline-error-on-first-scan" title="Link to this heading">#</a></h3>
 <p>Re-run with <code class="docutils literal notranslate"><span class="pre">-v</span></code> to see the full traceback:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output<span class="w"> </span>-v
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>-v
 </pre></div>
 </div>
 </section>
@@ -724,15 +713,13 @@ new area is slow. Check your network connection. Install if missing:</p>
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quick-start">Quick start</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#running-the-pipeline">Running the pipeline</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#real-time-mode">Real-time mode</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quick-start">Quick start</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#historical-mode">Historical mode</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#using-a-custom-configuration">Using a custom configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#using-a-configuration-from-elsewhere">Using a configuration from elsewhere</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#verbose-logging">Verbose logging</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#all-options">All options</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#dashboard">Dashboard</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#controls">Controls</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#basemap">Basemap</a></li>

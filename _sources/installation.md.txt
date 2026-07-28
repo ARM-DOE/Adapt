@@ -36,6 +36,39 @@ adapt --help
 
 ---
 
+## Developers: latest source
+
+To run the bleeding-edge version from `main` and have your edits take effect
+immediately, install the checkout in editable mode:
+
+```bash
+conda create -n adapt_dev python=3.13 -y
+conda activate adapt_dev
+git clone https://github.com/ARM-DOE/Adapt.git
+cd Adapt
+pip install -e .
+```
+
+Then generate a config, run the pipeline, and open the dashboard:
+
+```bash
+adapt config                              # writes config.yaml in the current directory
+adapt run-nexrad --radar KLOT             # Ctrl-C to stop
+adapt dashboard                           # in a second terminal
+```
+
+`adapt config` with no argument writes `config.yaml` into the current directory
+and sets `base_dir` to that same directory, so the three commands above work
+together with no paths to pass.
+
+> **Use a fresh environment.** Adapt's compiled dependencies (netCDF4, h5py,
+> opencv, Py-ART) ship both conda and pip builds of the same native libraries.
+> Installing the pip wheels over existing conda builds mixes incompatible
+> binaries and fails at import with a DLL error — on Windows,
+> `[WinError 11] An attempt was made to load a program with an incorrect format`.
+
+---
+
 ## Optional: map overlay support
 
 By default Adapt installs without `contextily` and `pyproj`. The dashboard runs

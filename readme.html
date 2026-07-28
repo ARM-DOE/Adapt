@@ -490,17 +490,36 @@ opencv, Py-ART) ship both conda and pip builds of the same native libraries;
 installing the pip wheels over existing conda builds mixes incompatible binaries
 and fails at import with a DLL error — on Windows, <code class="docutils literal notranslate"><span class="pre">[WinError</span> <span class="pre">11]</span> <span class="pre">An</span> <span class="pre">attempt</span> <span class="pre">was</span> <span class="pre">made</span> <span class="pre">to</span> <span class="pre">load</span> <span class="pre">a</span> <span class="pre">program</span> <span class="pre">with</span> <span class="pre">an</span> <span class="pre">incorrect</span> <span class="pre">format</span></code>. On Windows, use 64-bit x86
 Python: several of these dependencies publish no ARM64 wheels.</p>
+<section id="developers-latest-source">
+<h3>Developers — latest source<a class="headerlink" href="#developers-latest-source" title="Link to this heading">#</a></h3>
+<p>To run the bleeding-edge version and have your edits take effect immediately:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_env1<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
+conda<span class="w"> </span>activate<span class="w"> </span>adapt_env1
+git<span class="w"> </span>clone<span class="w"> </span>https://github.com/ARM-DOE/Adapt.git
+<span class="nb">cd</span><span class="w"> </span>Adapt
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+<p>Then follow the <a class="reference internal" href="#quickstart"><span class="xref myst">Quickstart</span></a> below.</p>
+</section>
 </section>
 <hr class="docutils" />
 <section id="quickstart">
 <h2>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">#</a></h2>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Run real-time processing on a NEXRAD radar</span>
-adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w"> </span>--base-dir<span class="w"> </span>~/adapt_output
+<p>Work inside a directory and it becomes the repository — <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> writes
+<code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> there with <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> pointing at itself, and the other commands
+read it from the working directory. No paths to pass:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mkdir<span class="w"> </span>my_case<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>my_case
 
-<span class="c1"># Open the dashboard in a second terminal</span>
-adapt<span class="w"> </span>dashboard<span class="w"> </span>--repo<span class="w"> </span>~/adapt_output
+adapt<span class="w"> </span>config<span class="w">                    </span><span class="c1"># skip if you already have a config.yaml</span>
+adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w">   </span><span class="c1"># Ctrl-C to stop</span>
+
+adapt<span class="w"> </span>dashboard<span class="w">                 </span><span class="c1"># second terminal; repo is selectable in the GUI</span>
 </pre></div>
 </div>
+<p>Everything is overridable — a config elsewhere, a different output root, another
+repository — but none of it is required. Run <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">&lt;command&gt;</span> <span class="pre">--help</span></code> for the
+full set of options.</p>
 </section>
 <hr class="docutils" />
 <section id="status-and-compatibility">
@@ -573,7 +592,10 @@ See the <a class="reference external" href="https://github.com/ARM-DOE/Adapt/blo
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline">Pipeline</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installation">Installation</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installation">Installation</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#developers-latest-source">Developers — latest source</a></li>
+</ul>
+</li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quickstart">Quickstart</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#status-and-compatibility">Status and Compatibility</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#funding">Funding</a></li>

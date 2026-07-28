@@ -240,7 +240,7 @@ def test_sqlite_table_written_and_schema_registered(repo):
 def test_router_source_names_no_module_keys():
     import adapt.persistence.output_router as mod
 
-    with open(mod.__file__) as f:
+    with open(mod.__file__, encoding="utf-8") as f:
         source = f.read()
     # Hardcoding means a quoted context-key literal (kwarg names of store APIs are fine).
     for key in ("grid_nc_path", "projected_ds", "cell_stats", "tracked_cells", "cell_events"):

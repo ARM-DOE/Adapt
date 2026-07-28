@@ -50,7 +50,7 @@ def test_init_runtime_config_continues_existing_run_id(tmp_path, capsys):
     saved_cfg = baseline.model_dump()
     saved_cfg["run_id"] = run_id
     saved_cfg["created_at"] = "2026-03-23T02:06:00+00:00"
-    with open(tmp_path / f"runtime_config_{run_id}.json", "w") as f:
+    with open(tmp_path / f"runtime_config_{run_id}.json", "w", encoding="utf-8") as f:
         json.dump(saved_cfg, f)
 
     registry = RepositoryRegistry.get_instance(tmp_path)
@@ -82,7 +82,7 @@ def test_init_runtime_config_existing_run_ignores_config_and_cli(tmp_path, capsy
     saved_cfg["segmenter"]["method"] = "threshold"
     saved_cfg["segmenter"]["threshold_params"]["threshold"] = 37.0
     saved_cfg["created_at"] = "2026-03-23T02:06:00+00:00"
-    with open(tmp_path / f"runtime_config_{run_id}.json", "w") as f:
+    with open(tmp_path / f"runtime_config_{run_id}.json", "w", encoding="utf-8") as f:
         json.dump(saved_cfg, f)
 
     # Register existing run in repository registry.
@@ -97,7 +97,8 @@ def test_init_runtime_config_existing_run_ignores_config_and_cli(tmp_path, capsy
         "    'radar': 'KTLX',\n"
         "    'base_dir': '/tmp/should_not_be_used',\n"
         "    'threshold': 99,\n"
-        "}\n"
+        "}\n",
+        encoding="utf-8",
     )
     config = init_runtime_config(
         _args(

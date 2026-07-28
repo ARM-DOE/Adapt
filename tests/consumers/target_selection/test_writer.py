@@ -31,7 +31,7 @@ def test_appends_jsonl(tmp_path):
     path = tmp_path / "selections.jsonl"
     append_selection(path, _selection())
     append_selection(path, _selection(reason=SelectionReason.CONTINUATION))
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     assert json.loads(lines[0]) == {
         "cell_uid": "uid_beta",

@@ -61,7 +61,8 @@ class TestInitBaseDirDefaults:
         monkeypatch.chdir(tmp_path)
         config_yaml = tmp_path / "config.yaml"
         config_yaml.write_text(
-            "min_cellsize_gridpoint: 12\nradar: KLOT\nbase_dir: " + str(tmp_path) + "\n"
+            "min_cellsize_gridpoint: 12\nradar: KLOT\nbase_dir: " + str(tmp_path) + "\n",
+            encoding="utf-8",
         )
 
         from adapt.configuration.schemas.initialization import init_runtime_config

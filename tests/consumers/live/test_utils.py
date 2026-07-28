@@ -52,7 +52,7 @@ def test_adapt_cmd_is_runnable_on_this_interpreter():
 
 def test_safe_close_closes_an_open_resource(tmp_path):
     """safe_close releases the resource so its file descriptor is freed."""
-    handle = (tmp_path / "scratch.txt").open("w")
+    handle = (tmp_path / "scratch.txt").open("w", encoding="utf-8")
 
     safe_close(handle, "scratch file", logging.getLogger("adapt.test"))
 

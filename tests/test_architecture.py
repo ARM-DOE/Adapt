@@ -46,7 +46,7 @@ def _source_files(package_name: str) -> list[Path]:
 def _imported_adapt_modules(py_file: Path) -> set[str]:
     """Parse a .py file and return the set of adapt.modules.* names it imports."""
     try:
-        tree = ast.parse(py_file.read_text())
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
     except SyntaxError:
         return set()
 
@@ -101,7 +101,7 @@ def test_module_does_not_import_execution_or_runtime(pkg: str) -> None:
 
     for py_file in files:
         try:
-            tree = ast.parse(py_file.read_text())
+            tree = ast.parse(py_file.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
         for node in ast.walk(tree):
@@ -134,7 +134,7 @@ def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
     """The scan-time join-key format may appear only in adapt.utils.time."""
     offenders: list[str] = []
     for py_file in _SRC_ADAPT.rglob("*.py"):
-        if _SCAN_TIME_FORMAT in py_file.read_text():
+        if _SCAN_TIME_FORMAT in py_file.read_text(encoding="utf-8"):
             offenders.append(str(py_file.relative_to(_SRC_ADAPT)))
 
     assert offenders == ["utils/time.py"], (
@@ -153,7 +153,7 @@ def test_adapt_name_is_never_all_caps() -> None:
     offenders = [
         f"{py_file.relative_to(_SRC_ADAPT)}:{i}"
         for py_file in _SRC_ADAPT.rglob("*.py")
-        for i, line in enumerate(py_file.read_text().splitlines(), 1)
+        for i, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1)
         if re.search(r"\bADAPT\b", line)
     ]
     assert not offenders, "Use 'Adapt', not 'ADAPT':\n" + "\n".join(offenders)
@@ -170,7 +170,7 @@ _WALL_CLOCK_ALLOWED = {"acquisition/module.py"}
 
 def _nondeterminism_calls(py_file: Path) -> list[str]:
     """Return wall-clock / global-RNG usages in a file (AST, ignores docstrings)."""
-    tree = ast.parse(py_file.read_text())
+    tree = ast.parse(py_file.read_text(encoding="utf-8"))
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute):
@@ -233,7 +233,7 @@ _DEP_HOMES = {
 
 
 def _top_level_imports(py_file: Path) -> set[str]:
-    tree = ast.parse(py_file.read_text())
+    tree = ast.parse(py_file.read_text(encoding="utf-8"))
     tops: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

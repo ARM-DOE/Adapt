@@ -1,10 +1,13 @@
 """Tests for DataRepository artifact management."""
 
+import gc
 import json
 import re
 import shutil
 import sqlite3
 import tempfile
+import warnings
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -411,9 +414,33 @@ class TestWriteOperations:
         )
 
         artifact = repository.get_artifact(db_artifact_id)
-        with sqlite3.connect(artifact["file_path"]) as conn:
+        with closing(sqlite3.connect(artifact["file_path"])) as conn:
             df_read = pd.read_sql("SELECT * FROM cells", conn)
             assert len(df_read) == 3
+
+    def test_sqlite_operations_do_not_leak_connections(self, repository, sample_dataframe):
+        """Creating, writing and reading a cells DB must leave no connection open.
+
+        ``with sqlite3.connect(...)`` commits the transaction but does not close
+        the connection. In a pipeline that writes every scan those connections
+        accumulate for the process's lifetime until it runs out of descriptors,
+        and on Windows each one also pins the database file on disk.
+        """
+        gc.collect()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+
+            db_artifact_id = repository.get_or_create_cells_db(
+                scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC), producer="processor"
+            )
+            repository.write_sqlite_table(
+                df=sample_dataframe, table_name="cells", artifact_id=db_artifact_id
+            )
+            repository.open_table(db_artifact_id, table_name="cells")
+            gc.collect()
+
+        leaked = [w for w in caught if issubclass(w.category, ResourceWarning)]
+        assert not leaked, [str(w.message) for w in leaked]
 
 
 # =========================================================================

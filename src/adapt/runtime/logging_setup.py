@@ -29,9 +29,11 @@ __all__ = [
     "ConsoleFilter",
     "StatusAwareStreamHandler",
     "configure_logging",
+    "shutdown_logging",
 ]
 
-_CONSOLE_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Human-readable line format, shared by the console and the plain-text file log.
+_TEXT_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # Standard LogRecord attributes to exclude when surfacing structured extras.
 _STD_ATTRS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
 _CONTEXT_FIELDS = (
@@ -109,6 +111,21 @@ class StatusAwareStreamHandler(logging.StreamHandler):
             super().emit(record)
 
 
+def shutdown_logging() -> None:
+    """Detach and close every root handler. The counterpart to configure_logging.
+
+    Removing a handler does not release what it holds: a FileHandler keeps its
+    log file open until closed. Left unclosed, every reconfigure leaks a file
+    descriptor for the process's lifetime, and on Windows the open handle also
+    makes the log file undeletable. Closing a StreamHandler is safe — it flushes
+    but never closes the underlying stream, so sys.stderr survives.
+    """
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+        handler.close()
+
+
 def configure_logging(
     settings: ObsSettings,
     log_path: Path | None,
@@ -118,22 +135,27 @@ def configure_logging(
     """Configure the root logger. The one place handlers are constructed.
 
     Fails loudly: ``json_logs`` with no ``log_path`` raises (no silent default).
-    Idempotent — clears existing handlers before re-adding, so repeated calls (or
-    a prior ``basicConfig``) never accumulate handlers.
+    Idempotent — releases existing handlers before re-adding, so repeated calls
+    (or a prior ``basicConfig``) never accumulate handlers or leak their files.
     """
+    shutdown_logging()
     root = logging.getLogger()
     root.setLevel(getattr(logging, settings.level.upper(), logging.INFO))
-    for handler in root.handlers[:]:
-        root.removeHandler(handler)
 
     context_filter = ContextFilter()
 
-    if settings.json_logs:
-        if log_path is None:
+    if log_path is None:
+        if settings.json_logs:
             raise ValueError("json_logs=True requires a log_path")
+    else:
+        # A log_path always gets a file handler; json_logs only selects the
+        # format. Gating the handler itself on json_logs would leave the default
+        # configuration writing the whole run to the console and nothing to disk.
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
-        file_handler.setFormatter(JsonFormatter())
+        file_handler.setFormatter(
+            JsonFormatter() if settings.json_logs else logging.Formatter(_TEXT_FORMAT)
+        )
         file_handler.addFilter(context_filter)
         root.addHandler(file_handler)
 
@@ -148,7 +170,7 @@ def configure_logging(
             if console_status is not None
             else logging.StreamHandler()
         )
-        console.setFormatter(logging.Formatter(_CONSOLE_FORMAT))
+        console.setFormatter(logging.Formatter(_TEXT_FORMAT))
         console.addFilter(context_filter)
         console.addFilter(ConsoleFilter(console_threshold))
         root.addHandler(console)

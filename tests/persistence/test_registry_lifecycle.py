@@ -13,8 +13,10 @@ that cached registries hold descriptors open, that ``close_all`` frees every one
 and that the module stays usable afterwards.
 """
 
+import ctypes
 import gc
 import os
+import sys
 
 import pytest
 
@@ -24,7 +26,19 @@ pytestmark = pytest.mark.unit
 
 
 def _open_fd_count() -> int:
-    """Number of file descriptors this process currently holds open."""
+    """Number of OS handles this process currently holds open.
+
+    The leak this guards against is platform-independent, so the measurement has
+    to be too. POSIX exposes descriptors as directory entries; Windows has no
+    /dev/fd, so ask the kernel for the process handle count directly. Both are
+    only ever compared as deltas around a known operation.
+    """
+    if sys.platform == "win32":
+        count = ctypes.c_uint32()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if not kernel32.GetProcessHandleCount(kernel32.GetCurrentProcess(), ctypes.byref(count)):
+            raise OSError(ctypes.get_last_error(), "GetProcessHandleCount failed")
+        return count.value
     return len(os.listdir("/dev/fd"))
 
 

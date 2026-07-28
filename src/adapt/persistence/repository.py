@@ -20,6 +20,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -379,7 +380,7 @@ class DataRepository:
             return pd.read_parquet(file_path)
         elif product_type == ProductType.CELLS_DB:
             table_name = table_name or "cells"
-            with sqlite3.connect(str(file_path)) as conn:
+            with closing(sqlite3.connect(str(file_path))) as conn:
                 return pd.read_sql(f"SELECT * FROM {table_name}", conn)
         else:
             raise ValueError(f"Cannot open as table: {product_type}")
@@ -712,7 +713,9 @@ class DataRepository:
 
         file_path = Path(artifact["file_path"])
 
-        with sqlite3.connect(str(file_path)) as conn:
+        # closing() outermost, conn innermost: the connection is its own
+        # transaction context manager, which commits but never closes.
+        with closing(sqlite3.connect(str(file_path))) as conn, conn:
             # If appending, perform schema migration for missing columns
             if if_exists == "append":
                 self._migrate_table_schema(conn, table_name, df)
@@ -941,7 +944,7 @@ class DataRepository:
         """Initialize cells database with WAL mode."""
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn:
             # Enable WAL mode for concurrent access
             conn.execute("PRAGMA journal_mode=WAL")
             conn.commit()

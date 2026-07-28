@@ -15,6 +15,7 @@ from adapt.runtime.logging_setup import (
     ContextFilter,
     JsonFormatter,
     configure_logging,
+    shutdown_logging,
 )
 from adapt.runtime.observability import ObsSettings, build_observability
 
@@ -25,6 +26,9 @@ def _restore_root_logger():
     saved = root.handlers[:]
     saved_level = root.level
     yield
+    # Close whatever the test configured before restoring: simply reassigning the
+    # list would drop those handlers while their files were still open.
+    shutdown_logging()
     root.handlers[:] = saved
     root.setLevel(saved_level)
 
@@ -98,6 +102,36 @@ def test_configure_logging_creates_dir_and_is_idempotent(tmp_path) -> None:
     second = len(logging.getLogger().handlers)
     assert log_path.parent.is_dir()
     assert first == second  # handlers cleared+re-added, no accumulation
+
+
+def test_file_log_receives_records_without_json_logs(tmp_path) -> None:
+    """A run's log file must capture the run, whatever the file format is.
+
+    json_logs only chooses the formatter. If it also decided whether a file
+    handler exists at all, the default configuration would create the log file
+    and then write nothing to it — an operator watching an unattended remote run
+    would see an empty log.
+    """
+    log_path = tmp_path / "logs" / "pipeline_KDIX.log"
+    configure_logging(ObsSettings(json_logs=False), log_path=log_path)
+    logging.getLogger("adapt.run").warning("scan failed")
+
+    assert "scan failed" in log_path.read_text(encoding="utf-8")
+
+
+def test_shutdown_logging_releases_the_log_file(tmp_path) -> None:
+    """After shutdown the log file must be closed, not merely detached.
+
+    A detached-but-open FileHandler leaks a descriptor per run, and on Windows
+    the open handle also makes the file undeletable.
+    """
+    log_path = tmp_path / "logs" / "pipeline_KDIX.log"
+    configure_logging(ObsSettings(json_logs=True), log_path=log_path)
+    handler = next(h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler))
+    shutdown_logging()
+
+    assert handler.stream is None or handler.stream.closed
+    assert logging.getLogger().handlers == []
 
 
 def _console_stream_output(settings, records):

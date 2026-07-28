@@ -122,14 +122,18 @@ class OutputRouter:
                         f"{module_name}: TrackTablesWrite requires context keys {missing} "
                         f"alongside '{spec.tracked_key}'"
                     )
-                TrackStore(self._repo.catalog.db_path).write_scan(
-                    run_id=meta.run_id,
-                    scan_time=scan_time,
-                    cell_stats_df=result[spec.stats_key],
-                    tracked_cells_df=tracked,
-                    cell_events_df=result[spec.events_key],
-                    cell_adjacency_df=result[spec.adjacency_key],
-                )
+                # Context-managed: this runs once per scan, so a store left open
+                # would leak a catalog.db connection (plus its WAL/SHM sidecars)
+                # every scan for the lifetime of the pipeline.
+                with TrackStore(self._repo.catalog.db_path) as store:
+                    store.write_scan(
+                        run_id=meta.run_id,
+                        scan_time=scan_time,
+                        cell_stats_df=result[spec.stats_key],
+                        tracked_cells_df=tracked,
+                        cell_events_df=result[spec.events_key],
+                        cell_adjacency_df=result[spec.adjacency_key],
+                    )
             case SqliteTable():
                 df = result.get(spec.key)
                 if df is None or df.empty:

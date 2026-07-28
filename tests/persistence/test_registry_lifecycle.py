@@ -9,12 +9,21 @@ open file descriptors (db + ``-wal`` + ``-shm`` per root) and exhausts a low
 ``ulimit -n`` — macOS defaults to 256, which is exactly where the suite fell over.
 
 These tests pin the release primitive (``close_all``) behaviourally: they observe
-that cached registries hold descriptors open, that ``close_all`` frees every one,
-and that the module stays usable afterwards.
+that ``close_all`` frees every cached connection, and that the module stays usable
+afterwards.
+
+Each OS gets the probe that actually has teeth on it. POSIX counts open
+descriptors, which is exact. Windows cannot: its only cheap counter,
+``GetProcessHandleCount``, totals every kernel handle in the process — threads,
+events, registry keys — so it neither drops reliably when a file closes nor holds
+still between two reads. Windows instead gets a sharper probe that POSIX lacks:
+it refuses to delete a file that is still open, so a surviving connection turns
+into a ``PermissionError`` on cleanup.
 """
 
 import gc
 import os
+import shutil
 import sys
 
 import pytest
@@ -23,49 +32,35 @@ from adapt.persistence.registry import RepositoryRegistry
 
 pytestmark = pytest.mark.unit
 
-# The leak this guards against is platform-independent, so the measurement has to
-# be too. POSIX exposes descriptors as directory entries; Windows has no /dev/fd,
-# so ask the kernel for the process handle count. Both are only ever compared as
-# deltas around a known operation.
-if sys.platform == "win32":
-    import ctypes
-
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    # Explicit signatures are mandatory, not tidiness: HANDLE is pointer-sized and
-    # ctypes defaults restype to c_int, which truncates GetCurrentProcess's
-    # (HANDLE)-1 pseudo-handle to 32 bits and yields ERROR_INVALID_HANDLE.
-    _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-    _kernel32.GetCurrentProcess.argtypes = ()
-    _kernel32.GetProcessHandleCount.restype = ctypes.c_int
-    _kernel32.GetProcessHandleCount.argtypes = (
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_uint32),
-    )
-
-    def _open_fd_count() -> int:
-        """Number of OS handles this process currently holds open."""
-        count = ctypes.c_uint32()
-        if not _kernel32.GetProcessHandleCount(_kernel32.GetCurrentProcess(), ctypes.byref(count)):
-            err = ctypes.get_last_error()
-            raise OSError(
-                0, f"GetProcessHandleCount failed: {ctypes.WinError(err).strerror}", None, err
-            )
-        return count.value
-
-else:
-
-    def _open_fd_count() -> int:
-        """Number of OS handles this process currently holds open."""
-        return len(os.listdir("/dev/fd"))
+_needs_posix_fds = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="descriptor counting is POSIX-only; Windows uses the deletion probe instead",
+)
 
 
+def _open_fd_count() -> int:
+    """Number of file descriptors this process currently holds open."""
+    return len(os.listdir("/dev/fd"))
+
+
+def _cache_twenty_registries(tmp_path) -> list:
+    """Cache one registry per root and return the roots."""
+    roots = []
+    for i in range(20):
+        root = tmp_path / f"repo{i}"
+        root.mkdir()
+        RepositoryRegistry.get_instance(root)
+        roots.append(root)
+    return roots
+
+
+@_needs_posix_fds
 def test_open_fd_count_actually_tracks_open_handles(tmp_path):
     """Self-test of the measuring instrument, before anything relies on it.
 
-    Every assertion below is a delta from this counter, so a broken counter does
+    The assertions below are deltas from this counter, so a broken counter does
     not fail honestly — it fails somewhere else, as a confusing error inside an
-    unrelated assertion. It has one platform branch per OS, and each branch is
-    only ever exercised by that OS's CI job.
+    unrelated assertion.
     """
     baseline = _open_fd_count()
     assert baseline > 0
@@ -80,22 +75,36 @@ def test_open_fd_count_actually_tracks_open_handles(tmp_path):
     assert _open_fd_count() <= baseline + 2
 
 
-def test_close_all_releases_every_cached_registry_connection(tmp_path):
-    """Each distinct repository root keeps a WAL connection open while cached;
-    ``close_all`` must release them all so descriptors return to the baseline."""
+@_needs_posix_fds
+def test_close_all_returns_the_descriptor_count_to_baseline(tmp_path):
+    """Each cached root holds a live WAL connection; close_all releases them all."""
     RepositoryRegistry.close_all()  # start from a clean cache, independent of other tests
     gc.collect()
     before = _open_fd_count()
 
-    for i in range(20):
-        root = tmp_path / f"repo{i}"
-        root.mkdir()
-        RepositoryRegistry.get_instance(root)
+    _cache_twenty_registries(tmp_path)
     assert _open_fd_count() >= before + 20  # 20 roots each hold a live connection
 
     RepositoryRegistry.close_all()
     gc.collect()
     assert _open_fd_count() <= before + 3  # every cached connection released
+
+
+def test_close_all_leaves_every_repository_deletable(tmp_path):
+    """After close_all, nothing may still be holding a repository's files.
+
+    This is the probe with teeth on Windows, where deleting an open file raises
+    PermissionError — the failure mode that a leaked connection actually causes
+    for users, whose repository directories become unremovable.
+    """
+    RepositoryRegistry.close_all()
+    roots = _cache_twenty_registries(tmp_path)
+
+    RepositoryRegistry.close_all()
+
+    for root in roots:
+        shutil.rmtree(root)  # raises on Windows if a connection survived
+        assert not root.exists()
 
 
 def test_get_instance_after_close_all_returns_a_working_registry(tmp_path):

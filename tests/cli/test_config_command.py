@@ -53,6 +53,32 @@ def test_adapt_config_writes_absolute_path_when_cwd_is_missing(tmp_path, restore
     assert {"tracker", "segmenter"} <= cfg.keys()
 
 
+def _suggested_command(stdout: str) -> str:
+    """The `adapt ...` command `adapt config` tells the user to run next."""
+    line = next(ln for ln in stdout.splitlines() if "run-nexrad" in ln)
+    return line.split(":", 1)[1].strip()
+
+
+def test_hint_omits_the_config_path_when_it_is_the_default(tmp_path, monkeypatch, capsys):
+    """A config.yaml in the working directory is auto-loaded, so the suggested
+    command must not tell the user to pass a path they do not need."""
+    monkeypatch.chdir(tmp_path)
+    _config_cmd(Namespace(output=None))
+
+    command = _suggested_command(capsys.readouterr().out)
+    assert command == "adapt run-nexrad --radar KLOT"
+
+
+def test_hint_includes_the_config_path_when_it_is_not_the_default(tmp_path, monkeypatch, capsys):
+    """A config written anywhere else is not picked up automatically, so the
+    suggested command has to name it."""
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "custom.yaml"
+    _config_cmd(Namespace(output=str(out)))
+
+    assert str(out) in _suggested_command(capsys.readouterr().out)
+
+
 def test_adapt_config_sets_base_dir_to_output_parent(tmp_path):
     out_dir = tmp_path / "nested"
     out_path = out_dir / "my_config.yaml"

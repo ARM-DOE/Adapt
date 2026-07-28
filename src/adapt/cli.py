@@ -5,17 +5,26 @@
 
 Entry point: ``adapt``
 
-Usage::
+Typical use: make a directory, work inside it, and let that directory be the
+repository. ``adapt config`` writes ``config.yaml`` there with ``base_dir``
+pointing at itself, and the other commands pick it up from the working
+directory — so no paths need to be passed::
 
-    adapt run-nexrad [config.yaml] --radar KLOT --mode realtime
-    adapt run-nexrad --radar KDIX --base-dir /data/radar --mode historical \\
+    mkdir my_case && cd my_case
+    adapt config                        # skip if you already have a config.yaml
+    adapt run-nexrad --radar KLOT
+    adapt dashboard                     # second terminal; repo is selectable in the GUI
+
+Everything is overridable when you want it to be — a config file elsewhere, a
+different output root, a repository other than the working directory::
+
+    adapt run-nexrad /path/to/config.yaml --radar KDIX --base-dir /data/radar \\
         --start-time 2025-03-05T15:00:00Z --end-time 2025-03-05T18:00:00Z
+    adapt dashboard --repo /data/radar
 
-    adapt config [output_path]          # generate config.yaml template
-    adapt dashboard [--repo /path]      # open GUI dashboard
-
-The config file is optional. When omitted, ParamConfig expert defaults are
-used. Any value from the config file can be overridden with CLI flags.
+The config file itself is optional: with none, ParamConfig expert defaults are
+used. Any value from it can be overridden with CLI flags. See ``adapt <command>
+--help`` for the full set.
 """
 
 import argparse
@@ -333,7 +342,11 @@ def _config_cmd(args: argparse.Namespace) -> None:
 
     write_default_config(out, extensions=extensions)
     print(f"Config written: {out}")
-    print(f"Edit it, then run:  adapt run-nexrad {out} --radar KLOT")
+    # A config.yaml in the working directory is picked up automatically, so only
+    # name the file when it is somewhere the pipeline would not find it.
+    is_default_location = cwd is not None and out == cwd / "config.yaml"
+    config_arg = "" if is_default_location else f" {out}"
+    print(f"Edit it, then run:  adapt run-nexrad{config_arg} --radar KLOT")
 
 
 # ---------------------------------------------------------------------------

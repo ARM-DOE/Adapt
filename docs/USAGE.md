@@ -7,18 +7,31 @@ outputs, and configuring the system. For installation see [Installation](install
 
 ## Quick start
 
-Open **two terminals**, both with the conda environment active.
-
-**Terminal 1 — start the pipeline:**
+Make a directory and work inside it — that directory becomes the repository.
+`adapt config` writes `config.yaml` there with `base_dir` pointing at itself, and
+every other command reads it from the working directory, so there are no paths to
+pass:
 
 ```bash
-adapt run-nexrad --radar KLOT --base-dir ~/adapt_output
+mkdir my_case && cd my_case
+adapt config          # skip if you already have a config.yaml here
 ```
+
+Then, in **two terminals** with the conda environment active and both in that
+directory:
+
+**Terminal 1 — start the real-time pipeline:**
+
+```bash
+adapt run-nexrad --radar KLOT
+```
+Replace `KLOT` with any 4-letter NEXRAD site code (e.g. `KDIX`, `KFTG`, `KAMX`).
+The pipeline runs until you press `Ctrl-C`.
 
 **Terminal 2 — open the dashboard:**
 
 ```bash
-adapt dashboard --repo ~/adapt_output
+adapt dashboard
 ```
 
 Click **Show Latest** in the dashboard to see the most recent processed scan.
@@ -26,25 +39,12 @@ Press `Ctrl-C` in Terminal 1 to stop the pipeline.
 
 ---
 
-## Running the pipeline
-
-### Real-time mode
-
-Continuously downloads and processes new scans as they are released:
-
-```bash
-adapt run-nexrad --radar KLOT --base-dir ~/adapt_output
-```
-
-Replace `KLOT` with any 4-letter NEXRAD site code (e.g. `KDIX`, `KFTG`, `KAMX`).
-The pipeline runs until you press `Ctrl-C`.
-
 ### Historical mode
 
 Process a fixed time window from the archive:
 
 ```bash
-adapt run-nexrad --radar KLOT --base-dir ~/adapt_output \
+adapt run-nexrad --radar KLOT \
     --start-time 2025-03-05T18:00:00 \
     --end-time   2025-03-05T20:00:00
 ```
@@ -52,13 +52,14 @@ adapt run-nexrad --radar KLOT --base-dir ~/adapt_output \
 If `--start-time` or `--end-time` is provided, historical mode is selected
 automatically — you do not need `--mode historical`.
 
-### Using a custom configuration
+### Using a configuration from elsewhere
 
-Generate a template, edit it, then pass it as the first argument:
+A `config.yaml` in the working directory is picked up automatically. A config
+kept anywhere else, or under another name, is passed as the first argument:
 
 ```bash
-adapt config my_config.yaml        # generate template with all options
-adapt run-nexrad my_config.yaml --radar KLOT --base-dir ~/adapt_output
+adapt config my_config.yaml        # generate a template with all options
+adapt run-nexrad my_config.yaml --radar KLOT
 ```
 
 ### Verbose logging
@@ -66,23 +67,22 @@ adapt run-nexrad my_config.yaml --radar KLOT --base-dir ~/adapt_output
 Add `-v` to see debug-level output, including per-scan timing and any errors:
 
 ```bash
-adapt run-nexrad --radar KLOT --base-dir ~/adapt_output -v
+adapt run-nexrad --radar KLOT -v
+```
+
+### All options
+
+Each command lists its own flags:
+
+```bash
+adapt --help
+adapt run-nexrad --help
+adapt config --help
+adapt dashboard --help
 ```
 
 ---
 
-## Configuration
-
-Running without a config file uses built-in defaults. Key parameters:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `regridder.grid_shape` | `[41, 201, 201]` | Grid points (nz, ny, nx) |
-| `regridder.grid_limits` | `±100 km` | Horizontal extent from radar |
-| `segmenter.threshold` | `30 dBZ` | Reflectivity threshold for cell detection |
-| `segmenter.min_cellsize_gridpoint` | `5` | Minimum cell size in grid points |
-
-Generate a fully documented template with all available options:
 
 ```bash
 adapt config my_config.yaml
@@ -95,8 +95,21 @@ adapt config my_config.yaml
 Launch in a second terminal while the pipeline is running:
 
 ```bash
-adapt dashboard --repo ~/adapt_output
+adapt dashboard
 ```
+
+With no arguments it opens the working directory's repository if it is one, and
+otherwise the repository you used last. Either way the toolbar's repository
+selector switches to any other, so `--repo` is never required — it just
+pre-populates that field:
+
+```bash
+adapt dashboard --repo /data/radar
+```
+
+A directory only counts as a repository once the pipeline has run in it and
+created `adapt_registry.db`. Start the dashboard before that and it falls back
+to your previous repository; use the selector, or just wait for the first scan.
 
 The dashboard is **read-only** — it does not affect the pipeline.
 
@@ -122,10 +135,11 @@ internet and may take a few seconds.
 
 ## Outputs
 
-All pipeline artifacts are written under `--base-dir`:
+All pipeline artifacts are written under `base_dir` — the repository root,
+which is the working directory unless the config or `--base-dir` says otherwise:
 
 ```
-~/adapt_output/
+my_case/
 ├── KLOT/
 │   ├── nexrad/                        # raw Level-II files from AWS
 │   ├── gridnc/
@@ -154,7 +168,7 @@ use the [DataClient API](api/client.rst):
 ```python
 from adapt.api import DataClient
 
-client = DataClient("~/adapt_output")
+client = DataClient(".")  # or any repository path
 df = client.latest("cells_by_scan", radar="KLOT")
 ```
 
@@ -186,7 +200,7 @@ pip install "arm-adapt[maps]"
 Re-run with `-v` to see the full traceback:
 
 ```bash
-adapt run-nexrad --radar KLOT --base-dir ~/adapt_output -v
+adapt run-nexrad --radar KLOT -v
 ```
 
 ### `adapt: command not found`

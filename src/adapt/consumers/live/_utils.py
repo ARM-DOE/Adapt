@@ -9,7 +9,7 @@ import contextlib
 import logging
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -191,9 +191,33 @@ def format_run_labels(runs: Iterable) -> list[str]:
     return labels
 
 
+def is_repository(path: Path) -> bool:
+    """True if *path* is an Adapt repository root.
+
+    ``adapt_registry.db`` sits at the root and is created by the pipeline on its
+    first run, so it is the marker that distinguishes a repository from any other
+    directory.
+    """
+    return (path / "adapt_registry.db").exists()
+
+
+def startup_repo(explicit: str | None, cwd: Path, recent: Sequence[str]) -> str | None:
+    """Repository the dashboard should open with, or None to ask the user.
+
+    The working directory wins over history: the documented workflow is to work
+    inside a case directory, so ``adapt dashboard`` run there must show *that*
+    case rather than silently reopening whichever one was used last.
+    """
+    if explicit:
+        return explicit
+    if is_repository(cwd):
+        return str(cwd)
+    return recent[0] if recent else None
+
+
 def _list_radars(repo: Path) -> list:
     """Return all registered radar IDs from the repository registry."""
-    if not (repo / "adapt_registry.db").exists():
+    if not is_repository(repo):
         return []
     from adapt.api.client import RepositoryClient
 
@@ -209,7 +233,7 @@ def _list_runs(repo: Path, radar: str | None = None) -> list:
     list
         List of strings: "run_id  (MM-DD HH:MM)"
     """
-    if not (repo / "adapt_registry.db").exists():
+    if not is_repository(repo):
         return []
     from adapt.api.client import RepositoryClient
 

@@ -84,6 +84,7 @@ from adapt.consumers.live._utils import (  # noqa: E402
     _list_runs,
     _pipeline_running,
     _suppress_osx_stderr,
+    startup_repo,
 )
 
 # ── Main dashboard window ─────────────────────────────────────────────────────
@@ -144,11 +145,11 @@ class AdaptDashboard(tk.Tk):
         self._timers.recurring("refresh", 500, self._schedule_refresh)
         self._timers.recurring("status", 1000, self._status_tick)
 
-        if repo:
-            self.after(200, self._on_repo_changed)
-        elif self._recent_repos:
-            # Auto-load most recent repo so panels show on startup without --repo arg
-            self._repo_root.set(self._recent_repos[0])
+        # Open the working directory's repository when there is one, else the most
+        # recent — so panels show on startup without a --repo argument either way.
+        opening = startup_repo(repo, Path.cwd(), self._recent_repos)
+        if opening:
+            self._repo_root.set(opening)
             self.after(200, self._on_repo_changed)
         else:
             self.after(150, self._show_first_run_dialog)

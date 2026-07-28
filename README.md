@@ -82,17 +82,40 @@ and fails at import with a DLL error — on Windows, `[WinError 11] An attempt w
 made to load a program with an incorrect format`. On Windows, use 64-bit x86
 Python: several of these dependencies publish no ARM64 wheels.
 
+### Developers — latest source
+
+To run the bleeding-edge version and have your edits take effect immediately:
+
+```bash
+conda create -n adapt_env1 python=3.13 -y
+conda activate adapt_env1
+git clone https://github.com/ARM-DOE/Adapt.git
+cd Adapt
+pip install -e .
+```
+
+Then follow the [Quickstart](#quickstart) below.
+
 ---
 
 ## Quickstart
 
-```bash
-# Run real-time processing on a NEXRAD radar
-adapt run-nexrad --radar KLOT --base-dir ~/adapt_output
+Work inside a directory and it becomes the repository — `adapt config` writes
+`config.yaml` there with `base_dir` pointing at itself, and the other commands
+read it from the working directory. No paths to pass:
 
-# Open the dashboard in a second terminal
-adapt dashboard --repo ~/adapt_output
+```bash
+mkdir my_case && cd my_case
+
+adapt config                    # skip if you already have a config.yaml
+adapt run-nexrad --radar KLOT   # Ctrl-C to stop
+
+adapt dashboard                 # second terminal; repo is selectable in the GUI
 ```
+
+Everything is overridable — a config elsewhere, a different output root, another
+repository — but none of it is required. Run `adapt <command> --help` for the
+full set of options.
 
 ---
 

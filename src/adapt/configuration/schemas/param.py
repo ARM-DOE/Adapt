@@ -78,13 +78,17 @@ class SegmenterConfig(AdaptBaseModel):
     parameters apply to every method's convective mask.
     """
 
+    # threshold is the default because it needs only the 2D CAPPI the pipeline
+    # always produces, so an out-of-the-box run works with no further setup. The
+    # pyart convective/stratiform classifiers need a 3D grid; select one via
+    # `segmenter.method` once that is available.
     method: Literal[
         "conv_strat_raut",
         "conv_strat_yuter",
         "feature_detection",
         "steiner_conv_strat",
         "threshold",
-    ] = "conv_strat_raut"
+    ] = "threshold"
     # Shared labeling-backend parameters (applied to every method's mask)
     min_cellsize_gridpoint: int = Field(5, ge=1)
     max_cellsize_gridpoint: int | None = Field(None, ge=1)

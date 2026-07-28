@@ -46,7 +46,10 @@ if sys.platform == "win32":
         """Number of OS handles this process currently holds open."""
         count = ctypes.c_uint32()
         if not _kernel32.GetProcessHandleCount(_kernel32.GetCurrentProcess(), ctypes.byref(count)):
-            raise OSError(ctypes.get_last_error(), "GetProcessHandleCount failed")
+            err = ctypes.get_last_error()
+            raise OSError(
+                0, f"GetProcessHandleCount failed: {ctypes.WinError(err).strerror}", None, err
+            )
         return count.value
 
 else:
@@ -54,6 +57,27 @@ else:
     def _open_fd_count() -> int:
         """Number of OS handles this process currently holds open."""
         return len(os.listdir("/dev/fd"))
+
+
+def test_open_fd_count_actually_tracks_open_handles(tmp_path):
+    """Self-test of the measuring instrument, before anything relies on it.
+
+    Every assertion below is a delta from this counter, so a broken counter does
+    not fail honestly — it fails somewhere else, as a confusing error inside an
+    unrelated assertion. It has one platform branch per OS, and each branch is
+    only ever exercised by that OS's CI job.
+    """
+    baseline = _open_fd_count()
+    assert baseline > 0
+
+    handles = [(tmp_path / f"f{i}").open("w", encoding="utf-8") for i in range(10)]
+    try:
+        assert _open_fd_count() >= baseline + 10
+    finally:
+        for handle in handles:
+            handle.close()
+
+    assert _open_fd_count() <= baseline + 2
 
 
 def test_close_all_releases_every_cached_registry_connection(tmp_path):

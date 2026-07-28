@@ -25,7 +25,7 @@ pytestmark = pytest.mark.unit
 
 
 def _declared_module_paths() -> list[str]:
-    with open(_DEFAULTS_YAML) as f:
+    with open(_DEFAULTS_YAML, encoding="utf-8") as f:
         return yaml.safe_load(f)["pipeline"]["modules"]
 
 
@@ -69,7 +69,7 @@ def test_unreadable_defaults_yaml_raises(monkeypatch, tmp_path):
 def test_empty_module_list_raises(monkeypatch, tmp_path):
     """A defaults.yaml that declares no modules is a configuration error."""
     empty = tmp_path / "defaults.yaml"
-    empty.write_text("pipeline:\n  modules: []\n")
+    empty.write_text("pipeline:\n  modules: []\n", encoding="utf-8")
     monkeypatch.setattr(pipeline_builder, "_DEFAULTS_YAML", empty)
 
     with pytest.raises(RuntimeError, match="No pipeline modules declared"):
@@ -79,7 +79,7 @@ def test_empty_module_list_raises(monkeypatch, tmp_path):
 def test_unimportable_core_module_raises(monkeypatch, tmp_path):
     """A declared module that fails to import aborts startup loudly."""
     bad = tmp_path / "defaults.yaml"
-    bad.write_text("pipeline:\n  modules:\n    - adapt.no_such_module\n")
+    bad.write_text("pipeline:\n  modules:\n    - adapt.no_such_module\n", encoding="utf-8")
     monkeypatch.setattr(pipeline_builder, "_DEFAULTS_YAML", bad)
 
     with pytest.raises(ImportError, match="adapt.no_such_module"):

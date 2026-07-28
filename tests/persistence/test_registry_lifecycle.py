@@ -15,6 +15,7 @@ and that the module stays usable afterwards.
 
 import gc
 import os
+import sys
 
 import pytest
 
@@ -22,10 +23,37 @@ from adapt.persistence.registry import RepositoryRegistry
 
 pytestmark = pytest.mark.unit
 
+# The leak this guards against is platform-independent, so the measurement has to
+# be too. POSIX exposes descriptors as directory entries; Windows has no /dev/fd,
+# so ask the kernel for the process handle count. Both are only ever compared as
+# deltas around a known operation.
+if sys.platform == "win32":
+    import ctypes
 
-def _open_fd_count() -> int:
-    """Number of file descriptors this process currently holds open."""
-    return len(os.listdir("/dev/fd"))
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # Explicit signatures are mandatory, not tidiness: HANDLE is pointer-sized and
+    # ctypes defaults restype to c_int, which truncates GetCurrentProcess's
+    # (HANDLE)-1 pseudo-handle to 32 bits and yields ERROR_INVALID_HANDLE.
+    _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    _kernel32.GetCurrentProcess.argtypes = ()
+    _kernel32.GetProcessHandleCount.restype = ctypes.c_int
+    _kernel32.GetProcessHandleCount.argtypes = (
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_uint32),
+    )
+
+    def _open_fd_count() -> int:
+        """Number of OS handles this process currently holds open."""
+        count = ctypes.c_uint32()
+        if not _kernel32.GetProcessHandleCount(_kernel32.GetCurrentProcess(), ctypes.byref(count)):
+            raise OSError(ctypes.get_last_error(), "GetProcessHandleCount failed")
+        return count.value
+
+else:
+
+    def _open_fd_count() -> int:
+        """Number of OS handles this process currently holds open."""
+        return len(os.listdir("/dev/fd"))
 
 
 def test_close_all_releases_every_cached_registry_connection(tmp_path):

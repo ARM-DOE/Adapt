@@ -622,7 +622,10 @@ def test_cell_uid_fields_are_persisted_and_returned(store):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(os.getuid() == 0, reason="chmod has no effect as root")
+@pytest.mark.skipif(
+    not hasattr(os, "getuid") or os.getuid() == 0,
+    reason="needs POSIX directory permissions (no getuid on Windows; chmod is a no-op as root)",
+)
 def test_trackstore_readonly_connects_without_write_access(db_path):
     """Dashboard opens TrackStore(db_path, readonly=True) on a directory it
     cannot write to. Must not raise OperationalError from WAL sidecar creation."""
@@ -667,12 +670,14 @@ def test_readonly_trackstore_sees_schema_after_fresh_catalog_init(tmp_path):
 
     radar_dir = tmp_path / "KHTX"
     radar_dir.mkdir()
-    RadarCatalog(radar_dir)  # creates catalog.db + schema in WAL
-
-    ts = TrackStore(radar_dir / "catalog.db", readonly=True)
-    conn = ts._connect()  # must not raise RuntimeError: Missing required tracking tables
-    assert conn is not None
-    ts.close()
+    catalog = RadarCatalog(radar_dir)  # creates catalog.db + schema in WAL
+    try:
+        ts = TrackStore(radar_dir / "catalog.db", readonly=True)
+        conn = ts._connect()  # must not raise RuntimeError: Missing tracking tables
+        assert conn is not None
+        ts.close()
+    finally:
+        catalog.close()
 
 
 def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
@@ -683,24 +688,24 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
 
     radar_dir = tmp_path / "KHTX"
     radar_dir.mkdir()
-    _catalog = RadarCatalog(radar_dir)  # holds _conn open for its lifetime
+    catalog = RadarCatalog(radar_dir)  # deliberately held open across the write
     db_path = radar_dir / "catalog.db"
+    try:
+        with TrackStore(db_path) as writer:
+            writer.write_scan(
+                "r1",
+                _t("2024-01-01T12:00:00"),
+                _cell_stats(1),
+                _tracked_cells(1, "UID1"),
+                pd.DataFrame(),
+                _empty_cell_adjacency(),
+            )
 
-    writer = TrackStore(db_path)
-    writer.write_scan(
-        "r1",
-        _t("2024-01-01T12:00:00"),
-        _cell_stats(1),
-        _tracked_cells(1, "UID1"),
-        pd.DataFrame(),
-        _empty_cell_adjacency(),
-    )
-    writer.close()
-
-    reader = TrackStore(db_path, readonly=True)
-    count = reader._connect().execute("SELECT count(*) FROM cells_by_scan").fetchone()[0]
-    reader.close()
-    assert count == 1
+        with TrackStore(db_path, readonly=True) as reader:
+            count = reader._connect().execute("SELECT count(*) FROM cells_by_scan").fetchone()[0]
+        assert count == 1
+    finally:
+        catalog.close()
 
 
 # ---------------------------------------------------------------------------

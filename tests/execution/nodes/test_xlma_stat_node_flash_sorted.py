@@ -65,7 +65,7 @@ def test_run_on_flash_sorted_netcdf_produces_both_tables(tmp_path):
 
 def test_non_netcdf_files_are_ignored(tmp_path):
     write_flash_sorted_nc(tmp_path / "a.nc", "2024-05-18T12:00:00", 2)
-    (tmp_path / "LYLOUT_240518_120000.dat").write_text("ascii sources")
+    (tmp_path / "LYLOUT_240518_120000.dat").write_text("ascii sources", encoding="utf-8")
 
     result = XlmaStatModule().run(_run_context(tmp_path))
 
@@ -73,7 +73,7 @@ def test_non_netcdf_files_are_ignored(tmp_path):
 
 
 def test_directory_without_netcdf_raises(tmp_path):
-    (tmp_path / "LYLOUT_240518_120000.dat").write_text("ascii sources")
+    (tmp_path / "LYLOUT_240518_120000.dat").write_text("ascii sources", encoding="utf-8")
 
     with pytest.raises(ValueError, match="No flash-sorted NetCDF"):
         XlmaStatModule().run(_run_context(tmp_path))

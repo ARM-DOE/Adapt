@@ -96,7 +96,7 @@ def test_save_user_config_creates_file_with_named_entry(user_config_path):
     _save_user_config("my config", cfg, user_config_path)
 
     assert user_config_path.exists()
-    data = json.loads(user_config_path.read_text())
+    data = json.loads(user_config_path.read_text(encoding="utf-8"))
     assert "configs" in data
     assert "my config" in data["configs"]
 
@@ -109,7 +109,7 @@ def test_save_user_config_second_save_adds_entry_without_losing_first(user_confi
     _save_user_config("first", cfg, user_config_path)
     _save_user_config("second", cfg, user_config_path)
 
-    data = json.loads(user_config_path.read_text())
+    data = json.loads(user_config_path.read_text(encoding="utf-8"))
     assert "first" in data["configs"]
     assert "second" in data["configs"]
 
@@ -135,7 +135,7 @@ def test_load_user_config_raises_when_name_missing(user_config_path):
     """_load_user_config must raise KeyError for a config name that was never saved."""
     from adapt.consumers.live._config import _load_user_config
 
-    user_config_path.write_text(json.dumps({"configs": {}}))
+    user_config_path.write_text(json.dumps({"configs": {}}), encoding="utf-8")
 
     with pytest.raises(KeyError):
         _load_user_config("nonexistent", user_config_path)

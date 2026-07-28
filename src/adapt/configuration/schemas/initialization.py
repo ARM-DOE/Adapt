@@ -78,7 +78,7 @@ def write_default_config(path: Path, extensions: list[str] | None = None) -> Non
     header = _CONFIG_HEADER.format(timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml_writer.dump(data, descriptions, header=header))
+    path.write_text(yaml_writer.dump(data, descriptions, header=header), encoding="utf-8")
 
 
 # Internal alias used within this module

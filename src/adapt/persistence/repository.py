@@ -17,10 +17,10 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import sqlite3
 import tempfile
 import threading
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -380,7 +380,7 @@ class DataRepository:
             return pd.read_parquet(file_path)
         elif product_type == ProductType.CELLS_DB:
             table_name = table_name or "cells"
-            with sqlite3.connect(str(file_path)) as conn:
+            with closing(sqlite3.connect(str(file_path))) as conn:
                 return pd.read_sql(f"SELECT * FROM {table_name}", conn)
         else:
             raise ValueError(f"Cannot open as table: {product_type}")
@@ -713,7 +713,9 @@ class DataRepository:
 
         file_path = Path(artifact["file_path"])
 
-        with sqlite3.connect(str(file_path)) as conn:
+        # closing() outermost, conn innermost: the connection is its own
+        # transaction context manager, which commits but never closes.
+        with closing(sqlite3.connect(str(file_path))) as conn, conn:
             # If appending, perform schema migration for missing columns
             if if_exists == "append":
                 self._migrate_table_schema(conn, table_name, df)
@@ -928,8 +930,9 @@ class DataRepository:
             encoding = {var: {"zlib": True, "complevel": 4} for var in ds.data_vars}
             ds.to_netcdf(temp_path, encoding=encoding, engine="netcdf4")
 
-            # Atomic rename
-            shutil.move(temp_path, output_path)
+            # Atomic rename. os.replace (not shutil.move) — it is the only form
+            # that silently overwrites an existing destination on every platform.
+            os.replace(temp_path, output_path)
             logger.debug(f"Wrote NetCDF: {output_path}")
 
         except Exception:
@@ -941,7 +944,7 @@ class DataRepository:
         """Initialize cells database with WAL mode."""
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn:
             # Enable WAL mode for concurrent access
             conn.execute("PRAGMA journal_mode=WAL")
             conn.commit()

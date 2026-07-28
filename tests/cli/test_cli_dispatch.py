@@ -25,7 +25,7 @@ class TestSingleInstance:
         cli._check_single_instance()
 
     def test_live_pid_exits_with_error(self, pid_file, capsys):
-        pid_file.write_text(str(os.getpid()))  # our own PID is always alive
+        pid_file.write_text(str(os.getpid()), encoding="utf-8")  # our own PID is always alive
 
         with pytest.raises(SystemExit) as exc:
             cli._check_single_instance()
@@ -34,7 +34,7 @@ class TestSingleInstance:
         assert "already running" in capsys.readouterr().out
 
     def test_stale_pid_is_ignored(self, pid_file, monkeypatch):
-        pid_file.write_text("12345")
+        pid_file.write_text("12345", encoding="utf-8")
 
         def gone(pid, sig):
             raise ProcessLookupError
@@ -43,13 +43,13 @@ class TestSingleInstance:
         cli._check_single_instance()
 
     def test_malformed_pid_file_is_ignored(self, pid_file):
-        pid_file.write_text("not-a-pid")
+        pid_file.write_text("not-a-pid", encoding="utf-8")
 
         cli._check_single_instance()
 
     def test_write_then_remove_pid(self, pid_file):
         cli._write_pid()
-        assert pid_file.read_text() == str(os.getpid())
+        assert pid_file.read_text(encoding="utf-8") == str(os.getpid())
 
         cli._remove_pid()
         assert not pid_file.exists()
@@ -83,7 +83,7 @@ class TestMainDispatch:
         cli.main()
 
         assert out.exists()
-        assert "radar" in out.read_text()
+        assert "radar" in out.read_text(encoding="utf-8")
 
 
 class TestConfigCommand:
@@ -97,22 +97,22 @@ class TestConfigCommand:
 
     def test_existing_file_aborts_when_not_confirmed(self, tmp_path, monkeypatch, capsys):
         out = tmp_path / "config.yaml"
-        out.write_text("keep me")
+        out.write_text("keep me", encoding="utf-8")
         monkeypatch.setattr("builtins.input", lambda *_: "n")
 
         cli._config_cmd(self._args(out))
 
-        assert out.read_text() == "keep me"
+        assert out.read_text(encoding="utf-8") == "keep me"
         assert "Aborted" in capsys.readouterr().out
 
     def test_existing_file_overwritten_when_confirmed(self, tmp_path, monkeypatch):
         out = tmp_path / "config.yaml"
-        out.write_text("old")
+        out.write_text("old", encoding="utf-8")
         monkeypatch.setattr("builtins.input", lambda *_: "y")
 
         cli._config_cmd(self._args(out))
 
-        assert out.read_text() != "old"
+        assert out.read_text(encoding="utf-8") != "old"
 
     def test_unknown_pipeline_raises(self, tmp_path):
         args = argparse.Namespace(output=str(tmp_path / "c.yaml"), pipeline="goes", extensions=None)
@@ -130,7 +130,7 @@ class TestConfigCommand:
 
         cli._config_cmd(args)
 
-        assert "cell_volume_stats" in out.read_text()
+        assert "cell_volume_stats" in out.read_text(encoding="utf-8")
 
 
 class TestPostprocessCommand:

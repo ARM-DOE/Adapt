@@ -31,7 +31,7 @@ def test_appends_jsonl(tmp_path):
     path = tmp_path / "selections.jsonl"
     append_selection(path, _selection())
     append_selection(path, _selection(reason=SelectionReason.CONTINUATION))
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     assert json.loads(lines[0]) == {
         "cell_uid": "uid_beta",
@@ -42,6 +42,18 @@ def test_appends_jsonl(tmp_path):
         "observation_window": ["2024-06-01T14:00:00Z", "2024-06-01T14:30:00Z"],
         "predicted_hulls": None,
     }
+
+
+def test_lines_are_separated_by_a_bare_newline(tmp_path):
+    """The selection log is a data product — its bytes must not vary by platform.
+
+    Text mode on Windows translates "\\n" to "\\r\\n", so the same run would emit a
+    different file there.
+    """
+    path = tmp_path / "selections.jsonl"
+    append_selection(path, _selection())
+    append_selection(path, _selection())
+    assert b"\r\n" not in path.read_bytes()
 
 
 def test_missing_parent_dir_raises(tmp_path):

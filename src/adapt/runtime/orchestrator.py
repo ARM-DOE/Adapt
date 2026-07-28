@@ -26,7 +26,7 @@ from adapt.persistence import DataRepository
 from adapt.runtime.console_status import ConsoleStatus
 from adapt.runtime.file_tracker import FileProcessingTracker
 from adapt.runtime.history_handler import HistoryLogHandler
-from adapt.runtime.logging_setup import configure_logging
+from adapt.runtime.logging_setup import configure_logging, shutdown_logging
 from adapt.runtime.observability import ObsSettings, build_observability
 from adapt.runtime.processor import RadarProcessor
 from adapt.runtime.provenance import capture_provenance, config_hash
@@ -154,7 +154,7 @@ class PipelineOrchestrator:
         self.downloader: ScanSource | None = None
         self.processor: RadarProcessor | None = None
 
-        # File tracking (initialized in _setup_logging)
+        # File tracking (initialized in _setup_tracker)
         self.tracker: FileProcessingTracker | None = None
 
         # DataRepository (initialized in start()) - use run_id from config or generate
@@ -314,45 +314,13 @@ class PipelineOrchestrator:
             failures=int(m.counter_total("errors_total")),
         )
 
-    def _setup_logging(self):
-        """Configure logging and file tracking systems.
+    def _setup_tracker(self):
+        """Create the FileProcessingTracker that records per-file pipeline state.
 
-        Initializes root logger with file and console handlers, creates output
-        directories, and sets up FileProcessingTracker for pipeline state management.
-        Log level and paths derived from config.
+        Logging is not configured here — ``configure_logging`` is the single site
+        where handlers are constructed, and ``start`` calls it before this.
         """
-        log_level = getattr(logging, self.config.logging.level.upper(), logging.INFO)
-
-        # Get log path from output_dirs
         radar = self.config.downloader.radar
-        log_dir = Path(self.output_dirs["logs"])
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"pipeline_{radar}.log"
-
-        formatter = logging.Formatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-
-        # Clear existing handlers and add new ones
-        root = logging.getLogger()
-        root.setLevel(log_level)
-        for handler in root.handlers[:]:
-            root.removeHandler(handler)
-
-        # File handler
-        fh = logging.FileHandler(log_path)
-        fh.setLevel(log_level)
-        fh.setFormatter(formatter)
-        root.addHandler(fh)
-
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setLevel(log_level)
-        ch.setFormatter(formatter)
-        root.addHandler(ch)
-
-        logger.debug("Logging: level=%s, file=%s", log_level, log_path)
 
         # Initialize file tracker (stored in RADAR_ID/analysis/) - renamed to processing_tracker
         tracker_dir = Path(self.output_dirs["base"]) / radar / "analysis"
@@ -419,10 +387,27 @@ class PipelineOrchestrator:
             orch = PipelineOrchestrator(config)  # mode="historical" in config
             orch.start()  # Runs until all files between start_time/end_time processed
         """
-        self._setup_logging()
+        radar = self.config.downloader.radar
+
+        # Logging is configured first so that everything below it — repository
+        # construction, telemetry setup, and any failure in either — lands in the
+        # run's log file rather than being emitted before any handler exists.
+        # Live status line (spinner) — TTY only; self-disables when piped or quiet.
+        settings = self._obs_settings()
+        self._status = ConsoleStatus(
+            sys.stderr,
+            enabled=settings.console_logs and sys.stderr.isatty(),
+            clock=time.monotonic,
+        )
+        log_path = Path(self.output_dirs["logs"]) / f"pipeline_{radar}.log"
+        configure_logging(settings, log_path, console_status=self._status)
+        self._history_handler = HistoryLogHandler()
+        logging.getLogger().addHandler(self._history_handler)
+        self._reporter = RunReporter()
+
+        self._setup_tracker()
 
         # Initialize DataRepository
-        radar = self.config.downloader.radar
         assert self.run_id is not None
         self.repository = DataRepository(
             run_id=self.run_id,
@@ -440,21 +425,6 @@ class PipelineOrchestrator:
         )
         self._root_span.__enter__()
         self._root_trace_id = self._obs.current().trace_id
-
-        # Live status line (spinner) — TTY only; self-disables when piped or quiet.
-        settings = self._obs_settings()
-        self._status = ConsoleStatus(
-            sys.stderr,
-            enabled=settings.console_logs and sys.stderr.isatty(),
-            clock=time.monotonic,
-        )
-
-        # Structured logging (JSON file + quiet console) + capture warnings/errors.
-        log_path = Path(self.output_dirs["logs"]) / f"pipeline_{radar}.log"
-        configure_logging(settings, log_path, console_status=self._status)
-        self._history_handler = HistoryLogHandler()
-        logging.getLogger().addHandler(self._history_handler)
-        self._reporter = RunReporter()
 
         self._start_time = time.time()
         self._max_duration = max_runtime * 60 if max_runtime else None
@@ -708,6 +678,10 @@ class PipelineOrchestrator:
             self.tracker.close()
         else:
             logger.info("Pipeline stopped. Runtime: %.1fs", elapsed)
+
+        # Last: the run owns its log file, so releasing it is part of stopping.
+        # Nothing may log after this — a later start() reconfigures from scratch.
+        shutdown_logging()
 
     def _stop_processor(self) -> None:
         """Stop the processor, letting it finish its in-flight scan, with clear status.

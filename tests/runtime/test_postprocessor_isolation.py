@@ -22,7 +22,7 @@ pytestmark = pytest.mark.unit
 
 
 def _module_paths(yaml_path: Path) -> set[str]:
-    cfg = yaml.safe_load(yaml_path.read_text()) or {}
+    cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     return set((cfg.get("pipeline") or cfg.get("postprocess") or {}).get("modules", []) or [])
 
 

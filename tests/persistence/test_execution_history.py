@@ -11,6 +11,8 @@ module is computed from the stored rows.
 
 from datetime import UTC, datetime
 
+import pytest
+
 from adapt.contracts.execution_history import (
     ErrorEvent,
     RunProvenance,
@@ -50,12 +52,15 @@ def _start(run_id="R1"):
     )
 
 
-def _history(tmp_path):
-    return ExecutionHistory(tmp_path / "catalog.db")
+@pytest.fixture
+def history(tmp_path):
+    store = ExecutionHistory(tmp_path / "catalog.db")
+    yield store
+    store.close()
 
 
-def test_start_run_inserts_running_row_with_provenance(tmp_path):
-    h = _history(tmp_path)
+def test_start_run_inserts_running_row_with_provenance(history):
+    h = history
     h.start_run(_start())
     runs = h.query_runs()
     assert len(runs) == 1
@@ -65,8 +70,8 @@ def test_start_run_inserts_running_row_with_provenance(tmp_path):
     assert runs[0]["site"] == "KDIX"
 
 
-def test_record_modules_one_row_per_span_with_status(tmp_path):
-    h = _history(tmp_path)
+def test_record_modules_one_row_per_span_with_status(history):
+    h = history
     h.start_run(_start())
     spans = [
         SpanRecord("detection", "t", "s1", "p", 0.0, 2.0, 2.0, "", {}),
@@ -80,8 +85,8 @@ def test_record_modules_one_row_per_span_with_status(tmp_path):
     assert by["tracking"]["scan_id"] == "scan1"
 
 
-def test_finalize_run_updates_status_and_aggregates(tmp_path):
-    h = _history(tmp_path)
+def test_finalize_run_updates_status_and_aggregates(history):
+    h = history
     h.start_run(_start())
     h.finalize_run(
         RunSummary(
@@ -108,8 +113,8 @@ def test_finalize_run_updates_status_and_aggregates(tmp_path):
     assert run["slowest_stage_duration"] == 371.0
 
 
-def test_errors_and_warnings_stored_and_failure_rate(tmp_path):
-    h = _history(tmp_path)
+def test_errors_and_warnings_stored_and_failure_rate(history):
+    h = history
     h.start_run(_start())
     ok = [SpanRecord("detection", "t", "s", "p", 0, 1, 1.0, "", {})]
     bad = [SpanRecord("detection", "t", "s", "p", 0, 1, 1.0, "E: x", {})]

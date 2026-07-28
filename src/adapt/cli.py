@@ -29,6 +29,7 @@ from pathlib import Path
 
 from adapt import __version__
 from adapt.configuration.schemas import ConfigError
+from adapt.utils.process import process_alive
 
 # ---------------------------------------------------------------------------
 # Single-instance enforcement
@@ -49,20 +50,19 @@ def _check_single_instance() -> None:
     if not _PID_FILE.exists():
         return
     try:
-        pid = int(_PID_FILE.read_text().strip())
-        os.kill(pid, 0)  # signal 0 = existence check only
+        pid = int(_PID_FILE.read_text(encoding="utf-8").strip())
+    except ValueError:
+        return  # malformed PID file — ignore
+
+    if process_alive(pid):
         print(f"[adapt] Error: A pipeline is already running (PID {pid}).")
         print(f"[adapt] Stop it first, or delete {_PID_FILE} if it is stale.")
         sys.exit(1)
-    except (ProcessLookupError, PermissionError):
-        pass  # process gone — stale PID file
-    except ValueError:
-        pass  # malformed PID file — ignore
 
 
 def _write_pid() -> None:
     _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PID_FILE.write_text(str(os.getpid()))
+    _PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
 
 def _remove_pid() -> None:

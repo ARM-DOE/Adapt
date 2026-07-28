@@ -46,7 +46,7 @@ def _source_files(package_name: str) -> list[Path]:
 def _imported_adapt_modules(py_file: Path) -> set[str]:
     """Parse a .py file and return the set of adapt.modules.* names it imports."""
     try:
-        tree = ast.parse(py_file.read_text())
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
     except SyntaxError:
         return set()
 
@@ -101,7 +101,7 @@ def test_module_does_not_import_execution_or_runtime(pkg: str) -> None:
 
     for py_file in files:
         try:
-            tree = ast.parse(py_file.read_text())
+            tree = ast.parse(py_file.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
         for node in ast.walk(tree):
@@ -130,12 +130,21 @@ _SCAN_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _SRC_ADAPT = Path(__file__).parents[1] / "src" / "adapt"
 
 
+def _rel(py_file: Path, root: Path) -> str:
+    """Path of *py_file* relative to *root*, always with '/' separators.
+
+    These fitness functions compare paths against literal module locations, so
+    the separator must not depend on the OS the suite runs on.
+    """
+    return py_file.relative_to(root).as_posix()
+
+
 def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
     """The scan-time join-key format may appear only in adapt.utils.time."""
     offenders: list[str] = []
     for py_file in _SRC_ADAPT.rglob("*.py"):
-        if _SCAN_TIME_FORMAT in py_file.read_text():
-            offenders.append(str(py_file.relative_to(_SRC_ADAPT)))
+        if _SCAN_TIME_FORMAT in py_file.read_text(encoding="utf-8"):
+            offenders.append(_rel(py_file, _SRC_ADAPT))
 
     assert offenders == ["utils/time.py"], (
         "scan-time format must be centralized in adapt.utils.time.to_scan_iso — "
@@ -151,9 +160,9 @@ def test_adapt_name_is_never_all_caps() -> None:
     Matches the standalone token only, so 'arm_adaptive', 'ADAPTIVE', 'ADAPTER' are fine.
     """
     offenders = [
-        f"{py_file.relative_to(_SRC_ADAPT)}:{i}"
+        f"{_rel(py_file, _SRC_ADAPT)}:{i}"
         for py_file in _SRC_ADAPT.rglob("*.py")
-        for i, line in enumerate(py_file.read_text().splitlines(), 1)
+        for i, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1)
         if re.search(r"\bADAPT\b", line)
     ]
     assert not offenders, "Use 'Adapt', not 'ADAPT':\n" + "\n".join(offenders)
@@ -170,7 +179,7 @@ _WALL_CLOCK_ALLOWED = {"acquisition/module.py"}
 
 def _nondeterminism_calls(py_file: Path) -> list[str]:
     """Return wall-clock / global-RNG usages in a file (AST, ignores docstrings)."""
-    tree = ast.parse(py_file.read_text())
+    tree = ast.parse(py_file.read_text(encoding="utf-8"))
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute):
@@ -198,7 +207,7 @@ def test_module_does_not_read_wall_clock_or_global_rng(pkg: str) -> None:
     violations: list[str] = []
 
     for py_file in _source_files(pkg):
-        rel = str(py_file.relative_to(modules_dir))
+        rel = _rel(py_file, modules_dir)
         if rel in _WALL_CLOCK_ALLOWED:
             continue
         violations.extend(f"  {rel}: {hit}" for hit in _nondeterminism_calls(py_file))
@@ -233,7 +242,7 @@ _DEP_HOMES = {
 
 
 def _top_level_imports(py_file: Path) -> set[str]:
-    tree = ast.parse(py_file.read_text())
+    tree = ast.parse(py_file.read_text(encoding="utf-8"))
     tops: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -250,7 +259,7 @@ def test_heavy_dependency_stays_in_its_component(dep: str) -> None:
     violations: list[str] = []
 
     for py_file in _SRC_ADAPT.rglob("*.py"):
-        rel = str(py_file.relative_to(_SRC_ADAPT))
+        rel = _rel(py_file, _SRC_ADAPT)
         if dep in _top_level_imports(py_file) and not rel.startswith(allowed):
             violations.append(f"  {rel}")
 

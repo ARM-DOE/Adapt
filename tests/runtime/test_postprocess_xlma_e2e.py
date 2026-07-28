@@ -97,7 +97,7 @@ def _run_postprocess(repo, make_config, tmp_path) -> None:
     lma_dir.mkdir(exist_ok=True)
     # two flashes in minute 19:05 at the radar origin — the cell's mid-gap position
     write_flash_sorted_nc(lma_dir / "LYLOUT_240518_190000_3600_map.nc", "2024-05-18T19:05:10", 2)
-    (lma_dir / "LYLOUT_240518_190000.dat").write_text("raw ascii — ignored")
+    (lma_dir / "LYLOUT_240518_190000.dat").write_text("raw ascii — ignored", encoding="utf-8")
     config = make_config(module_params={"xlma_stat": {"input_dir": str(lma_dir)}})
     PostProcessor(repo, config).run(modules=["xlma_stat"])
 

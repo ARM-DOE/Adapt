@@ -99,9 +99,8 @@ def test_process_file_persists_all_declared_outputs(
     assert len(pq_items) >= 1
 
     # Tracking tables from the declared TrackTablesWrite spec.
-    rows = TrackStore(test_repository.catalog.db_path).get_cells_by_scan(
-        test_repository.run_id, _T2
-    )
+    with TrackStore(test_repository.catalog.db_path) as store:
+        rows = store.get_cells_by_scan(test_repository.run_id, _T2)
     assert rows["cell_uid"].tolist() == ["uid-1"]
 
     # Generic read API discovers the core tables in the same repository.

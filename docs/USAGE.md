@@ -83,13 +83,6 @@ adapt dashboard --help
 
 ---
 
-
-```bash
-adapt config my_config.yaml
-```
-
----
-
 ## Dashboard
 
 Launch in a second terminal while the pipeline is running:
@@ -124,6 +117,8 @@ The dashboard is **read-only** — it does not affect the pipeline.
 | **Min / Max** | Set the colour-scale range; values outside are masked |
 | **Proj steps** | Number of projected future positions to overlay (0 = show all) |
 | **Hover** | Mouse over any cell to see its statistics in the side panel |
+
+See [Dashboard Reference](dashboard_reference.md) for the full controls, launch wizard, and internals guide.
 
 ### Basemap
 

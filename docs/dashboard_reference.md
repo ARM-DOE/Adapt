@@ -1,7 +1,5 @@
 # Adapt Dashboard — Reference
 
----
-
 ## Getting started (first-time user)
 
 ### 1. Open the dashboard
@@ -87,8 +85,6 @@ The badge returns to **○ Idle**.
 If you close the dashboard while the pipeline is running, a dialog asks whether
 to stop it. The pipeline can also keep running independently — reopen the
 dashboard and it will offer to reconnect to the running process.
-
----
 
 ---
 

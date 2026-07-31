@@ -1,6 +1,6 @@
-# ARM Adapt
+# Adapt
 
-**Real-time processing for informed adaptive scanning of ARM weather radar operations and field campaigns.**
+**Real-time detection, projection, and tracking of convective storms in weather radar data, built to support adaptive radar scanning at the DOE ARM User Facility.**
 
 ![Status](https://img.shields.io/badge/STATUS-ACTIVE%20DEVELOPMENT-orange?style=for-the-badge&logo=github)
 ![API](https://img.shields.io/badge/API-BREAKING%20CHANGES-red?style=for-the-badge&logo=dependabot)
@@ -11,130 +11,72 @@
 [![codecov](https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov)](https://codecov.io/gh/ARM-DOE/Adapt)
 [![CodeFactor](https://www.codefactor.io/repository/github/arm-doe/adapt/badge)](https://www.codefactor.io/repository/github/arm-doe/adapt)
 [![PyPI Release](https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml)
+[![conda-forge](https://img.shields.io/conda/vn/conda-forge/arm-adapt.svg)](https://anaconda.org/conda-forge/arm-adapt)
 [![Downloads](https://static.pepy.tech/personalized-badge/arm-adapt?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pypi.org/project/arm-adapt/)
 [![License](https://img.shields.io/pypi/l/arm-adapt)](https://github.com/ARM-DOE/Adapt?tab=License-1-ov-file)
 [![ARM Sponsor](https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&colorB=00539c)](https://www.arm.gov/)
 
-> **Note:** Adapt is under active development. We are not accepting external Pull Requests at this time.
-> Contribution guidelines will be published after the stable release. Expect frequent breaking changes
-> in APIs, configuration files, database schemas, and outputs.
+> **Note.** Adapt is under active development. External pull requests are not being accepted at this
+> time; contribution guidelines will follow the first stable release. APIs, configuration files,
+> database schemas, and output formats are subject to change without notice.
+
+**Documentation:** [arm-doe.github.io/Adapt](https://arm-doe.github.io/Adapt/) — [Installation](https://arm-doe.github.io/Adapt/installation.html) · [User Guide](https://arm-doe.github.io/Adapt/USAGE.html) · [CLI Reference](https://arm-doe.github.io/Adapt/cli_reference.html)
 
 ---
 
 ## Overview
 
-**ARM Adapt** is a configuration-driven modular framework for near real-time analysis of convective systems
-designed to support adaptive sampling and study of convective storms and their life cycles. The system
-implements a modular pipeline that ingests radar observations, performs gridding and segmentation to identify
-convective cells, and maintains their identity through time using tracking. It further derives cell-level
-properties and motion to characterize storm evolution and generate candidate targets for adaptive radar scanning.
+Adapt is a modular framework for real-time convective cell detection, motion projection, and storm
+lifecycle analysis. It processes a stream of radar volume scans and, for each cell, produces a tracked
+identity, a set of measured properties, and a record of lifecycle events — initiation, growth,
+splitting, merging, and decay. Results are written to a structured, queryable repository (NetCDF,
+Parquet, and SQLite) exposed through a read-only Python API, rather than as loose output files.
 
-Adapt operates in both real-time and archival modes, producing standardized data products in the form of
-gridded fields, tabular summaries, and relational tracking records. Its design emphasizes reproducibility,
-extensibility, and consistency, allowing new analysis methods and data sources to be integrated without
-altering core workflows.
+The processing pipeline is composed of independently registered modules — ingest, detection, projection,
+analysis, and tracking — assembled automatically at run time. New algorithms and data sources are added
+by registering a module, not by modifying the pipeline. Every run is deterministic and reproducible:
+runs are registered, derived quantities are traceable to their inputs, and identical inputs produce
+identical tracks.
 
-Currently it ingests NEXRAD Level-II data, performs gridding, segmentation, and analysis, and writes
-results for downstream visualization and scientific workflows.
+## Motivation
 
----
+Adapt is developed to support adaptive scanning at the U.S. Department of Energy's Atmospheric Radiation
+Measurement (ARM) User Facility, where the C-Band Scanning ARM Precipitation Radar (CSAPR2) requires a
+real-time source of high-value scan targets, identified and prioritized automatically rather than by a
+fixed volume-scan schedule. The same pipeline runs unchanged on historical data, supporting research
+applications such as storm lifecycle studies, radar–lightning correlation analysis, and the construction
+of analysis-ready, multi-sensor datasets combining radar, satellite, and Lightning Mapping Array
+observations.
 
-## Pipeline
+## Current status
 
-```
-AWS S3 (NEXRAD Level-II)
-        │
-        ▼
-   Downloader
-        │  raw files
-        ▼
-   Processor
-        ├─ Ingest      (Py-ART + xarray → Cartesian grid)
-        ├─ Detection   (threshold + morphology → cell labels)
-        ├─ Projection  (optical flow → future cell positions)
-        ├─ Analysis    (per-cell statistics)
-        └─ Tracking    (stable cell identities across scans)
-        │
-        ▼
-   Output repository  (NetCDF + Parquet + SQLite)
-        │
-        ▼
-   Dashboard  (live Tkinter GUI)
-```
+Adapt is at an alpha stage of development.
 
----
+- The reference NEXRAD pipeline (ingest, detection, projection, analysis, tracking) runs end to end in
+  real-time and historical modes.
+- A read-only query API and GUI dashboard provide access to pipeline output.
+- Post-processing modules enrich completed storm tracks with observations from other instruments.
+- Rule-based target selection for adaptive scanning is under active development.
+- Supported platforms: macOS, Linux, and Windows. See [Installation](https://arm-doe.github.io/Adapt/installation.html).
 
-## Installation
+No backward compatibility is guaranteed for APIs, configuration, or generated data products until the
+first stable release.
 
-Create a fresh conda environment (Python 3.13) and install from PyPI:
+## Roadmap
 
-```bash
-conda create -n adapt_env python=3.13 -y
-conda activate adapt_env
-pip install arm-adapt
-adapt --help
-```
-
-The environment must be **fresh**. Adapt's compiled dependencies (netCDF4, h5py,
-opencv, Py-ART) ship both conda and pip builds of the same native libraries;
-installing the pip wheels over existing conda builds mixes incompatible binaries
-and fails at import with a DLL error — on Windows, `[WinError 11] An attempt was
-made to load a program with an incorrect format`. On Windows, use 64-bit x86
-Python: several of these dependencies publish no ARM64 wheels.
-
-### Developers — latest source
-
-To run the bleeding-edge version and have your edits take effect immediately:
-
-```bash
-conda create -n adapt_env1 python=3.13 -y
-conda activate adapt_env1
-git clone https://github.com/ARM-DOE/Adapt.git
-cd Adapt
-pip install -e .
-```
-
-Then follow the [Quickstart](#quickstart) below.
-
----
-
-## Quickstart
-
-Work inside a directory and it becomes the repository — `adapt config` writes
-`config.yaml` there with `base_dir` pointing at itself, and the other commands
-read it from the working directory. No paths to pass:
-
-```bash
-mkdir my_case && cd my_case
-
-adapt config                    # skip if you already have a config.yaml
-adapt run-nexrad --radar KLOT   # Ctrl-C to stop
-
-adapt dashboard                 # second terminal; repo is selectable in the GUI
-```
-
-Everything is overridable — a config elsewhere, a different output root, another
-repository — but none of it is required. Run `adapt <command> --help` for the
-full set of options.
-
----
-
-## Status and Compatibility
-
-- **Status:** Alpha — provided for early testing and evaluation.
-- No backward compatibility is guaranteed for code, APIs, configuration, or generated data products
-  (SQLite, Parquet, NetCDF) until the first stable release.
+Planned work extends Adapt toward a general, multi-sensor storm-analysis framework: pluggable tracking
+and segmentation backends, a data-agnostic variable layer so new instruments are a configuration change
+rather than a code change, and integration with ARM radar-control systems to close the loop between
+detection and adaptive scanning. See [Vision](https://arm-doe.github.io/Adapt/vision.html) for details.
 
 ---
 
 ## Funding
 
 Adapt is supported by the U.S. Department of Energy as part of the Atmospheric Radiation Measurement
-(ARM) User Facility within the Office of Science.
-
----
+(ARM) User Facility, within the Office of Science.
 
 ## License
 
 Copyright © 2026, UChicago Argonne, LLC.
-See the [LICENSE](https://github.com/ARM-DOE/Adapt/blob/main/LICENSE) file for terms and disclaimer.
+See [LICENSE](https://github.com/ARM-DOE/Adapt/blob/main/LICENSE) for terms and disclaimer.

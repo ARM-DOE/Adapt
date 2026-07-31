@@ -8,31 +8,42 @@
 
 ---
 
-## Standard installation
+## Recommended: conda-forge
+
+Adapt is published on [conda-forge](https://anaconda.org/conda-forge/arm-adapt) for macOS, Linux, and
+Windows. Installing from there keeps every compiled dependency (netCDF4, h5py, opencv, Py-ART) on
+conda-native builds, which avoids the binary conflicts described below:
 
 ```bash
-pip install arm-adapt
+conda create -n adapt_env python=3.13 -y
+conda activate adapt_env
+conda install conda-forge::arm-adapt
 ```
 
 Verify:
 
 ```bash
+adapt --version
 adapt --help
 ```
+
+`adapt --version` prints the installed version and the path Adapt was installed to — useful for
+confirming which environment is active.
 
 ---
 
-## Recommended: conda environment
-
-Using conda or mamba avoids dependency conflicts, particularly with geospatial
-libraries (PROJ, GDAL):
+## Alternative: pip
 
 ```bash
-mamba create -n adapt_env python=3.13 -y
-mamba activate adapt_env
 pip install arm-adapt
-adapt --help
 ```
+
+The environment must be **fresh** — do not `pip install` into a conda environment that already has
+netCDF4, h5py, opencv, or Py-ART installed from conda-forge. Adapt's compiled dependencies ship both
+conda and pip builds of the same native libraries, and mixing them fails at import with a DLL error —
+on Windows, `[WinError 11] An attempt was made to load a program with an incorrect format`. On Windows,
+use 64-bit x86 Python: several of these dependencies publish no ARM64 wheels. This is a pip/conda
+mixing issue only — it does not apply to the conda-forge install above.
 
 ---
 
@@ -61,11 +72,8 @@ adapt dashboard                           # in a second terminal
 and sets `base_dir` to that same directory, so the three commands above work
 together with no paths to pass.
 
-> **Use a fresh environment.** Adapt's compiled dependencies (netCDF4, h5py,
-> opencv, Py-ART) ship both conda and pip builds of the same native libraries.
-> Installing the pip wheels over existing conda builds mixes incompatible
-> binaries and fails at import with a DLL error — on Windows,
-> `[WinError 11] An attempt was made to load a program with an incorrect format`.
+> Use a fresh environment for the editable install too — the same pip/conda
+> binary-mixing issue described above applies.
 
 ---
 

@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>ARM Adapt &#8212; Adapt 0.1.4 documentation</title>
+    <title>Adapt &#8212; Adapt 0.1.4 documentation</title>
   
   
   
@@ -145,6 +145,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="dashboard_reference.html">
+    Adapt Dashboard — Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="cli_reference.html">
     CLI Reference
   </a>
@@ -157,13 +164,6 @@
   </a>
 </li>
 
-
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="api/cli.html">
-    Command-Line Interface
-  </a>
-</li>
-
             <li class="nav-item dropdown">
                 <button class="btn dropdown-toggle nav-item" type="button"
                 data-bs-toggle="dropdown" aria-expanded="false"
@@ -172,6 +172,13 @@
                 </button>
                 <ul id="pst-nav-more-links" class="dropdown-menu">
                     
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="api/cli.html">
+    Command-Line Interface
+  </a>
+</li>
+
+
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="api/dashboard.html">
     Dashboard (GUI)
@@ -306,6 +313,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="dashboard_reference.html">
+    Adapt Dashboard — Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="cli_reference.html">
     CLI Reference
   </a>
@@ -417,9 +431,9 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="arm-adapt">
-<h1>ARM Adapt<a class="headerlink" href="#arm-adapt" title="Link to this heading">#</a></h1>
-<p><strong>Real-time processing for informed adaptive scanning of ARM weather radar operations and field campaigns.</strong></p>
+  <section id="adapt">
+<h1>Adapt<a class="headerlink" href="#adapt" title="Link to this heading">#</a></h1>
+<p><strong>Real-time detection, projection, and tracking of convective storms in weather radar data, built to support adaptive radar scanning at the DOE ARM User Facility.</strong></p>
 <p><img alt="Status" src="https://img.shields.io/badge/STATUS-ACTIVE%20DEVELOPMENT-orange?style=for-the-badge&amp;logo=github" />
 <img alt="API" src="https://img.shields.io/badge/API-BREAKING%20CHANGES-red?style=for-the-badge&amp;logo=dependabot" />
 <img alt="Stability" src="https://img.shields.io/badge/STABILITY-ALPHA-yellow?style=for-the-badge" /></p>
@@ -428,119 +442,71 @@
 <a class="reference external" href="https://codecov.io/gh/ARM-DOE/Adapt"><img alt="codecov" src="https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov" /></a>
 <a class="reference external" href="https://www.codefactor.io/repository/github/arm-doe/adapt"><img alt="CodeFactor" src="https://www.codefactor.io/repository/github/arm-doe/adapt/badge" /></a>
 <a class="reference external" href="https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml"><img alt="PyPI Release" src="https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml/badge.svg" /></a>
+<a class="reference external" href="https://anaconda.org/conda-forge/arm-adapt"><img alt="conda-forge" src="https://img.shields.io/conda/vn/conda-forge/arm-adapt.svg" /></a>
 <a class="reference external" href="https://pypi.org/project/arm-adapt/"><img alt="Downloads" src="https://static.pepy.tech/personalized-badge/arm-adapt?period=total&amp;units=INTERNATIONAL_SYSTEM&amp;left_color=BLACK&amp;right_color=GREEN&amp;left_text=downloads" /></a>
 <a class="reference external" href="https://github.com/ARM-DOE/Adapt?tab=License-1-ov-file"><img alt="License" src="https://img.shields.io/pypi/l/arm-adapt" /></a>
 <a class="reference external" href="https://www.arm.gov/"><img alt="ARM Sponsor" src="https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&amp;colorB=00539c" /></a></p>
 <blockquote>
-<div><p><strong>Note:</strong> Adapt is under active development. We are not accepting external Pull Requests at this time.
-Contribution guidelines will be published after the stable release. Expect frequent breaking changes
-in APIs, configuration files, database schemas, and outputs.</p>
+<div><p><strong>Note.</strong> Adapt is under active development. External pull requests are not being accepted at this
+time; contribution guidelines will follow the first stable release. APIs, configuration files,
+database schemas, and output formats are subject to change without notice.</p>
 </div></blockquote>
+<p><strong>Documentation:</strong> <a class="reference external" href="https://arm-doe.github.io/Adapt/">arm-doe.github.io/Adapt</a> — <a class="reference external" href="https://arm-doe.github.io/Adapt/installation.html">Installation</a> · <a class="reference external" href="https://arm-doe.github.io/Adapt/USAGE.html">User Guide</a> · <a class="reference external" href="https://arm-doe.github.io/Adapt/cli_reference.html">CLI Reference</a></p>
 <hr class="docutils" />
 <section id="overview">
 <h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
-<p><strong>ARM Adapt</strong> is a configuration-driven modular framework for near real-time analysis of convective systems
-designed to support adaptive sampling and study of convective storms and their life cycles. The system
-implements a modular pipeline that ingests radar observations, performs gridding and segmentation to identify
-convective cells, and maintains their identity through time using tracking. It further derives cell-level
-properties and motion to characterize storm evolution and generate candidate targets for adaptive radar scanning.</p>
-<p>Adapt operates in both real-time and archival modes, producing standardized data products in the form of
-gridded fields, tabular summaries, and relational tracking records. Its design emphasizes reproducibility,
-extensibility, and consistency, allowing new analysis methods and data sources to be integrated without
-altering core workflows.</p>
-<p>Currently it ingests NEXRAD Level-II data, performs gridding, segmentation, and analysis, and writes
-results for downstream visualization and scientific workflows.</p>
+<p>Adapt is a modular framework for real-time convective cell detection, motion projection, and storm
+lifecycle analysis. It processes a stream of radar volume scans and, for each cell, produces a tracked
+identity, a set of measured properties, and a record of lifecycle events — initiation, growth,
+splitting, merging, and decay. Results are written to a structured, queryable repository (NetCDF,
+Parquet, and SQLite) exposed through a read-only Python API, rather than as loose output files.</p>
+<p>The processing pipeline is composed of independently registered modules — ingest, detection, projection,
+analysis, and tracking — assembled automatically at run time. New algorithms and data sources are added
+by registering a module, not by modifying the pipeline. Every run is deterministic and reproducible:
+runs are registered, derived quantities are traceable to their inputs, and identical inputs produce
+identical tracks.</p>
 </section>
-<hr class="docutils" />
-<section id="pipeline">
-<h2>Pipeline<a class="headerlink" href="#pipeline" title="Link to this heading">#</a></h2>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>AWS S3 (NEXRAD Level-II)
-        │
-        ▼
-   Downloader
-        │  raw files
-        ▼
-   Processor
-        ├─ Ingest      (Py-ART + xarray → Cartesian grid)
-        ├─ Detection   (threshold + morphology → cell labels)
-        ├─ Projection  (optical flow → future cell positions)
-        ├─ Analysis    (per-cell statistics)
-        └─ Tracking    (stable cell identities across scans)
-        │
-        ▼
-   Output repository  (NetCDF + Parquet + SQLite)
-        │
-        ▼
-   Dashboard  (live Tkinter GUI)
-</pre></div>
-</div>
+<section id="motivation">
+<h2>Motivation<a class="headerlink" href="#motivation" title="Link to this heading">#</a></h2>
+<p>Adapt is developed to support adaptive scanning at the U.S. Department of Energy’s Atmospheric Radiation
+Measurement (ARM) User Facility, where the C-Band Scanning ARM Precipitation Radar (CSAPR2) requires a
+real-time source of high-value scan targets, identified and prioritized automatically rather than by a
+fixed volume-scan schedule. The same pipeline runs unchanged on historical data, supporting research
+applications such as storm lifecycle studies, radar–lightning correlation analysis, and the construction
+of analysis-ready, multi-sensor datasets combining radar, satellite, and Lightning Mapping Array
+observations.</p>
 </section>
-<hr class="docutils" />
-<section id="installation">
-<h2>Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h2>
-<p>Create a fresh conda environment (Python 3.13) and install from PyPI:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_env<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
-conda<span class="w"> </span>activate<span class="w"> </span>adapt_env
-pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
-adapt<span class="w"> </span>--help
-</pre></div>
-</div>
-<p>The environment must be <strong>fresh</strong>. Adapt’s compiled dependencies (netCDF4, h5py,
-opencv, Py-ART) ship both conda and pip builds of the same native libraries;
-installing the pip wheels over existing conda builds mixes incompatible binaries
-and fails at import with a DLL error — on Windows, <code class="docutils literal notranslate"><span class="pre">[WinError</span> <span class="pre">11]</span> <span class="pre">An</span> <span class="pre">attempt</span> <span class="pre">was</span> <span class="pre">made</span> <span class="pre">to</span> <span class="pre">load</span> <span class="pre">a</span> <span class="pre">program</span> <span class="pre">with</span> <span class="pre">an</span> <span class="pre">incorrect</span> <span class="pre">format</span></code>. On Windows, use 64-bit x86
-Python: several of these dependencies publish no ARM64 wheels.</p>
-<section id="developers-latest-source">
-<h3>Developers — latest source<a class="headerlink" href="#developers-latest-source" title="Link to this heading">#</a></h3>
-<p>To run the bleeding-edge version and have your edits take effect immediately:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_env1<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
-conda<span class="w"> </span>activate<span class="w"> </span>adapt_env1
-git<span class="w"> </span>clone<span class="w"> </span>https://github.com/ARM-DOE/Adapt.git
-<span class="nb">cd</span><span class="w"> </span>Adapt
-pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
-</pre></div>
-</div>
-<p>Then follow the <a class="reference internal" href="#quickstart"><span class="xref myst">Quickstart</span></a> below.</p>
-</section>
-</section>
-<hr class="docutils" />
-<section id="quickstart">
-<h2>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">#</a></h2>
-<p>Work inside a directory and it becomes the repository — <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> writes
-<code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> there with <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> pointing at itself, and the other commands
-read it from the working directory. No paths to pass:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mkdir<span class="w"> </span>my_case<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>my_case
-
-adapt<span class="w"> </span>config<span class="w">                    </span><span class="c1"># skip if you already have a config.yaml</span>
-adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w">   </span><span class="c1"># Ctrl-C to stop</span>
-
-adapt<span class="w"> </span>dashboard<span class="w">                 </span><span class="c1"># second terminal; repo is selectable in the GUI</span>
-</pre></div>
-</div>
-<p>Everything is overridable — a config elsewhere, a different output root, another
-repository — but none of it is required. Run <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">&lt;command&gt;</span> <span class="pre">--help</span></code> for the
-full set of options.</p>
-</section>
-<hr class="docutils" />
-<section id="status-and-compatibility">
-<h2>Status and Compatibility<a class="headerlink" href="#status-and-compatibility" title="Link to this heading">#</a></h2>
+<section id="current-status">
+<h2>Current status<a class="headerlink" href="#current-status" title="Link to this heading">#</a></h2>
+<p>Adapt is at an alpha stage of development.</p>
 <ul class="simple">
-<li><p><strong>Status:</strong> Alpha — provided for early testing and evaluation.</p></li>
-<li><p>No backward compatibility is guaranteed for code, APIs, configuration, or generated data products
-(SQLite, Parquet, NetCDF) until the first stable release.</p></li>
+<li><p>The reference NEXRAD pipeline (ingest, detection, projection, analysis, tracking) runs end to end in
+real-time and historical modes.</p></li>
+<li><p>A read-only query API and GUI dashboard provide access to pipeline output.</p></li>
+<li><p>Post-processing modules enrich completed storm tracks with observations from other instruments.</p></li>
+<li><p>Rule-based target selection for adaptive scanning is under active development.</p></li>
+<li><p>Supported platforms: macOS, Linux, and Windows. See <a class="reference external" href="https://arm-doe.github.io/Adapt/installation.html">Installation</a>.</p></li>
 </ul>
+<p>No backward compatibility is guaranteed for APIs, configuration, or generated data products until the
+first stable release.</p>
+</section>
+<section id="roadmap">
+<h2>Roadmap<a class="headerlink" href="#roadmap" title="Link to this heading">#</a></h2>
+<p>Planned work extends Adapt toward a general, multi-sensor storm-analysis framework: pluggable tracking
+and segmentation backends, a data-agnostic variable layer so new instruments are a configuration change
+rather than a code change, and integration with ARM radar-control systems to close the loop between
+detection and adaptive scanning. See <a class="reference external" href="https://arm-doe.github.io/Adapt/vision.html">Vision</a> for details.</p>
 </section>
 <hr class="docutils" />
 <section id="funding">
 <h2>Funding<a class="headerlink" href="#funding" title="Link to this heading">#</a></h2>
 <p>Adapt is supported by the U.S. Department of Energy as part of the Atmospheric Radiation Measurement
-(ARM) User Facility within the Office of Science.</p>
+(ARM) User Facility, within the Office of Science.</p>
 </section>
-<hr class="docutils" />
 <section id="license">
 <h2>License<a class="headerlink" href="#license" title="Link to this heading">#</a></h2>
 <p>Copyright © 2026, UChicago Argonne, LLC.
-See the <a class="reference external" href="https://github.com/ARM-DOE/Adapt/blob/main/LICENSE">LICENSE</a> file for terms and disclaimer.</p>
+See <a class="reference external" href="https://github.com/ARM-DOE/Adapt/blob/main/LICENSE">LICENSE</a> for terms and disclaimer.</p>
 <div class="toctree-wrapper compound">
 </div>
 <div class="toctree-wrapper compound">
@@ -591,13 +557,9 @@ See the <a class="reference external" href="https://github.com/ARM-DOE/Adapt/blo
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline">Pipeline</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installation">Installation</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#developers-latest-source">Developers — latest source</a></li>
-</ul>
-</li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quickstart">Quickstart</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#status-and-compatibility">Status and Compatibility</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#motivation">Motivation</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#current-status">Current status</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#roadmap">Roadmap</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#funding">Funding</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#license">License</a><ul class="nav section-nav flex-column">
 </ul>

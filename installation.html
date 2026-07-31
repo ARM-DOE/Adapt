@@ -46,7 +46,7 @@
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="User Guide" href="USAGE.html" />
-    <link rel="prev" title="ARM Adapt" href="readme.html" />
+    <link rel="prev" title="Adapt" href="readme.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -146,6 +146,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="dashboard_reference.html">
+    Adapt Dashboard — Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="cli_reference.html">
     CLI Reference
   </a>
@@ -158,13 +165,6 @@
   </a>
 </li>
 
-
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="api/cli.html">
-    Command-Line Interface
-  </a>
-</li>
-
             <li class="nav-item dropdown">
                 <button class="btn dropdown-toggle nav-item" type="button"
                 data-bs-toggle="dropdown" aria-expanded="false"
@@ -173,6 +173,13 @@
                 </button>
                 <ul id="pst-nav-more-links" class="dropdown-menu">
                     
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="api/cli.html">
+    Command-Line Interface
+  </a>
+</li>
+
+
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="api/dashboard.html">
     Dashboard (GUI)
@@ -300,6 +307,13 @@
 <li class="nav-item ">
   <a class="nav-link nav-internal" href="USAGE.html">
     User Guide
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="dashboard_reference.html">
+    Adapt Dashboard — Reference
   </a>
 </li>
 
@@ -468,27 +482,36 @@
 </ul>
 </section>
 <hr class="docutils" />
-<section id="standard-installation">
-<h2>Standard installation<a class="headerlink" href="#standard-installation" title="Link to this heading">#</a></h2>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
+<section id="recommended-conda-forge">
+<h2>Recommended: conda-forge<a class="headerlink" href="#recommended-conda-forge" title="Link to this heading">#</a></h2>
+<p>Adapt is published on <a class="reference external" href="https://anaconda.org/conda-forge/arm-adapt">conda-forge</a> for macOS, Linux, and
+Windows. Installing from there keeps every compiled dependency (netCDF4, h5py, opencv, Py-ART) on
+conda-native builds, which avoids the binary conflicts described below:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_env<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
+conda<span class="w"> </span>activate<span class="w"> </span>adapt_env
+conda<span class="w"> </span>install<span class="w"> </span>conda-forge::arm-adapt
 </pre></div>
 </div>
 <p>Verify:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>--help
-</pre></div>
-</div>
-</section>
-<hr class="docutils" />
-<section id="recommended-conda-environment">
-<h2>Recommended: conda environment<a class="headerlink" href="#recommended-conda-environment" title="Link to this heading">#</a></h2>
-<p>Using conda or mamba avoids dependency conflicts, particularly with geospatial
-libraries (PROJ, GDAL):</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mamba<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_env<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
-mamba<span class="w"> </span>activate<span class="w"> </span>adapt_env
-pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>--version
 adapt<span class="w"> </span>--help
 </pre></div>
 </div>
+<p><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">--version</span></code> prints the installed version and the path Adapt was installed to — useful for
+confirming which environment is active.</p>
+</section>
+<hr class="docutils" />
+<section id="alternative-pip">
+<h2>Alternative: pip<a class="headerlink" href="#alternative-pip" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
+</pre></div>
+</div>
+<p>The environment must be <strong>fresh</strong> — do not <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> into a conda environment that already has
+netCDF4, h5py, opencv, or Py-ART installed from conda-forge. Adapt’s compiled dependencies ship both
+conda and pip builds of the same native libraries, and mixing them fails at import with a DLL error —
+on Windows, <code class="docutils literal notranslate"><span class="pre">[WinError</span> <span class="pre">11]</span> <span class="pre">An</span> <span class="pre">attempt</span> <span class="pre">was</span> <span class="pre">made</span> <span class="pre">to</span> <span class="pre">load</span> <span class="pre">a</span> <span class="pre">program</span> <span class="pre">with</span> <span class="pre">an</span> <span class="pre">incorrect</span> <span class="pre">format</span></code>. On Windows,
+use 64-bit x86 Python: several of these dependencies publish no ARM64 wheels. This is a pip/conda
+mixing issue only — it does not apply to the conda-forge install above.</p>
 </section>
 <hr class="docutils" />
 <section id="developers-latest-source">
@@ -512,11 +535,8 @@ adapt<span class="w"> </span>dashboard<span class="w">                          
 and sets <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> to that same directory, so the three commands above work
 together with no paths to pass.</p>
 <blockquote>
-<div><p><strong>Use a fresh environment.</strong> Adapt’s compiled dependencies (netCDF4, h5py,
-opencv, Py-ART) ship both conda and pip builds of the same native libraries.
-Installing the pip wheels over existing conda builds mixes incompatible
-binaries and fails at import with a DLL error — on Windows,
-<code class="docutils literal notranslate"><span class="pre">[WinError</span> <span class="pre">11]</span> <span class="pre">An</span> <span class="pre">attempt</span> <span class="pre">was</span> <span class="pre">made</span> <span class="pre">to</span> <span class="pre">load</span> <span class="pre">a</span> <span class="pre">program</span> <span class="pre">with</span> <span class="pre">an</span> <span class="pre">incorrect</span> <span class="pre">format</span></code>.</p>
+<div><p>Use a fresh environment for the editable install too — the same pip/conda
+binary-mixing issue described above applies.</p>
 </div></blockquote>
 </section>
 <hr class="docutils" />
@@ -597,7 +617,7 @@ and coordinate toolbar are disabled automatically).</p>
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">ARM Adapt</p>
+        <p class="prev-next-title">Adapt</p>
       </div>
     </a>
     <a class="right-next"
@@ -629,8 +649,8 @@ and coordinate toolbar are disabled automatically).</p>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#requirements">Requirements</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#standard-installation">Standard installation</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#recommended-conda-environment">Recommended: conda environment</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#recommended-conda-forge">Recommended: conda-forge</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#alternative-pip">Alternative: pip</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#developers-latest-source">Developers: latest source</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#optional-map-overlay-support">Optional: map overlay support</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">

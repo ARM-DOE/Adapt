@@ -46,7 +46,7 @@
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="License" href="license.html" />
-    <link rel="prev" title="User Guide" href="USAGE.html" />
+    <link rel="prev" title="Adapt Dashboard — Reference" href="dashboard_reference.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -145,6 +145,13 @@
 </li>
 
 
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="dashboard_reference.html">
+    Adapt Dashboard — Reference
+  </a>
+</li>
+
+
 <li class="nav-item current active">
   <a class="nav-link nav-internal" href="#">
     CLI Reference
@@ -158,13 +165,6 @@
   </a>
 </li>
 
-
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="api/cli.html">
-    Command-Line Interface
-  </a>
-</li>
-
             <li class="nav-item dropdown">
                 <button class="btn dropdown-toggle nav-item" type="button"
                 data-bs-toggle="dropdown" aria-expanded="false"
@@ -173,6 +173,13 @@
                 </button>
                 <ul id="pst-nav-more-links" class="dropdown-menu">
                     
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="api/cli.html">
+    Command-Line Interface
+  </a>
+</li>
+
+
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="api/dashboard.html">
     Dashboard (GUI)
@@ -300,6 +307,13 @@
 <li class="nav-item ">
   <a class="nav-link nav-internal" href="USAGE.html">
     User Guide
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="dashboard_reference.html">
+    Adapt Dashboard — Reference
   </a>
 </li>
 
@@ -463,8 +477,12 @@
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">adapt</span> <span class="n">run</span><span class="o">-</span><span class="n">nexrad</span>   <span class="c1"># run the processing pipeline</span>
 <span class="n">adapt</span> <span class="n">config</span>       <span class="c1"># generate a config.yaml template</span>
 <span class="n">adapt</span> <span class="n">dashboard</span>    <span class="c1"># open the GUI dashboard</span>
+<span class="n">adapt</span> <span class="n">postprocess</span>  <span class="c1"># enrich an existing repository with extension tables</span>
 </pre></div>
 </div>
+<p><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">--version</span></code> prints the installed version and the path Adapt was installed
+to. <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">--help</span></code> and <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">&lt;command&gt;</span> <span class="pre">--help</span></code> print this same reference from
+the command line.</p>
 <hr class="docutils" />
 <section id="adapt-run-nexrad">
 <h2><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">run-nexrad</span></code><a class="headerlink" href="#adapt-run-nexrad" title="Link to this heading">#</a></h2>
@@ -545,6 +563,14 @@ adapt<span class="w"> </span>run-nexrad<span class="w"> </span><span class="o">[
 <td><p>off</p></td>
 <td><p>Open a live window showing plots as they are produced</p></td>
 </tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--only</span> <span class="pre">NODES</span></code></p></td>
+<td><p>—</p></td>
+<td><p>Comma-separated pipeline node names to run; skip the rest. Mutually exclusive with <code class="docutils literal notranslate"><span class="pre">--not</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--not</span> <span class="pre">NODES</span></code></p></td>
+<td><p>—</p></td>
+<td><p>Comma-separated pipeline node names to skip; run the rest. Mutually exclusive with <code class="docutils literal notranslate"><span class="pre">--only</span></code></p></td>
+</tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-v</span></code>, <code class="docutils literal notranslate"><span class="pre">--verbose</span></code></p></td>
 <td><p>off</p></td>
 <td><p>Enable DEBUG-level logging</p></td>
@@ -580,8 +606,69 @@ adapt<span class="w"> </span>config<span class="w"> </span>/path/to/my.yaml<span
 </tbody>
 </table>
 </div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Flag</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--pipeline</span> <span class="pre">NAME</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nexrad</span></code></p></td>
+<td><p>Pipeline to generate a template for</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--extensions</span> <span class="pre">PATHS</span></code></p></td>
+<td><p>—</p></td>
+<td><p>Comma-separated extension module import paths to include (e.g. <code class="docutils literal notranslate"><span class="pre">adapt.execution.nodes.cell_volume_stats</span></code>)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <p>The generated file includes all tunable parameters with inline comments.
 Edit it, then pass it as the first argument to <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">run-nexrad</span></code>.</p>
+</section>
+<hr class="docutils" />
+<section id="adapt-postprocess">
+<h2><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">postprocess</span></code><a class="headerlink" href="#adapt-postprocess" title="Link to this heading">#</a></h2>
+<p>Enrich an existing repository with post-processing extension tables (e.g.
+associating lightning or other external observations with completed storm
+tracks).</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>postprocess<span class="w"> </span>--module<span class="w"> </span>xlma_stat
+adapt<span class="w"> </span>postprocess<span class="w"> </span>--repository<span class="w"> </span>/data/radar<span class="w"> </span>--module<span class="w"> </span>xlma_stat<span class="w"> </span>--input-dir<span class="w"> </span>/data/lma<span class="w"> </span>-v
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Flag</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--repository</span> <span class="pre">PATH</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.</span></code></p></td>
+<td><p>Repository to enrich</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--module</span> <span class="pre">MODULE</span> <span class="pre">[MODULE</span> <span class="pre">...]</span></code></p></td>
+<td><p>—</p></td>
+<td><p>Post-processing module(s) to run</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--input-dir</span> <span class="pre">PATH</span></code></p></td>
+<td><p>—</p></td>
+<td><p>Directory containing the external dataset to associate</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--config</span> <span class="pre">PATH</span></code></p></td>
+<td><p>—</p></td>
+<td><p>Config file with module-specific settings</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-v</span></code>, <code class="docutils literal notranslate"><span class="pre">--verbose</span></code></p></td>
+<td><p>off</p></td>
+<td><p>Enable DEBUG-level logging</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 </section>
 <hr class="docutils" />
 <section id="adapt-dashboard">
@@ -620,12 +707,12 @@ affect a running pipeline. Run it in a second terminal while the pipeline runs.<
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="USAGE.html"
+       href="dashboard_reference.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">User Guide</p>
+        <p class="prev-next-title">Adapt Dashboard — Reference</p>
       </div>
     </a>
     <a class="right-next"
@@ -663,6 +750,7 @@ affect a running pipeline. Run it in a second terminal while the pipeline runs.<
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt-config"><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt-postprocess"><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">postprocess</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt-dashboard"><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">dashboard</span></code></a></li>
 </ul>
   </nav></div>

@@ -6,7 +6,7 @@ Dashboard (GUI)
    :align: center
    :width: 100%
 
-.. automodule:: adapt.gui.dashboard
+.. automodule:: adapt.consumers.live.dashboard
    :members:
    :undoc-members:
    :show-inheritance:

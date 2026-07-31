@@ -6,7 +6,12 @@ Adapt command structure: `adapt <command> [options]`
 adapt run-nexrad   # run the processing pipeline
 adapt config       # generate a config.yaml template
 adapt dashboard    # open the GUI dashboard
+adapt postprocess  # enrich an existing repository with extension tables
 ```
+
+`adapt --version` prints the installed version and the path Adapt was installed
+to. `adapt --help` and `adapt <command> --help` print this same reference from
+the command line.
 
 ---
 
@@ -42,6 +47,8 @@ adapt run-nexrad [config.yaml] --radar KDIX --base-dir /data \
 | `--no-plot` | off | Disable the plot consumer thread |
 | `--plot-interval SEC` | `2.0` | How often the plot consumer checks for new data (seconds) |
 | `--show-plots` | off | Open a live window showing plots as they are produced |
+| `--only NODES` | — | Comma-separated pipeline node names to run; skip the rest. Mutually exclusive with `--not` |
+| `--not NODES` | — | Comma-separated pipeline node names to skip; run the rest. Mutually exclusive with `--only` |
 | `-v`, `--verbose` | off | Enable DEBUG-level logging |
 
 ### Mode selection logic
@@ -64,8 +71,34 @@ adapt config /path/to/my.yaml   # writes to a specific path
 |----------|-------------|
 | `output` | Destination path. Defaults to `./config.yaml`. If a directory is given, `config.yaml` is written inside it. |
 
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--pipeline NAME` | `nexrad` | Pipeline to generate a template for |
+| `--extensions PATHS` | — | Comma-separated extension module import paths to include (e.g. `adapt.execution.nodes.cell_volume_stats`) |
+
 The generated file includes all tunable parameters with inline comments.
 Edit it, then pass it as the first argument to `adapt run-nexrad`.
+
+---
+
+## `adapt postprocess`
+
+Enrich an existing repository with post-processing extension tables (e.g.
+associating lightning or other external observations with completed storm
+tracks).
+
+```bash
+adapt postprocess --module xlma_stat
+adapt postprocess --repository /data/radar --module xlma_stat --input-dir /data/lma -v
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--repository PATH` | `.` | Repository to enrich |
+| `--module MODULE [MODULE ...]` | — | Post-processing module(s) to run |
+| `--input-dir PATH` | — | Directory containing the external dataset to associate |
+| `--config PATH` | — | Config file with module-specific settings |
+| `-v`, `--verbose` | off | Enable DEBUG-level logging |
 
 ---
 

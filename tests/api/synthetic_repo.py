@@ -17,7 +17,8 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS cells_by_scan (
-    run_id TEXT NOT NULL, scan_time TEXT NOT NULL, cell_label INTEGER NOT NULL,
+    run_id TEXT NOT NULL, scan_id TEXT NOT NULL,
+    scan_time TEXT NOT NULL, cell_label INTEGER NOT NULL,
     cell_uid TEXT NOT NULL, cell_area_sqkm REAL, cell_centroid_mass_lat REAL,
     cell_centroid_mass_lon REAL, cell_centroid_geom_x REAL,
     cell_centroid_geom_y REAL, radar_reflectivity_max REAL,
@@ -30,12 +31,13 @@ CREATE TABLE IF NOT EXISTS cells_by_scan (
     is_split_source_here INTEGER NOT NULL DEFAULT 0,
     is_merge_source_here INTEGER NOT NULL DEFAULT 0,
     is_terminated_after_here INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (run_id, scan_time, cell_uid),
-    UNIQUE (run_id, scan_time, cell_label)
+    PRIMARY KEY (run_id, scan_id, cell_uid),
+    UNIQUE (run_id, scan_id, cell_label)
 );
 
 CREATE TABLE IF NOT EXISTS cell_events (
     event_id INTEGER PRIMARY KEY, run_id TEXT NOT NULL,
+    source_scan_id TEXT, target_scan_id TEXT,
     source_scan_time TEXT, target_scan_time TEXT, event_type TEXT NOT NULL,
     source_cell_uid TEXT, target_cell_uid TEXT,
     source_cell_label INTEGER, target_cell_label INTEGER,
@@ -58,15 +60,29 @@ CREATE TABLE IF NOT EXISTS cell_tracks (
 
 CREATE TABLE IF NOT EXISTS items (
     item_id TEXT PRIMARY KEY, run_id TEXT, item_type TEXT,
-    scan_time TEXT, file_path TEXT, status TEXT DEFAULT 'pending'
+    scan_id TEXT, scan_time TEXT, file_path TEXT, status TEXT DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS scans (
+    run_id TEXT NOT NULL, scan_id TEXT NOT NULL,
+    scan_time TEXT NOT NULL, scan_date TEXT NOT NULL,
+    start_time TEXT, end_time TEXT,
+    source_file_name TEXT NOT NULL,
+    processing_status TEXT NOT NULL DEFAULT 'complete',
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, scan_id),
+    UNIQUE (run_id, scan_time)
 );
 """
 
 _RUN_ID = "2024JUN01-1200-KDIX"
 _RADAR = "KDIX"
-# Canonical scan-time join-key format (adapt.utils.time.to_scan_iso)
+# Canonical scan-time metadata format (adapt.utils.time.to_scan_iso)
 _T0 = "2024-06-01T12:00:00Z"
 _T1 = "2024-06-01T14:00:00Z"
+# Content-derived scan identity (the join key)
+_SID0 = "sid0000000000000"
+_SID1 = "sid1111111111111"
 _UID_A = "uid_alpha"
 _UID_B = "uid_beta"
 
@@ -136,9 +152,10 @@ def build_synthetic_repo(tmp_path):
         ),
     )
     conn.execute(
-        "INSERT INTO cells_by_scan VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO cells_by_scan VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             _RUN_ID,
+            _SID0,
             _T0,
             1,
             _UID_A,
@@ -163,8 +180,8 @@ def build_synthetic_repo(tmp_path):
         ),
     )
     conn.execute(
-        "INSERT INTO cell_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (1, _RUN_ID, None, _T0, "INITIATION", None, _UID_A, None, 1, 0.0, 1, "grp1"),
+        "INSERT INTO cell_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (1, _RUN_ID, None, _SID0, None, _T0, "INITIATION", None, _UID_A, None, 1, 0.0, 1, "grp1"),
     )
     conn.commit()
     conn.close()

@@ -12,13 +12,28 @@ import xarray as xr
 
 from adapt.api.client import RepositoryClient
 from adapt.api.domain import Scan, ScanBundle
+from adapt.contracts import ScanRecord
 from adapt.persistence.catalog import RadarCatalog
 from adapt.persistence.registry import RepositoryRegistry
-from tests.api.synthetic_repo import _RADAR, _RUN_ID, _UID_A
+from tests.api.synthetic_repo import _RADAR, _RUN_ID, _SID0, _UID_A
 
 pytestmark = pytest.mark.unit
 
 _SCAN_T = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
+_SID = _SID0  # matches the synthetic repo's cells_by_scan row
+
+
+def _register_scan(repo_root, scan_id=_SID, scan_time=_SCAN_T):
+    catalog = RadarCatalog(repo_root / _RADAR)
+    catalog.register_scan(
+        ScanRecord(
+            run_id=_RUN_ID,
+            scan_id=scan_id,
+            scan_time=scan_time,
+            source_file_name="KDIX_source_V06",
+        )
+    )
+    catalog.close()
 
 
 def _write_products(repo_root):
@@ -35,9 +50,9 @@ def _write_products(repo_root):
         ("ana-1", "analysis2d", "cells.parquet"),
     ):
         conn.execute(
-            "INSERT INTO items (item_id, run_id, item_type, scan_time, file_path, status)"
-            " VALUES (?, ?, ?, ?, ?, 'complete')",
-            (item_id, _RUN_ID, item_type, _SCAN_T.isoformat(), file_path),
+            "INSERT INTO items (item_id, run_id, item_type, scan_id, scan_time, file_path,"
+            " status) VALUES (?, ?, ?, ?, ?, ?, 'complete')",
+            (item_id, _RUN_ID, item_type, _SID, _SCAN_T.isoformat(), file_path),
         )
     conn.commit()
     conn.close()
@@ -52,13 +67,7 @@ class TestScans:
             client.scans("KNOPE")
 
     def test_registered_scan_is_returned_with_metadata(self, repo_root):
-        _write_products(repo_root)  # items rows must exist: scans links via FK
-        catalog = RadarCatalog(repo_root / _RADAR)
-        catalog.register_scan(_SCAN_T, _RUN_ID)
-        catalog.link_item_to_scan(
-            _SCAN_T, "segmentation2d", "seg-1", num_cells=3, max_reflectivity=55.0
-        )
-        catalog.close()
+        _register_scan(repo_root)
 
         client = RepositoryClient(repo_root)
         try:
@@ -68,14 +77,14 @@ class TestScans:
 
         assert len(scans) == 1
         assert isinstance(scans[0], Scan)
-        assert scans[0].n_cells == 3
-        assert scans[0].max_reflectivity == 55.0
+        assert scans[0].scan_id == _SID
         assert scans[0].run_id == _RUN_ID
+        assert scans[0].scan_time == _SCAN_T
+        assert scans[0].source_file_name == "KDIX_source_V06"
+        assert scans[0].status == "complete"
 
     def test_time_window_excludes_scan(self, repo_root):
-        catalog = RadarCatalog(repo_root / _RADAR)
-        catalog.register_scan(_SCAN_T, _RUN_ID)
-        catalog.close()
+        _register_scan(repo_root)
 
         client = RepositoryClient(repo_root)
         try:
@@ -87,41 +96,37 @@ class TestScans:
 
 
 class TestScanBundle:
-    def test_bundle_from_items_loads_products_from_disk(self, repo_root):
+    def test_bundle_loads_products_by_identity(self, repo_root):
         _write_products(repo_root)
+        _register_scan(repo_root)
 
         client = RepositoryClient(repo_root)
         try:
-            bundle = client.scan_bundle(_SCAN_T, radar=_RADAR)
+            bundle = client.scan_bundle(_RUN_ID, _SID, radar=_RADAR)
         finally:
             client.close()
 
         assert isinstance(bundle, ScanBundle)
+        assert bundle.scan.scan_id == _SID
         assert bundle.scan.run_id == _RUN_ID
         assert isinstance(bundle.segmentation, xr.Dataset)
         assert bundle.cells["cell_label"].tolist() == [1]
+        assert [t.cell_uid for t in bundle.tracks] == [_UID_A]
 
-    def test_bundle_from_scan_record_includes_tracks(self, repo_root):
-        _write_products(repo_root)
-        catalog = RadarCatalog(repo_root / _RADAR)
-        catalog.register_scan(_SCAN_T, _RUN_ID)
-        catalog.link_item_to_scan(_SCAN_T, "segmentation2d", "seg-1", num_cells=1)
-        catalog.link_item_to_scan(_SCAN_T, "analysis2d", "ana-1")
-        catalog.close()
+    def test_bundle_unregistered_scan_raises(self, client):
+        with pytest.raises(KeyError, match="not registered"):
+            client.scan_bundle(_RUN_ID, "sid-unknown", radar=_RADAR)
+
+    def test_bundle_without_products_has_empty_fields(self, repo_root):
+        # Registered scan, but no product items and no tracking rows at its time.
+        other_t = datetime(2024, 6, 1, 18, 0, 0, tzinfo=UTC)
+        _register_scan(repo_root, scan_id="sid-bare", scan_time=other_t)
 
         client = RepositoryClient(repo_root)
         try:
-            bundle = client.scan_bundle(_SCAN_T, radar=_RADAR)
+            bundle = client.scan_bundle(_RUN_ID, "sid-bare", radar=_RADAR)
         finally:
             client.close()
-
-        assert isinstance(bundle.segmentation, xr.Dataset)
-        assert bundle.cells["area"].tolist() == [4.0]
-        assert bundle.scan.max_reflectivity == 0.0  # NULL column maps to 0.0
-        assert [t.cell_uid for t in bundle.tracks] == [_UID_A]
-
-    def test_bundle_with_no_products_has_empty_fields(self, client):
-        bundle = client.scan_bundle(_SCAN_T, radar=_RADAR)
 
         assert bundle.segmentation is None
         assert bundle.cells is None

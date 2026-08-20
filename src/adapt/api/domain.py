@@ -44,14 +44,20 @@ class Track:
 
 @dataclass(frozen=True)
 class Scan:
-    """Metadata for one processed scan."""
+    """Metadata for one processed scan.
 
-    scan_time: datetime
-    radar_id: str
+    ``scan_id`` is the identity (join key); times are ordering/display metadata.
+    Coverage times are per-source and may be absent.
+    """
+
+    scan_id: str
     run_id: str
-    n_cells: int
-    max_reflectivity: float
-    has_tracks: bool
+    radar_id: str
+    scan_time: datetime
+    source_file_name: str
+    status: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
 
 
 @dataclass

@@ -19,7 +19,7 @@ Example usage::
     tracks_df = client.tracks(run_id)
     severe = client.select(run_id, FilterSpec(max_refl_min_dbz=55.0))
 
-    bundle = client.scan_bundle(scan_time, radar="KDIX")
+    bundle = client.scan_bundle(run_id, scan_id, radar="KDIX")
 
     # Raw SQL escape hatch (DuckDB over Parquet)
     df = client.query("SELECT * FROM analysis2d WHERE refl_max > 40")
@@ -27,7 +27,6 @@ Example usage::
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import time
 from datetime import UTC, datetime
@@ -47,6 +46,7 @@ from adapt.persistence.registry import RepositoryRegistry
 from adapt.persistence.tables import CORE_DATA_TABLES
 from adapt.persistence.track_store import TrackStore
 from adapt.utils.process import process_alive
+from adapt.utils.time import to_scan_iso
 
 __all__ = ["RepositoryClient"]
 
@@ -207,13 +207,11 @@ class RepositoryClient:
         with self._track_store(radar) as store:
             return store.get_cell_events(run_id, cell_uid)
 
-    def cells_at_scan(
-        self, run_id: str, scan_time: datetime, radar: str | None = None
-    ) -> pd.DataFrame:
-        """Return all cells_by_scan rows for one scan of a run."""
+    def cells_at_scan(self, run_id: str, scan_id: str, radar: str | None = None) -> pd.DataFrame:
+        """Return all cells_by_scan rows for one scan, keyed by identity."""
         radar = self._resolve_radar(radar)
         with self._track_store(radar) as store:
-            return store.get_cells_by_scan(run_id, scan_time)
+            return store.get_cells_by_scan(run_id, scan_id)
 
     # =========================================================================
     # Generic table access (catalog-driven discovery)
@@ -322,10 +320,10 @@ class RepositoryClient:
             params.append(run_id)
         if start is not None:
             conditions.append("scan_time >= ?")
-            params.append(start.isoformat())
+            params.append(to_scan_iso(start))
         if end is not None:
             conditions.append("scan_time <= ?")
-            params.append(end.isoformat())
+            params.append(to_scan_iso(end))
         sql = "SELECT * FROM items"
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
@@ -424,161 +422,94 @@ class RepositoryClient:
         end: datetime | None = None,
         limit: int = 200,
     ) -> list[Scan]:
-        """Return scan metadata records for a radar."""
-        catalog = self._catalog(radar)
-        try:
-            df = catalog.list_scans(
-                run_id=run_id,
-                start_time=start,
-                end_time=end,
-                limit=limit,
-            )
-        except Exception:
-            df = self._scans_from_items(radar, run_id, start, end, limit)
+        """Return scan metadata records for a radar, ordered by scan_time.
+
+        Reads the scans registry the pipeline populates — no filename parsing,
+        no derivation from other tables.
+        """
+        df = self._catalog(radar).list_scans(
+            run_id=run_id,
+            start_time=start,
+            end_time=end,
+            limit=limit,
+        )
 
         result = []
         for _, row in df.iterrows():
             result.append(
                 Scan(
-                    scan_time=self._parse_dt(row.get("scan_time")),
+                    scan_id=str(row["scan_id"]),
+                    run_id=str(row["run_id"]),
                     radar_id=radar,
-                    run_id=str(row.get("run_id", run_id or "")),
-                    n_cells=int(row.get("num_cells", 0)),
-                    max_reflectivity=float(row.get("max_reflectivity", 0.0)),
-                    has_tracks=bool(row.get("has_tracks", False)),
+                    scan_time=self._parse_dt(row["scan_time"]),
+                    source_file_name=str(row["source_file_name"]),
+                    status=str(row["processing_status"]),
+                    start_time=self._parse_dt(row["start_time"]) if row["start_time"] else None,
+                    end_time=self._parse_dt(row["end_time"]) if row["end_time"] else None,
                 )
             )
         return result
 
-    def _scans_from_items(
-        self,
-        radar: str,
-        run_id: str | None,
-        start: datetime | None,
-        end: datetime | None,
-        limit: int,
-    ) -> pd.DataFrame:
-        catalog = self._catalog(radar)
-        conn = catalog._get_connection()
-        conditions = ["item_type = 'segmentation2d'", "status = 'complete'"]
-        params: list = []
-        if run_id:
-            conditions.append("run_id = ?")
-            params.append(run_id)
-        if start:
-            conditions.append("scan_time >= ?")
-            params.append(start.isoformat())
-        if end:
-            conditions.append("scan_time <= ?")
-            params.append(end.isoformat())
-        params.append(limit)
-        where = " AND ".join(conditions)
-        with catalog._lock:
-            rows = conn.execute(
-                f"SELECT DISTINCT scan_time, run_id FROM items WHERE {where} "
-                f"ORDER BY scan_time DESC LIMIT ?",
-                params,
-            ).fetchall()
-        if not rows:
-            return pd.DataFrame()
-        return pd.DataFrame([dict(r) for r in rows])
+    def scan_bundle(self, run_id: str, scan_id: str, radar: str | None = None) -> ScanBundle:
+        """Return all data products for one scan, resolved by identity.
 
-    def scan_bundle(self, scan_time: datetime | str, radar: str | None = None) -> ScanBundle:
-        """Return all data products for a single scan."""
+        Every product is looked up through the catalog by (run_id, scan_id) —
+        no filename parsing, no nearest-time matching. An unregistered scan
+        raises instead of guessing.
+        """
         radar = self._resolve_radar(radar)
-        scan_time_dt = self._parse_dt(scan_time)
+        scan_record = self._catalog(radar).get_scan(run_id, scan_id)
+        if scan_record is None:
+            raise KeyError(
+                f"scan (run_id={run_id!r}, scan_id={scan_id!r}) is not registered "
+                f"in the {radar} catalog"
+            )
 
-        catalog = self._catalog(radar)
-        scan_record = None
-        with contextlib.suppress(Exception):
-            scan_record = catalog.get_scan(scan_time_dt)
-
-        if scan_record:
-            return self._bundle_from_scan_record(scan_record, radar, scan_time_dt)
-        return self._bundle_from_items(radar, scan_time_dt)
-
-    def _bundle_from_scan_record(
-        self, scan_record: dict, radar: str, scan_time: datetime
-    ) -> ScanBundle:
+        scan_time = self._parse_dt(scan_record["scan_time"])
         meta = Scan(
-            scan_time=scan_time,
+            scan_id=scan_id,
+            run_id=run_id,
             radar_id=radar,
-            run_id=str(scan_record.get("run_id", "")),
-            n_cells=int(scan_record.get("num_cells") or 0),
-            max_reflectivity=float(scan_record.get("max_reflectivity") or 0.0),
-            has_tracks=bool(scan_record.get("has_tracks")),
+            scan_time=scan_time,
+            source_file_name=str(scan_record["source_file_name"]),
+            status=str(scan_record["processing_status"]),
+            start_time=(
+                self._parse_dt(scan_record["start_time"]) if scan_record["start_time"] else None
+            ),
+            end_time=(self._parse_dt(scan_record["end_time"]) if scan_record["end_time"] else None),
         )
-        seg = self._load_item_file(radar, scan_record.get("segmentation2d_item_id"))
-        cells = self._load_item_file(radar, scan_record.get("analysis2d_item_id"))
+        seg = self._load_product(radar, run_id, scan_id, "segmentation2d")
+        cells = self._load_product(radar, run_id, scan_id, "analysis2d")
 
         tracks: list[Track] = []
-        run_id = scan_record.get("run_id")
-        if run_id:
-            with self._track_store(radar) as store:
-                scan_cells = store.get_cells_by_scan(run_id, scan_time)
-            for uid in scan_cells["cell_uid"].dropna().unique() if not scan_cells.empty else []:
-                with contextlib.suppress(Exception):
-                    tracks.append(self.track(run_id, str(uid), radar=radar))
+        with self._track_store(radar) as store:
+            scan_cells = store.get_cells_by_scan(run_id, scan_id)
+        for uid in scan_cells["cell_uid"].dropna().unique() if not scan_cells.empty else []:
+            tracks.append(self.track(run_id, str(uid), radar=radar))
 
         return ScanBundle(scan=meta, segmentation=seg, cells=cells, tracks=tracks)
 
-    def _bundle_from_items(self, radar: str, scan_time: datetime) -> ScanBundle:
-        catalog = self._catalog(radar)
-        conn = catalog._get_connection()
-        scan_time_str = scan_time.isoformat()
+    def _load_product(self, radar: str, run_id: str, scan_id: str, item_type: str) -> Any:
+        """Load one cataloged product for a scan, or None when not produced.
 
-        def _nearest(item_type: str) -> dict | None:
-            with catalog._lock:
-                row = conn.execute(
-                    "SELECT * FROM items WHERE item_type = ? AND status = 'complete' "
-                    "ORDER BY ABS(julianday(scan_time) - julianday(?)) LIMIT 1",
-                    (item_type, scan_time_str),
-                ).fetchone()
-            return dict(row) if row else None
-
-        seg_item = _nearest("segmentation2d")
-        analysis_item = _nearest("analysis2d")
-
-        seg = None
-        if seg_item:
-            path = self.root_dir / radar / seg_item["file_path"]
-            if path.exists():
-                seg = xr.open_dataset(path)
-
-        cells = None
-        if analysis_item:
-            path = self.root_dir / radar / analysis_item["file_path"]
-            if path.exists():
-                cells = pd.read_parquet(path, engine="pyarrow")
-
-        run_id = seg_item.get("run_id", "") if seg_item else ""
-        meta = Scan(
-            scan_time=scan_time,
-            radar_id=radar,
-            run_id=run_id,
-            n_cells=len(cells) if cells is not None else 0,
-            max_reflectivity=0.0,
-            has_tracks=False,
-        )
-        return ScanBundle(scan=meta, segmentation=seg, cells=cells, tracks=[])
-
-    def _load_item_file(self, radar: str, item_id: str | None) -> Any:
-        if not item_id:
-            return None
+        A cataloged file missing from disk is corruption and raises.
+        """
         catalog = self._catalog(radar)
         conn = catalog._get_connection()
         with catalog._lock:
-            row = conn.execute("SELECT * FROM items WHERE item_id = ?", (item_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM items WHERE run_id = ? AND scan_id = ? AND item_type = ? "
+                "AND status = 'complete'",
+                (run_id, scan_id, item_type),
+            ).fetchone()
         if not row:
             return None
         path = self.root_dir / radar / dict(row)["file_path"]
         if not path.exists():
-            return None
+            raise FileNotFoundError(f"cataloged {item_type} artifact missing on disk: {path}")
         if path.suffix == ".parquet":
             return pd.read_parquet(path, engine="pyarrow")
-        if path.suffix in {".nc", ".nc4", ".netcdf"}:
-            return xr.open_dataset(path)
-        return None
+        return xr.open_dataset(path)
 
     # =========================================================================
     # Annotations

@@ -34,6 +34,7 @@ def _make_proc(pipeline_config, pipeline_output_dirs, test_repository):
 def _persist(proc, test_repository, result, scan_time):
     meta = PersistenceMeta(
         scan_time=scan_time,
+        scan_id="sid-test",
         run_id=test_repository.run_id,
         source_file="scan_grid",
         dataset_id=test_repository.radar,

@@ -105,7 +105,7 @@ class TestRunAndWriteFixC:
         check_cell_volume_stats(df)
 
         db = tmp_path / "catalog.db"
-        ModuleOutputWriter(db, CellVolumeStatsModule.persistence[0]).write(df)
+        ModuleOutputWriter(db, CellVolumeStatsModule.persistence[0]).write(df, scan_id="sid-vol-1")
         conn = sqlite3.connect(str(db))
         try:
             iso, unix = conn.execute(
@@ -126,7 +126,7 @@ class TestNodeDeclarations:
         assert CellVolumeStatsModule.persistence[0].table == "cell_volume_stats"
         assert CellVolumeStatsModule.persistence[0].primary_key == (
             "run_id",
-            "scan_time",
+            "scan_id",
             "cell_uid",
         )
 

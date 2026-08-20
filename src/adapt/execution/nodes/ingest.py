@@ -1,8 +1,6 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from datetime import UTC
-from datetime import datetime as _dt
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +23,10 @@ class LoadModule(BaseModule):
     --------------
     nexrad_file : str
         Path to the NEXRAD Level-II file.
+    scan_time : datetime
+        Scan time owned by the source boundary (acquisition parse or replay
+        source); seeded into the context by the processor. Never re-derived
+        here — a missing value raises instead of substituting a clock.
     config : InternalConfig
         Runtime configuration (lazy-initialises the loader on first call).
     output_dirs : dict
@@ -36,16 +38,14 @@ class LoadModule(BaseModule):
         Full 3D Cartesian xarray Dataset.
     grid_ds_2d : xr.Dataset
         2D slice at configured z-level.
-    scan_time : datetime
-        Radar volume scan time parsed from the filename.
     """
 
     name = "ingest"
     summary = "download + read + regrid radar volumes"
     required_history = 1
     pipeline_phase = 0
-    inputs = ["nexrad_file", "ingest_config"]
-    outputs = ["grid_ds", "grid_ds_2d", "scan_time", "grid_nc_path"]
+    inputs = ["nexrad_file", "ingest_config", "scan_time"]
+    outputs = ["grid_ds", "grid_ds_2d", "grid_nc_path"]
     output_contracts = {"grid_ds_2d": check_grid_ds_2d}
     config_class = IngestConfig
     persistence = (
@@ -82,13 +82,13 @@ class LoadModule(BaseModule):
 
         radar = config.radar
         nc_filename = Path(filepath).stem
-        scan_time = _dt.now(UTC)
-        try:
-            parts = nc_filename.split("_")
-            dt_str = parts[0][-8:] + parts[1]
-            scan_time = _dt.strptime(dt_str, "%Y%m%d%H%M%S")
-        except Exception:
-            pass
+        scan_time = context.get("scan_time")
+        if scan_time is None:
+            raise ValueError(
+                f"Ingest requires a scan_time for {nc_filename!r} and the source "
+                "supplied none — refusing to substitute a clock or re-parse the "
+                "filename (wall-clock substitution is forbidden)"
+            )
 
         date_str = scan_time.strftime("%Y%m%d")
         base = output_dirs.get("base")
@@ -121,10 +121,9 @@ class LoadModule(BaseModule):
                 ds_2d = ds_2d.assign_coords({coord: ds[coord]})
         ds_2d.attrs.update(ds.attrs)
 
-        result = {
+        result: dict = {
             "grid_ds": ds,
             "grid_ds_2d": ds_2d,
-            "scan_time": scan_time,
         }
         # The loader wrote the 3D grid to `{output_dir}/{stem}.nc` when save_netcdf.
         # The key is OMITTED when no file was written: absent key = "not produced"

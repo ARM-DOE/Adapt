@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
-from adapt.contracts import ContractViolation, PersistenceMeta
+from adapt.contracts import ContractViolation, PersistenceMeta, ScanRecord
 from adapt.contracts.observability import Observability
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
@@ -258,10 +258,19 @@ class RadarProcessor(threading.Thread):
             True if processed or deferred (waiting for pair), False on error.
         """
         assert self.repository is not None  # guaranteed by __init__
-        queued_at = None
-        if isinstance(filepath, dict):
-            queued_at = filepath.get("queued_at")
-            filepath = filepath["path"]
+        if not isinstance(filepath, dict):
+            raise TypeError(
+                "processor queue message must be a dict with "
+                "'path', 'scan_id', 'scan_time', 'queued_at' — got "
+                f"{type(filepath).__name__}: {filepath!r}"
+            )
+        message = filepath
+        queued_at = message.get("queued_at")
+        scan_id = message.get("scan_id")
+        queued_scan_time = message.get("scan_time")
+        filepath = message["path"]
+        if not scan_id:
+            raise ValueError(f"queue message for {filepath} is missing scan_id")
 
         file_id = Path(filepath).stem
         tracker = self.file_tracker
@@ -275,20 +284,22 @@ class RadarProcessor(threading.Thread):
         logger.info("Processing: %s", Path(filepath).name)
 
         # Publish the current activity for the live status line; cleared on every exit.
-        self._current_scan_id = file_id
+        self._current_scan_id = scan_id
         try:
             # Bind scan context and open the scan span; module spans nest under it and
             # every log on this path carries scan_id. Disabled provider -> no-ops.
-            with self._obs.bind(scan_id=file_id):
+            with self._obs.bind(scan_id=scan_id):
                 with self._obs.span("scan") as scan_span:
-                    ok = self._run_scan(filepath, file_id, queue_wait_s, scan_span)
+                    ok = self._run_scan(
+                        filepath, file_id, queue_wait_s, scan_span, scan_id, queued_scan_time
+                    )
                 # The scan span has closed; split this scan's drained spans into the module
                 # spans (one module_history batch) and the scan span itself (carries n_cells).
                 all_spans = self._obs.drain_spans()
                 modules = [s for s in all_spans if s.name != "scan"]
                 if modules:
                     self.repository.history.record_modules(
-                        self.repository.run_id, file_id, modules, recorded_at=datetime.now(UTC)
+                        self.repository.run_id, scan_id, modules, recorded_at=datetime.now(UTC)
                     )
                 # One controlled console line per scan, built from the captured telemetry
                 # (stage timings + cell count) — never printed from inside a module.
@@ -300,7 +311,9 @@ class RadarProcessor(threading.Thread):
         finally:
             self._current_scan_id = None
 
-    def _run_scan(self, filepath, file_id, queue_wait_s, scan_span) -> bool:
+    def _run_scan(
+        self, filepath, file_id, queue_wait_s, scan_span, scan_id, queued_scan_time
+    ) -> bool:
         """Execute the scientific pipeline for one scan (inside the scan span)."""
         tracker = self.file_tracker
         try:
@@ -309,6 +322,9 @@ class RadarProcessor(threading.Thread):
             # ── Build base context with all module configs ─────────────────
             base_ctx: dict = {
                 "nexrad_file": filepath,
+                # The source boundary owns scan_time; normalized once so every
+                # consumer (modules, persistence, history) sees tz-aware UTC.
+                "scan_time": self._normalize_scan_time(queued_scan_time),
                 **self._module_configs,
                 "output_dirs": self.output_dirs,
             }
@@ -332,7 +348,7 @@ class RadarProcessor(threading.Thread):
 
                 if req_hist > 1:
                     # Validate time gap before running multi-scan modules
-                    current_scan_time = result.get("scan_time")
+                    current_scan_time = base_ctx["scan_time"]
                     time_gap_valid, time_gap_minutes = self._validate_time_gap(current_scan_time)
                     if not time_gap_valid:
                         logger.warning(
@@ -346,14 +362,13 @@ class RadarProcessor(threading.Thread):
                 if req_hist > 1:
                     # Build scan_history: (N-1) prior entries + current partial context
                     prior = self._scan_history[-prior_needed:] if prior_needed else []
-                    ctx["scan_history"] = list(prior) + [{**base_ctx, **result}]
+                    # base_ctx AFTER result: the source-owned scan_time is
+                    # authoritative — a module result must never override it.
+                    ctx["scan_history"] = list(prior) + [{**result, **base_ctx}]
                 group_result = executor.run(ctx)
                 result.update(group_result)
 
-            scan_time = result.get("scan_time") or base_ctx.get("scan_time")
-            # Normalize once to tz-aware UTC so persistence (artifact registration),
-            # the enrich 3D-grid read, and the enrich module all use one representation.
-            scan_time = self._normalize_scan_time(scan_time)
+            scan_time = base_ctx["scan_time"]
             elapsed_s = time.perf_counter() - t0
 
             # Register radar location from first scan (idempotent after that)
@@ -368,7 +383,8 @@ class RadarProcessor(threading.Thread):
                         )
 
             # ── Accumulate scan in rolling history ─────────────────────────
-            self._scan_history.append({**base_ctx, **result})
+            # base_ctx AFTER result: source-owned keys (scan_time) stay authoritative.
+            self._scan_history.append({**result, **base_ctx})
             if len(self._scan_history) > self._max_history:
                 self._scan_history.pop(0)
 
@@ -377,12 +393,23 @@ class RadarProcessor(threading.Thread):
             if self.repository:
                 meta = PersistenceMeta(
                     scan_time=scan_time,
+                    scan_id=scan_id,
                     run_id=self.repository.run_id,
                     source_file=str(filepath),
                     dataset_id=self.config.downloader.radar,
                 )
                 if result:
                     self._router.persist(self._pipeline_modules, result, meta)
+                    # One scans row per processed scan; the processor is the
+                    # single writer of the scan registry.
+                    self.repository.register_scan(
+                        ScanRecord(
+                            run_id=self.repository.run_id,
+                            scan_id=scan_id,
+                            scan_time=scan_time,
+                            source_file_name=Path(filepath).name,
+                        )
+                    )
 
             # ── Post-persistence enrichment (pipeline_phase=3) ─────────────
             # Enrich modules index on (scan_time, cell_uid); they only run once
@@ -392,11 +419,16 @@ class RadarProcessor(threading.Thread):
                 and self._post_executor is not None
                 and self._should_run_enrichment(result)
             ):
-                post_ctx = self._build_enrich_context(result, scan_time)
+                post_ctx = self._build_enrich_context(result, scan_time, scan_id)
                 ext_result = self._post_executor.run(post_ctx)
-                # Enrichment carries no scan_time (run-level aggregate)
+                # Enrichment carries no scan_time (run-level aggregate); it still
+                # runs per scan, so the scan identity travels with it.
                 enrich_meta = PersistenceMeta(
-                    scan_time=None, run_id=self.repository.run_id, source_file="", dataset_id=""
+                    scan_time=None,
+                    scan_id=scan_id,
+                    run_id=self.repository.run_id,
+                    source_file="",
+                    dataset_id="",
                 )
                 self._router.persist(self._post_modules, ext_result, enrich_meta)
 
@@ -463,7 +495,7 @@ class RadarProcessor(threading.Thread):
             and "cell_uid" in tracked_cells.columns
         )
 
-    def _build_enrich_context(self, result: dict, scan_time) -> dict:
+    def _build_enrich_context(self, result: dict, scan_time, scan_id: str) -> dict:
         """Assemble the post-persistence context, injecting stored artifacts on demand.
 
         Modules never touch storage. If any enrich module declares ``grid_ds_3d``
@@ -480,20 +512,15 @@ class RadarProcessor(threading.Thread):
             "repository": self.repository,
         }
         if any("grid_ds_3d" in m.inputs for m in self._post_modules):
-            grid_3d = self._read_grid_3d(scan_time)
+            grid_3d = self._read_grid_3d(scan_id)
             if grid_3d is not None:
                 ctx["grid_ds_3d"] = grid_3d
         return ctx
 
-    def _read_grid_3d(self, scan_time):
+    def _read_grid_3d(self, scan_id: str):
         """Read the registered 3D gridded NetCDF for this scan, or None if absent."""
         assert self.repository is not None
-        # The artifact is registered with a tz-aware (UTC) scan_time; normalize the
-        # query the same way so the catalog's isoformat comparison matches.
-        scan_time = self._normalize_scan_time(scan_time)
-        artifacts = self.repository.query(
-            product_type=ProductType.GRIDDED_NC, time_range=(scan_time, scan_time)
-        )
+        artifacts = self.repository.query(product_type=ProductType.GRIDDED_NC, scan_id=scan_id)
         if not artifacts:
             return None
         return self.repository.open_dataset(artifacts[0]["artifact_id"])

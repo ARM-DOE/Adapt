@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _FIXED_CBS_COLS = {
     "run_id",
+    "scan_id",
     "scan_time",
     "cell_label",
     "cell_uid",
@@ -142,18 +143,23 @@ class TrackStore:
         tracked_cells_df: pd.DataFrame,
         cell_events_df: pd.DataFrame,
         cell_adjacency_df: pd.DataFrame,
+        *,
+        scan_id: str,
     ) -> None:
         """Persist one scan's track outputs to the three tables.
 
         Parameters
         ----------
         run_id           : pipeline run identifier
-        scan_time        : UTC datetime of this scan
+        scan_time        : UTC datetime of this scan (ordering/display metadata)
         cell_stats_df    : full analysis output (all cell_stats columns)
         tracked_cells_df : tracking module output (cell_uid, cell_label)
         cell_events_df   : tracking module output (lineage events)
         cell_adjacency_df: analysis module output (label-space adjacency)
+        scan_id          : content-derived scan identity (the join key)
         """
+        if not scan_id or not isinstance(scan_id, str):
+            raise ValueError(f"scan_id is required and must be a non-empty string, got {scan_id!r}")
         if tracked_cells_df.empty:
             return
         if cell_adjacency_df is None:
@@ -170,6 +176,7 @@ class TrackStore:
 
             # 1b. Fetch first_seen_time for all active tracks (age computation)
             uid_col = _uid_col(tracked_cells_df)
+            self._reject_duplicate_identities(scan_id, tracked_cells_df, uid_col)
             cell_uids = tracked_cells_df[uid_col].astype(str).unique().tolist()
             placeholders = ",".join("?" * len(cell_uids))
             first_seen_rows = conn.execute(
@@ -189,6 +196,7 @@ class TrackStore:
             # 2. Build cells_by_scan rows
             rows = self._build_cells_rows(
                 run_id,
+                scan_id,
                 scan_iso,
                 cell_stats_df,
                 tracked_cells_df,
@@ -201,13 +209,13 @@ class TrackStore:
             self._upsert_cells(conn, rows)
 
             # 4. Retroactively update previous scan's cells_by_scan flags
-            prev_iso = self._prev_scan_time(conn, run_id, scan_iso)
-            if prev_iso and not cell_events_df.empty:
-                self._update_retroactive_flags(conn, run_id, prev_iso, cell_events_df)
+            prev = self._prev_scan(conn, run_id, scan_iso)
+            if prev and not cell_events_df.empty:
+                self._update_retroactive_flags(conn, run_id, prev[0], cell_events_df)
 
             # 5. Insert cell_events
             if not cell_events_df.empty:
-                self._insert_cell_events(conn, run_id, scan_iso, prev_iso, cell_events_df)
+                self._insert_cell_events(conn, run_id, scan_id, scan_iso, prev, cell_events_df)
 
             # 6. Upsert cell_tracks summary
             self._upsert_cell_tracks(conn, run_id, scan_iso, tracked_cells_df, cell_events_df)
@@ -220,13 +228,13 @@ class TrackStore:
     # Read
     # ------------------------------------------------------------------
 
-    def get_cells_by_scan(self, run_id: str, scan_time: datetime) -> pd.DataFrame:
-        scan_iso = _to_iso(scan_time)
+    def get_cells_by_scan(self, run_id: str, scan_id: str) -> pd.DataFrame:
+        """All cells_by_scan rows for one scan, keyed by identity."""
         conn = self._connect()
         with self._lock:
             rows = conn.execute(
-                "SELECT * FROM cells_by_scan WHERE run_id=? AND scan_time=?",
-                (run_id, scan_iso),
+                "SELECT * FROM cells_by_scan WHERE run_id=? AND scan_id=?",
+                (run_id, scan_id),
             ).fetchall()
         return pd.DataFrame([dict(r) for r in rows])
 
@@ -305,6 +313,11 @@ class TrackStore:
                 "cells_by_scan schema mismatch (missing n_adjacent_cells). "
                 "Ensure catalog.db was created with the current schema."
             )
+        if "scan_id" not in cbs_cols:
+            raise RuntimeError(
+                "cells_by_scan predates scan identity (missing scan_id column). "
+                "Recreate catalog.db (delete it and rerun the pipeline)."
+            )
 
         ct_cols = {r[1] for r in conn.execute("PRAGMA table_info(cell_tracks)").fetchall()}
         if any(c.endswith("_index") for c in ct_cols):
@@ -317,6 +330,11 @@ class TrackStore:
         if any(c.endswith("_index") for c in ce_cols):
             raise RuntimeError(
                 "Legacy index columns detected in cell_events. "
+                "Recreate catalog.db (delete it and rerun the pipeline)."
+            )
+        if not {"source_scan_id", "target_scan_id"} <= ce_cols:
+            raise RuntimeError(
+                "cell_events predates scan identity (missing source/target_scan_id). "
                 "Recreate catalog.db (delete it and rerun the pipeline)."
             )
 
@@ -368,6 +386,27 @@ class TrackStore:
             out[uid] = (len(ids), json.dumps(ids))
         return out
 
+    @staticmethod
+    def _reject_duplicate_identities(
+        scan_id: str, tracked_cells_df: pd.DataFrame, uid_col: str
+    ) -> None:
+        """Refuse a batch whose cell identities collide within one scan.
+
+        Under upsert, a duplicate (scan, cell_uid) or (scan, cell_label) pair
+        silently overwrites the earlier row — an observation is lost before any
+        constraint fires (issue #72). Identity collisions must surface loudly.
+        """
+        uids = tracked_cells_df[uid_col].astype(str)
+        dup_uids = sorted(uids[uids.duplicated()].unique())
+        labels = tracked_cells_df["cell_label"].astype(int)
+        dup_labels = sorted(labels[labels.duplicated()].unique())
+        if dup_uids or dup_labels:
+            raise ValueError(
+                f"duplicate cell identity within scan {scan_id}: "
+                f"cell_uid={dup_uids}, cell_label={dup_labels} — refusing to "
+                "upsert (an observation would be silently overwritten)"
+            )
+
     def _ensure_columns(self, conn: sqlite3.Connection, cell_stats_df: pd.DataFrame) -> None:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(cells_by_scan)").fetchall()}
         for col in cell_stats_df.columns:
@@ -381,6 +420,7 @@ class TrackStore:
     def _build_cells_rows(
         self,
         run_id: str,
+        scan_id: str,
         scan_iso: str,
         cell_stats_df: pd.DataFrame,
         tracked_cells_df: pd.DataFrame,
@@ -434,6 +474,7 @@ class TrackStore:
 
             row: dict = {
                 "run_id": run_id,
+                "scan_id": scan_id,
                 "scan_time": scan_iso,
                 "cell_label": cl,
                 "cell_uid": tid,
@@ -463,26 +504,30 @@ class TrackStore:
         placeholders = ", ".join("?" * len(cols))
         col_list = ", ".join(cols)
         update_set = ", ".join(
-            f"{c}=excluded.{c}" for c in cols if c not in ("run_id", "scan_time", "cell_uid")
+            f"{c}=excluded.{c}" for c in cols if c not in ("run_id", "scan_id", "cell_uid")
         )
         sql = (
             f"INSERT INTO cells_by_scan ({col_list}) VALUES ({placeholders}) "
-            f"ON CONFLICT(run_id, scan_time, cell_uid) DO UPDATE SET {update_set}"
+            f"ON CONFLICT(run_id, scan_id, cell_uid) DO UPDATE SET {update_set}"
         )
         conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
 
-    def _prev_scan_time(self, conn: sqlite3.Connection, run_id: str, scan_iso: str) -> str | None:
+    def _prev_scan(
+        self, conn: sqlite3.Connection, run_id: str, scan_iso: str
+    ) -> tuple[str, str] | None:
+        """(scan_id, scan_time) of the latest earlier scan; ordering is time-based."""
         row = conn.execute(
-            "SELECT MAX(scan_time) AS t FROM cells_by_scan WHERE run_id=? AND scan_time<?",
+            "SELECT scan_id, scan_time FROM cells_by_scan "
+            "WHERE run_id=? AND scan_time<? ORDER BY scan_time DESC LIMIT 1",
             (run_id, scan_iso),
         ).fetchone()
-        return row["t"] if row and row["t"] else None
+        return (row["scan_id"], row["scan_time"]) if row else None
 
     def _update_retroactive_flags(
         self,
         conn: sqlite3.Connection,
         run_id: str,
-        prev_iso: str,
+        prev_scan_id: str,
         cell_events_df: pd.DataFrame,
     ) -> None:
         """Set is_split_source, is_merge_source, is_terminated_after on prev scan rows."""
@@ -503,8 +548,8 @@ class TrackStore:
             for tid in cell_uids:
                 conn.execute(
                     f"UPDATE cells_by_scan SET {flag}=1 "
-                    "WHERE run_id=? AND scan_time=? AND cell_uid=?",
-                    (run_id, prev_iso, tid),
+                    "WHERE run_id=? AND scan_id=? AND cell_uid=?",
+                    (run_id, prev_scan_id, tid),
                 )
 
         _update("is_terminated_after_here", term_tracks)
@@ -515,12 +560,16 @@ class TrackStore:
         self,
         conn: sqlite3.Connection,
         run_id: str,
+        scan_id: str,
         target_iso: str,
-        source_iso: str | None,
+        prev: tuple[str, str] | None,
         cell_events_df: pd.DataFrame,
     ) -> None:
+        source_scan_id, source_iso = prev if prev else (None, None)
         cols = [
             "run_id",
+            "source_scan_id",
+            "target_scan_id",
             "source_scan_time",
             "target_scan_time",
             "event_type",
@@ -547,6 +596,12 @@ class TrackStore:
         placeholders = ", ".join("?" * len(all_cols))
         sql = f"INSERT INTO cell_events ({', '.join(all_cols)}) VALUES ({placeholders})"
 
+        def _src_id(etype: str) -> str | None:
+            return None if etype == "INITIATION" else source_scan_id
+
+        def _tgt_id(etype: str) -> str | None:
+            return None if etype == "TERMINATION" else scan_id
+
         def _src_time(etype: str) -> str | None:
             return None if etype == "INITIATION" else source_iso
 
@@ -566,6 +621,8 @@ class TrackStore:
             rows.append(
                 (
                     run_id,
+                    _src_id(etype),
+                    _tgt_id(etype),
                     _src_time(etype),
                     _tgt_time(etype),
                     etype,

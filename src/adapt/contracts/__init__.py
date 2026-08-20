@@ -32,6 +32,7 @@ from adapt.contracts.persistence import (
     PersistenceMeta,
     PersistenceSpec,
     RegisterFileArtifact,
+    ScanRecord,
     SqliteTable,
     TrackTablesWrite,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "SqliteTable",
     "PersistenceSpec",
     "PersistenceMeta",
+    "ScanRecord",
     "assert_gridded",
     "assert_segmented",
     "assert_projected",

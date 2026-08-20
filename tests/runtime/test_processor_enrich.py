@@ -33,8 +33,8 @@ class _ProbeEnrichModule(BaseModule):
         SqliteTable(
             key="enrich_probe_rows",
             table="enrich_probe",
-            primary_key=("run_id", "scan_time", "cell_uid"),
-            index_columns=("scan_time", "cell_uid"),
+            primary_key=("run_id", "scan_id", "cell_uid"),
+            index_columns=("scan_id", "cell_uid"),
         ),
     )
 
@@ -91,6 +91,7 @@ class TestEnrichWrite:
         ext_result = _ProbeEnrichModule().run({})
         meta = PersistenceMeta(
             scan_time=None,
+            scan_id="sid-test",
             run_id=test_repository.run_id,
             source_file="",
             dataset_id=test_repository.radar,
@@ -99,7 +100,9 @@ class TestEnrichWrite:
 
         conn = sqlite3.connect(str(test_repository.catalog.db_path))
         try:
-            rows = conn.execute("SELECT run_id, cell_uid, v FROM enrich_probe").fetchall()
+            rows = conn.execute("SELECT run_id, scan_id, cell_uid, v FROM enrich_probe").fetchall()
         finally:
             conn.close()
-        assert rows == [("R1", "a", 1.0)]
+        # The router stamped the scan identity from PersistenceMeta — enrich
+        # modules never supply it themselves.
+        assert rows == [("R1", "sid-test", "a", 1.0)]

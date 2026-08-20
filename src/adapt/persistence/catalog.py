@@ -17,13 +17,16 @@ Thread-safe for concurrent writer/reader access via SQLite WAL mode.
 
 import json
 import logging
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from adapt.contracts.persistence import ScanRecord
 from adapt.persistence.sqlite_store import SqliteStore
+from adapt.utils.time import to_scan_iso
 
 __all__ = ["RadarCatalog"]
 
@@ -61,8 +64,43 @@ class RadarCatalog(SqliteStore):
         """
         self.radar_dir = Path(radar_dir).resolve()
         self.radar = self.radar_dir.name
+        # BEFORE the schema script runs: the script only CREATEs missing
+        # tables/indexes — against a pre-identity catalog it would trip an
+        # opaque OperationalError (index on the missing scan_id column) before
+        # any friendly guidance could fire.
+        self._assert_scan_identity_schema(self.radar_dir / "catalog.db")
         super().__init__(self.radar_dir / "catalog.db", "radar_catalog_schema.sql", checkpoint=True)
         logger.info(f"RadarCatalog initialized for {self.radar} at {self.db_path}")
+
+    @staticmethod
+    def _assert_scan_identity_schema(db_path: Path) -> None:
+        """Fail fast on pre-identity catalogs, before touching their schema.
+
+        This codebase does not migrate old catalogs: recreate them instead.
+        A missing file (fresh repository) is fine — the schema script creates
+        everything identity-shaped from scratch.
+        """
+        if not db_path.exists():
+            return
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            tables = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if "items" not in tables:
+                return  # empty/new database file
+            items_cols = {r[1] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
+            scans_cols = {r[1] for r in conn.execute("PRAGMA table_info(scans)").fetchall()}
+        finally:
+            conn.close()
+        if "scan_id" not in items_cols or (
+            tables >= {"scans"} and "source_file_name" not in scans_cols
+        ):
+            raise RuntimeError(
+                f"{db_path} predates scan identity (items.scan_id / "
+                "scans.source_file_name missing). "
+                "Recreate catalog.db (delete it and rerun the pipeline)."
+            )
 
     # =========================================================================
     # Item Management
@@ -75,6 +113,7 @@ class RadarCatalog(SqliteStore):
         item_type: str,
         scan_time: str | None,
         file_path: str,
+        scan_id: str | None = None,
         processing_stage: str = "complete",
         status: str = "complete",
         parent_ids: list[str] | None = None,
@@ -118,15 +157,16 @@ class RadarCatalog(SqliteStore):
             conn.execute(
                 """
                 INSERT OR REPLACE INTO items
-                (item_id, run_id, item_type, scan_time, file_path, parent_ids,
+                (item_id, run_id, item_type, scan_id, scan_time, file_path, parent_ids,
                  processing_stage, status, metadata, file_size_bytes, file_hash,
                  created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     item_id,
                     run_id,
                     item_type,
+                    scan_id,
                     scan_time,
                     file_path,
                     parent_ids_json,
@@ -406,280 +446,82 @@ class RadarCatalog(SqliteStore):
     # Scan Management
     # =========================================================================
 
-    def register_scan(
-        self, scan_time: datetime, run_id: str, nexrad_file_name: str | None = None
-    ) -> str:
-        """Register a new scan. Idempotent on scan_time+run_id.
+    def register_scan(self, record: ScanRecord) -> None:
+        """Upsert one scan keyed by (run_id, scan_id); the processor is the single writer.
 
-        Parameters
-        ----------
-        scan_time : datetime
-            Scan timestamp (UTC)
-        run_id : str
-            Run identifier
-        nexrad_file_name : str, optional
-            Original NEXRAD filename
-
-        Returns
-        -------
-        str
-            Scan ID
+        ``scan_time`` is stored in the canonical format (``to_scan_iso``);
+        coverage times are optional per-source metadata kept at full precision.
         """
-        import uuid
-
-        scan_time_str = scan_time.isoformat()
-        scan_date = scan_time.strftime("%Y%m%d")
+        scan_iso = to_scan_iso(record.scan_time)
+        scan_date = record.scan_time.strftime("%Y%m%d")
         now = datetime.now(UTC).isoformat()
 
         conn = self._get_connection()
         with self._lock:
-            # Check if scan already exists
-            row = conn.execute(
-                """
-                SELECT scan_id FROM scans
-                WHERE scan_time = ? AND run_id = ?
-            """,
-                (scan_time_str, run_id),
-            ).fetchone()
-
-            if row:
-                return row["scan_id"]
-
-            # Create new scan
-            scan_id = str(uuid.uuid4())[:16]
             conn.execute(
                 """
                 INSERT INTO scans
-                (scan_id, scan_time, scan_date, run_id, nexrad_file_name,
-                 processing_status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+                (run_id, scan_id, scan_time, scan_date, start_time, end_time,
+                 source_file_name, processing_status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', ?, ?)
+                ON CONFLICT(run_id, scan_id) DO UPDATE SET
+                    scan_time=excluded.scan_time,
+                    scan_date=excluded.scan_date,
+                    start_time=excluded.start_time,
+                    end_time=excluded.end_time,
+                    source_file_name=excluded.source_file_name,
+                    processing_status=excluded.processing_status,
+                    updated_at=excluded.updated_at
             """,
-                (scan_id, scan_time_str, scan_date, run_id, nexrad_file_name, now, now),
+                (
+                    record.run_id,
+                    record.scan_id,
+                    scan_iso,
+                    scan_date,
+                    record.start_time.isoformat() if record.start_time else None,
+                    record.end_time.isoformat() if record.end_time else None,
+                    record.source_file_name,
+                    now,
+                    now,
+                ),
             )
             conn.commit()
 
-        logger.debug(f"Scan registered: {scan_id} at {scan_time_str}")
-        return scan_id
+        logger.debug(f"Scan registered: {record.scan_id} at {scan_iso}")
 
-    def link_item_to_scan(
-        self,
-        scan_time: datetime,
-        item_type: str,
-        item_id: str,
-        num_cells: int | None = None,
-        max_reflectivity: float | None = None,
-        has_tracks: bool | None = None,
-    ) -> None:
-        """Link an item to its parent scan.
-
-        Parameters
-        ----------
-        scan_time : datetime
-            Scan timestamp
-        item_type : str
-            Item type (gridded3d, segmentation2d, projection2d, analysis2d)
-        item_id : str
-            Item identifier
-        num_cells : int, optional
-            Number of cells detected
-        max_reflectivity : float, optional
-            Maximum reflectivity
-        has_tracks : bool, optional
-            Whether tracks exist for this scan
-        """
-        scan_time_str = scan_time.isoformat()
-        now = datetime.now(UTC).isoformat()
-
-        # Map item_type to column name
-        column_map = {
-            "gridded3d": "gridded3d_item_id",
-            "segmentation2d": "segmentation2d_item_id",
-            "projection2d": "projection2d_item_id",
-            "analysis2d": "analysis2d_item_id",
-        }
-
-        column = column_map.get(item_type)
-        if not column:
-            logger.warning(f"Unknown item_type for scan link: {item_type}")
-            return
-
-        conn = self._get_connection()
-        with self._lock:
-            # Build update query
-            updates = [f"{column} = ?"]
-            params: list[Any] = [item_id]
-
-            if num_cells is not None:
-                updates.append("num_cells = ?")
-                params.append(num_cells)
-            if max_reflectivity is not None:
-                updates.append("max_reflectivity = ?")
-                params.append(max_reflectivity)
-            if has_tracks is not None:
-                updates.append("has_tracks = ?")
-                params.append(has_tracks)
-
-            updates.append("updated_at = ?")
-            params.append(now)
-            params.append(scan_time_str)
-
-            # Check if all items are now linked
-            conn.execute(
-                f"""
-                UPDATE scans
-                SET {", ".join(updates)}
-                WHERE scan_time = ?
-            """,
-                params,
-            )
-
-            # Update processing status
-            conn.execute(
-                """
-                UPDATE scans
-                SET processing_status = CASE
-                    WHEN gridded3d_item_id IS NOT NULL
-                         AND segmentation2d_item_id IS NOT NULL
-                         AND analysis2d_item_id IS NOT NULL
-                    THEN 'complete'
-                    WHEN gridded3d_item_id IS NOT NULL
-                         OR segmentation2d_item_id IS NOT NULL
-                    THEN 'partial'
-                    ELSE 'pending'
-                END
-                WHERE scan_time = ?
-            """,
-                (scan_time_str,),
-            )
-
-            conn.commit()
-
-        logger.debug(f"Item {item_id} linked to scan at {scan_time_str}")
-
-    def get_scan(self, scan_time: datetime) -> dict | None:
-        """Get scan record by time.
-
-        Parameters
-        ----------
-        scan_time : datetime
-            Scan timestamp
-
-        Returns
-        -------
-        dict or None
-            Scan record with all linked items
-        """
-        scan_time_str = scan_time.isoformat()
-
+    def get_scan(self, run_id: str, scan_id: str) -> dict | None:
+        """Scan record by identity, or None when unknown."""
         conn = self._get_connection()
         with self._lock:
             row = conn.execute(
-                "SELECT * FROM scans WHERE scan_time = ?", (scan_time_str,)
+                "SELECT * FROM scans WHERE run_id = ? AND scan_id = ?", (run_id, scan_id)
             ).fetchone()
-
-        return dict(row) if row else None
-
-    def get_scan_by_id(self, scan_id: str) -> dict | None:
-        """Get scan by ID.
-
-        Parameters
-        ----------
-        scan_id : str
-            Scan identifier
-
-        Returns
-        -------
-        dict or None
-            Scan record
-        """
-        conn = self._get_connection()
-        with self._lock:
-            row = conn.execute("SELECT * FROM scans WHERE scan_id = ?", (scan_id,)).fetchone()
 
         return dict(row) if row else None
 
     def list_scans(
         self,
+        run_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
-        run_id: str | None = None,
-        status: str | None = None,
-        limit: int = 100,
+        limit: int = 200,
     ) -> pd.DataFrame:
-        """List scans with optional time range filter.
-
-        Parameters
-        ----------
-        start_time : datetime, optional
-            Start of time range
-        end_time : datetime, optional
-            End of time range
-        run_id : str, optional
-            Filter by run ID
-        status : str, optional
-            Filter by processing status
-        limit : int
-            Maximum results (default 100)
-
-        Returns
-        -------
-        DataFrame
-            Scan records
-        """
+        """Scan records ordered by scan_time ascending (time orders; scan_id identifies)."""
         query = "SELECT * FROM scans WHERE 1=1"
-        params = []
+        params: list[Any] = []
 
-        if start_time:
-            query += " AND scan_time >= ?"
-            params.append(start_time.isoformat())
-        if end_time:
-            query += " AND scan_time <= ?"
-            params.append(end_time.isoformat())
         if run_id:
             query += " AND run_id = ?"
             params.append(run_id)
-        if status:
-            query += " AND processing_status = ?"
-            params.append(status)
+        if start_time:
+            query += " AND scan_time >= ?"
+            params.append(to_scan_iso(start_time))
+        if end_time:
+            query += " AND scan_time <= ?"
+            params.append(to_scan_iso(end_time))
 
-        query += " ORDER BY scan_time DESC"
-        query += f" LIMIT {limit}"
+        query += f" ORDER BY scan_time ASC LIMIT {int(limit)}"
 
         conn = self._get_connection()
         with self._lock:
             return pd.read_sql_query(query, conn, params=params)
-
-    def get_latest_scan(self, run_id: str | None = None) -> dict | None:
-        """Get the most recent scan.
-
-        Parameters
-        ----------
-        run_id : str, optional
-            Filter by run ID
-
-        Returns
-        -------
-        dict or None
-            Latest scan record
-        """
-        conn = self._get_connection()
-        with self._lock:
-            if run_id:
-                row = conn.execute(
-                    """
-                    SELECT * FROM scans
-                    WHERE run_id = ? AND processing_status = 'complete'
-                    ORDER BY scan_time DESC
-                    LIMIT 1
-                """,
-                    (run_id,),
-                ).fetchone()
-            else:
-                row = conn.execute("""
-                    SELECT * FROM scans
-                    WHERE processing_status = 'complete'
-                    ORDER BY scan_time DESC
-                    LIMIT 1
-                """).fetchone()
-
-        return dict(row) if row else None

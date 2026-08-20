@@ -84,6 +84,7 @@ from adapt.consumers.live._utils import (  # noqa: E402
     _list_runs,
     _pipeline_running,
     _suppress_osx_stderr,
+    is_repository,
     startup_repo,
 )
 
@@ -96,6 +97,7 @@ class AdaptDashboard(tk.Tk):
         self.title("Adapt Radar Dashboard")
         self.geometry("1400x900")
         self.minsize(1000, 680)
+        self._last_refresh_error: str | None = None
 
         self._repo_root = tk.StringVar(value=repo or "")
         self._radar = tk.StringVar(value="")
@@ -511,7 +513,8 @@ class AdaptDashboard(tk.Tk):
         self._repo_root.set(repo_dir)
         self._record_recent_repo(repo_dir)
         # adapt_registry.db is created by the pipeline on first run, so retry
-        # until it appears (3 s, 8 s, 15 s, 25 s after launch).
+        # until it appears (3, 5, 7, and 10 s after launch; a slower start is
+        # picked up by _refresh_all's self-heal on the recurring poll).
         for delay_ms in (3000, 5000, 7000, 10000):
             self._timers.oneshot(delay_ms, self._on_repo_changed)
 
@@ -542,9 +545,33 @@ class AdaptDashboard(tk.Tk):
     # ── Auto-refresh ──────────────────────────────────────────────────────────
 
     def _schedule_refresh(self):
-        if self._auto_refresh_var.get():
-            self._refresh_all()
-        self._timers.recurring("refresh", POLL_MS, self._schedule_refresh)
+        # The re-arm lives in `finally`: one failing refresh (pre-identity repo,
+        # transient sqlite lock while the pipeline writes) must never silently
+        # kill auto-refresh for the rest of the session.
+        try:
+            if self._auto_refresh_var.get():
+                self._refresh_all()
+        except Exception as exc:
+            self._surface_refresh_error(exc)
+        finally:
+            self._timers.recurring("refresh", POLL_MS, self._schedule_refresh)
+
+    def report_callback_exception(self, exc_type, exc, tb):  # noqa: N802 (Tk hook name)
+        """Errors in direct Tk handlers (shortcuts, comboboxes, menus) surface
+        to the user instead of dying invisibly on stderr — the identity
+        contract's loud failures must reach the person at the screen."""
+        logger.error("Unhandled Tk callback error", exc_info=(exc_type, exc, tb))
+        messagebox.showerror("Dashboard error", str(exc), parent=self)
+
+    def _surface_refresh_error(self, exc: Exception) -> None:
+        """Show a refresh failure once per distinct message; keep polling."""
+        message = str(exc)
+        self._status_base = f"Error: {message[:80]}"
+        self._next_refresh_at = time.time() + POLL_MS / 1000
+        if message != getattr(self, "_last_refresh_error", None):
+            self._last_refresh_error = message
+            logger.exception("Dashboard refresh failed")
+            messagebox.showerror("Refresh failed", message, parent=self)
 
     def _status_tick(self):
         """Update status bar every second: scan time + countdown to next check."""
@@ -561,6 +588,11 @@ class AdaptDashboard(tk.Tk):
     def _refresh_all(self):
         repo = self._ctx.repo()
         radar = self._ctx.radar()
+        if repo and not radar and is_repository(Path(repo)):
+            # Self-heal: the registry appeared after the adoption retries ended
+            # (slow pipeline startup) — populate the radar/run selectors now.
+            self._on_repo_changed()
+            radar = self._ctx.radar()
         if not repo or not radar:
             return
 

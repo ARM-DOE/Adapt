@@ -20,6 +20,12 @@ import xarray as xr
 
 from adapt.runtime.observability import ObsSettings, build_observability
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.queue_msg import msg as _msg
+
+# Distinct per-file times: two different scans sharing one nominal second
+# is rejected by the scans registry (UNIQUE(run_id, scan_time)).
+_MT1 = datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC)
+_MT2 = datetime(2024, 5, 18, 12, 5, 0, tzinfo=UTC)
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -81,12 +87,12 @@ def test_processor_emits_scan_metrics_and_binds_scan_id(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    assert proc.process_file("/fake/file_1") is True
-    assert proc.process_file("/fake/file_2") is True
+    assert proc.process_file(_msg("/fake/file_1", scan_time=_MT1)) is True
+    assert proc.process_file(_msg("/fake/file_2", scan_time=_MT2)) is True
 
     assert obs.metrics.counter_total("files_processed_total") == 2.0
     assert len(obs.metrics.histogram_values("scan_processing_time")) == 2
-    assert seen_scan_ids == ["file_1", "file_2"]  # scan_id bound while executors ran
+    assert seen_scan_ids == ["sid-file_1", "sid-file_2"]  # minted scan_id bound while executors ran
     assert obs.drain_spans() == []  # processor drained each scan's spans for history
 
 
@@ -114,7 +120,7 @@ def test_processor_logs_single_enriched_traceback_on_scan_failure(
     monkeypatch.setattr(proc._executors[1], "run", _boom)
 
     with caplog.at_level(logging.ERROR):
-        result = proc.process_file("/fake/file_9")
+        result = proc.process_file(_msg("/fake/file_9"))
 
     assert result is False
     traced = [r for r in caplog.records if r.exc_info]
@@ -172,7 +178,7 @@ def test_processor_emits_per_scan_progress_from_spans(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    assert proc.process_file("/fake/file_7") is True
+    assert proc.process_file(_msg("/fake/file_7")) is True
 
     assert len(calls) == 1
     scan_id, stage_names, _ = calls[0]
@@ -218,7 +224,7 @@ def test_processor_publishes_current_activity(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    proc.process_file("/fake/file_3")
+    proc.process_file(_msg("/fake/file_3"))
 
-    assert seen_during == ["processing file_3"]  # set while the scan ran
+    assert seen_during == ["processing sid-file_3"]  # set while the scan ran
     assert proc.current_activity() is None  # cleared afterwards

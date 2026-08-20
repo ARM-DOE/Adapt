@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS items (
     item_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
     item_type TEXT NOT NULL,
+    scan_id TEXT,                      -- content-derived scan identity (NULL for run-level)
     scan_time TEXT NOT NULL,           -- ISO8601 UTC timestamp
     file_path TEXT NOT NULL,           -- Relative path from radar dir
     parent_ids TEXT,                   -- JSON array of parent item_ids for lineage
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_run ON items(run_id);
+CREATE INDEX IF NOT EXISTS idx_items_scan ON items(run_id, scan_id);
 CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type);
 CREATE INDEX IF NOT EXISTS idx_items_scan_time ON items(scan_time DESC);
 CREATE INDEX IF NOT EXISTS idx_items_type_time ON items(item_type, scan_time DESC);
@@ -77,38 +79,25 @@ CREATE TABLE IF NOT EXISTS schemas (
 -- Provides efficient time-based lookup and cross-item relationships
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS scans (
-    scan_id TEXT PRIMARY KEY,
-    scan_time TEXT NOT NULL,           -- ISO8601 UTC timestamp (indexed)
-    scan_date TEXT NOT NULL,           -- YYYYMMDD for partitioning
-    run_id TEXT NOT NULL,
+    run_id            TEXT NOT NULL,
+    scan_id           TEXT NOT NULL,   -- content-derived scan identity (join key)
+    scan_time         TEXT NOT NULL,   -- ISO8601 UTC (ordering/display metadata)
+    scan_date         TEXT NOT NULL,   -- YYYYMMDD (UTC), derived from scan_time
+    start_time        TEXT,            -- per-source coverage metadata (nullable)
+    end_time          TEXT,            -- per-source coverage metadata (nullable)
+    source_file_name  TEXT NOT NULL,   -- original source filename (metadata, not identity)
+    processing_status TEXT NOT NULL DEFAULT 'complete',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
 
-    -- Item references (NULL if not yet produced)
-    gridded3d_item_id TEXT,
-    segmentation2d_item_id TEXT,
-    projection2d_item_id TEXT,
-    analysis2d_item_id TEXT,
-
-    -- Quick-access metadata (denormalized for GUI speed)
-    num_cells INTEGER DEFAULT 0,
-    max_reflectivity REAL,
-    has_tracks BOOLEAN DEFAULT FALSE,
-
-    -- Provenance
-    nexrad_file_name TEXT,             -- Original AWS filename
-    processing_status TEXT NOT NULL DEFAULT 'pending',  -- pending | complete | partial | failed
-    created_at TEXT NOT NULL,          -- ISO8601 UTC timestamp
-    updated_at TEXT NOT NULL,          -- ISO8601 UTC timestamp
-
-    FOREIGN KEY (gridded3d_item_id) REFERENCES items(item_id),
-    FOREIGN KEY (segmentation2d_item_id) REFERENCES items(item_id),
-    FOREIGN KEY (projection2d_item_id) REFERENCES items(item_id),
-    FOREIGN KEY (analysis2d_item_id) REFERENCES items(item_id)
+    PRIMARY KEY (run_id, scan_id),
+    -- Two DIFFERENT scans sharing one nominal second within a run is a data
+    -- problem (e.g. a duplicate download); surface it at registration instead
+    -- of letting time-ordered reads silently pick one.
+    UNIQUE (run_id, scan_time)
 );
 
-CREATE INDEX IF NOT EXISTS idx_scans_time ON scans(scan_time DESC);
-CREATE INDEX IF NOT EXISTS idx_scans_date ON scans(scan_date);
-CREATE INDEX IF NOT EXISTS idx_scans_run ON scans(run_id, scan_time DESC);
-CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(processing_status);
+CREATE INDEX IF NOT EXISTS idx_scans_time ON scans(run_id, scan_time DESC);
 
 -- ====================================================================
 -- Table: cells_by_scan
@@ -119,7 +108,8 @@ CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(processing_status);
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS cells_by_scan (
     run_id                  TEXT NOT NULL,
-    scan_time               TEXT NOT NULL,       -- ISO8601 UTC
+    scan_id                 TEXT NOT NULL,       -- content-derived scan identity (join key)
+    scan_time               TEXT NOT NULL,       -- ISO8601 UTC (ordering/display metadata)
     cell_label              INTEGER NOT NULL,
     cell_uid                TEXT NOT NULL,
 
@@ -151,12 +141,13 @@ CREATE TABLE IF NOT EXISTS cells_by_scan (
     is_merge_source_here    INTEGER NOT NULL DEFAULT 0,
     is_terminated_after_here INTEGER NOT NULL DEFAULT 0,
 
-    PRIMARY KEY (run_id, scan_time, cell_uid),
-    UNIQUE (run_id, scan_time, cell_label)
+    PRIMARY KEY (run_id, scan_id, cell_uid),
+    UNIQUE (run_id, scan_id, cell_label)
 );
 
 CREATE INDEX IF NOT EXISTS idx_cbs_track ON cells_by_scan(run_id, cell_uid, scan_time);
-CREATE INDEX IF NOT EXISTS idx_cbs_scan  ON cells_by_scan(run_id, scan_time);
+CREATE INDEX IF NOT EXISTS idx_cbs_scan  ON cells_by_scan(run_id, scan_id);
+CREATE INDEX IF NOT EXISTS idx_cbs_time  ON cells_by_scan(run_id, scan_time);
 CREATE INDEX IF NOT EXISTS idx_cbs_label ON cells_by_scan(run_id, cell_label, scan_time);
 
 -- ====================================================================
@@ -167,6 +158,8 @@ CREATE INDEX IF NOT EXISTS idx_cbs_label ON cells_by_scan(run_id, cell_label, sc
 CREATE TABLE IF NOT EXISTS cell_events (
     event_id           INTEGER PRIMARY KEY,      -- autoincrement surrogate
     run_id             TEXT NOT NULL,
+    source_scan_id     TEXT,                     -- scan identity; NULL for INITIATION
+    target_scan_id     TEXT,                     -- scan identity; NULL for TERMINATION
     source_scan_time   TEXT,                     -- ISO8601 UTC; NULL for INITIATION
     target_scan_time   TEXT,                     -- ISO8601 UTC; NULL for TERMINATION
     event_type         TEXT NOT NULL,            -- CONTINUE|SPLIT|MERGE|INITIATION|TERMINATION

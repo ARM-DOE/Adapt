@@ -15,6 +15,7 @@ def test_notify_queue_puts_item(tmp_path, make_config):
     d = AwsNexradDownloader(config, output_dir=tmp_path, result_queue=q)
 
     path = tmp_path / "file1"
+    path.write_bytes(b"volume-bytes")  # identity is minted from the file content
 
     d._notify_queue(
         path=path,
@@ -48,6 +49,8 @@ def test_notify_queue_calls_tracker(tmp_path, fake_scan, make_config):
     config = make_config()
     d = AwsNexradDownloader(config, output_dir=tmp_path, result_queue=q, file_tracker=tracker)
 
-    d._notify_queue(path=tmp_path / "f", scan_time=fake_scan("x").scan_time, is_new=True)
+    path = tmp_path / "f"
+    path.write_bytes(b"volume-bytes")
+    d._notify_queue(path=path, scan_time=fake_scan("x").scan_time, is_new=True)
 
     assert tracker.registered

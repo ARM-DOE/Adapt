@@ -44,10 +44,15 @@ class ModuleOutputWriter:
         self._db_path = Path(db_path)
         self._spec = spec
 
-    def write(self, df: pd.DataFrame) -> None:
-        """Create the table if needed and upsert the DataFrame's rows."""
+    def write(self, df: pd.DataFrame, scan_id: str | None = None) -> None:
+        """Create the table if needed and upsert the DataFrame's rows.
+
+        ``scan_id`` is the scan identity from PersistenceMeta; per-scan tables
+        (those keying on scan_id) require it, run-level tables ignore it.
+        """
         if df is None or df.empty:
             return
+        df = self._stamp_scan_id(df, scan_id)
         df = self._add_scan_time_unix(df)
         conn = self._connect()
         try:
@@ -59,6 +64,22 @@ class ModuleOutputWriter:
             conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         finally:
             conn.close()
+
+    def _stamp_scan_id(self, df: pd.DataFrame, scan_id: str | None) -> pd.DataFrame:
+        """Stamp the scan identity onto per-scan tables; modules never supply it."""
+        keys_on_scan_id = "scan_id" in self._spec.primary_key
+        if scan_id is None:
+            if keys_on_scan_id and "scan_id" not in df.columns:
+                raise ValueError(
+                    f"{self._spec.table}: primary key includes scan_id but no scan "
+                    "identity was provided — refusing to persist rows without it"
+                )
+            return df
+        if not keys_on_scan_id:
+            return df
+        df = df.copy()
+        df["scan_id"] = scan_id
+        return df
 
     @staticmethod
     def _add_scan_time_unix(df: pd.DataFrame) -> pd.DataFrame:

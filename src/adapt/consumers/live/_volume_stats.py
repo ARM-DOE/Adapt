@@ -4,9 +4,9 @@
 """Read per-cell 3D volume statistics for a track and join them to its history.
 
 The ``cell_volume_stats`` enrichment table lives in the same ``catalog.db`` as
-the track tables but is keyed separately (run_id, scan_time, cell_uid). The live
-dashboard's time-series panels read ``cells_by_scan`` only, so volume columns
-(e.g. cloud-top height) must be joined on demand when a volume plot group is
+the track tables, keyed on (run_id, scan_id, cell_uid). The live dashboard's
+time-series panels read ``cells_by_scan`` only, so volume columns (e.g.
+cloud-top height) must be joined on demand when a volume plot group is
 selected. This module owns that read + join — no Tk, no matplotlib.
 """
 
@@ -14,6 +14,8 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+
+from adapt.consumers.live._utils import require_scan_identity
 
 
 def load_track_volume_stats(db_path, run_id: str, cell_uid: str) -> pd.DataFrame:
@@ -41,14 +43,15 @@ def load_track_volume_stats(db_path, run_id: str, cell_uid: str) -> pd.DataFrame
 
 
 def merge_volume_stats(track_df: pd.DataFrame, vol_df: pd.DataFrame) -> pd.DataFrame:
-    """Left-join volume columns onto ``track_df`` on ``scan_time``.
+    """Left-join volume columns onto ``track_df`` on ``scan_id``.
 
     Returns ``track_df`` unchanged when there is nothing to add. Columns already
     present in ``track_df`` (other than the join key) are kept from ``track_df``.
-    Both tables store ``scan_time`` via the single canonical ISO format, so the
-    string join is exact.
+    Both tables carry the pipeline-stamped scan identity, so the join is exact —
+    an identity join between two per-scan tables, never a timestamp comparison.
     """
-    if vol_df is None or vol_df.empty or "scan_time" not in vol_df.columns:
+    if vol_df is None or vol_df.empty:
         return track_df
-    drop = [c for c in vol_df.columns if c != "scan_time" and c in track_df.columns]
-    return track_df.merge(vol_df.drop(columns=drop), on="scan_time", how="left")
+    require_scan_identity(vol_df, table="cell_volume_stats")
+    drop = [c for c in vol_df.columns if c != "scan_id" and c in track_df.columns]
+    return track_df.merge(vol_df.drop(columns=drop), on="scan_id", how="left")

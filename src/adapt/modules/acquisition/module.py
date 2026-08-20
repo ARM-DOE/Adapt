@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from adapt.downloaders import NexradS3
+from adapt.utils.identity import scan_id_from_bytes
 
 __all__ = ["AwsNexradDownloader"]
 
@@ -40,7 +41,9 @@ class AwsNexradDownloader(threading.Thread):
     **Deduplication:** Maintains set of known files to avoid re-downloading.
     Safe to restart mid-execution.
 
-    **Queue Communication:** Sends filepath to result_queue for each new file.
+    **Queue Communication:** Puts one message dict per new file on result_queue —
+    ``{path, scan_id, scan_time, radar, file_id, queued_at}`` — where scan_id is
+    the content-derived scan identity minted here, at the source boundary.
     Downstream processor can begin work immediately (streaming architecture).
 
     **File Size Filtering:** Ignores files < 1 KB (corrupted downloads or
@@ -582,6 +585,12 @@ class AwsNexradDownloader(threading.Thread):
         if self.result_queue is None:
             return
 
+        # Mint the scan identity OUTSIDE the swallow below: a transient read
+        # failure must propagate to the run loop (which retries next poll,
+        # since the caller only marks the file known after we return), never
+        # silently drop the scan with a log line.
+        scan_id = scan_id_from_bytes(path.read_bytes())
+
         try:
             # Register with tracker if available
             tracker = self.file_tracker
@@ -596,6 +605,7 @@ class AwsNexradDownloader(threading.Thread):
             self.result_queue.put(
                 {
                     "path": path,
+                    "scan_id": scan_id,
                     "scan_time": scan_time,
                     "radar": self.radar,
                     "file_id": file_id,

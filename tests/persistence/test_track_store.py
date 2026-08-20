@@ -28,6 +28,7 @@ PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS cells_by_scan (
     run_id                  TEXT NOT NULL,
+    scan_id                 TEXT NOT NULL,
     scan_time               TEXT NOT NULL,
     cell_label              INTEGER NOT NULL,
     cell_uid                TEXT NOT NULL,
@@ -49,13 +50,15 @@ CREATE TABLE IF NOT EXISTS cells_by_scan (
     is_split_source_here    INTEGER NOT NULL DEFAULT 0,
     is_merge_source_here    INTEGER NOT NULL DEFAULT 0,
     is_terminated_after_here INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (run_id, scan_time, cell_uid),
-    UNIQUE (run_id, scan_time, cell_label)
+    PRIMARY KEY (run_id, scan_id, cell_uid),
+    UNIQUE (run_id, scan_id, cell_label)
 );
 
 CREATE TABLE IF NOT EXISTS cell_events (
     event_id          INTEGER PRIMARY KEY,
     run_id            TEXT NOT NULL,
+    source_scan_id    TEXT,
+    target_scan_id    TEXT,
     source_scan_time  TEXT,
     target_scan_time  TEXT,
     event_type        TEXT NOT NULL,
@@ -120,6 +123,11 @@ def store(db_path):
 
 def _t(iso: str) -> datetime:
     return datetime.fromisoformat(iso).replace(tzinfo=UTC)
+
+
+def _sid(scan_time: datetime) -> str:
+    """Deterministic per-scan identity for tests, derived from the fixture time."""
+    return "sid-" + scan_time.strftime("%Y%m%d%H%M%S")
 
 
 def _cell_stats(cell_label: int, area: float = 4.0, refl: float = 40.0) -> pd.DataFrame:
@@ -279,8 +287,9 @@ def test_initiation_inserts_cells_by_scan_and_tracks(store):
         tracked_cells_df=_tracked_cells(1, "AAAA"),
         cell_events_df=_initiation_event(t, "AAAA", 1),
         cell_adjacency_df=_empty_cell_adjacency(),
+        scan_id=_sid(t),
     )
-    cells = store.get_cells_by_scan("r1", t)
+    cells = store.get_cells_by_scan("r1", _sid(t))
     assert len(cells) == 1
     assert cells.iloc[0]["cell_uid"] == "AAAA"
     assert cells.iloc[0]["is_initiated_here"] == 1
@@ -302,6 +311,7 @@ def test_continuation_updates_last_seen_and_n_scans(store):
         _tracked_cells(1, "BBBB"),
         _initiation_event(t1, "BBBB", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
     store.write_scan(
         "r1",
@@ -310,6 +320,7 @@ def test_continuation_updates_last_seen_and_n_scans(store):
         _tracked_cells(1, "BBBB"),
         _continue_event(t2, "BBBB", 1, 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t2),
     )
 
     tracks = store.get_cell_tracks("r1")
@@ -327,6 +338,7 @@ def test_split_sets_split_source_retroactively_on_prev_scan(store):
         _tracked_cells(1, "CCCC"),
         _initiation_event(t1, "CCCC", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
 
     split_evts = pd.concat(
@@ -344,9 +356,10 @@ def test_split_sets_split_source_retroactively_on_prev_scan(store):
         cells2,
         split_evts,
         _empty_cell_adjacency(),
+        scan_id=_sid(t2),
     )
 
-    prev = store.get_cells_by_scan("r1", t1)
+    prev = store.get_cells_by_scan("r1", _sid(t1))
     assert prev.iloc[0]["is_split_source_here"] == 1
 
 
@@ -368,6 +381,7 @@ def test_merge_into_existing_track_marks_sources_terminated(store):
         cells1,
         init2,
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
 
     merge_evts = pd.concat(
@@ -385,6 +399,7 @@ def test_merge_into_existing_track_marks_sources_terminated(store):
         _tracked_cells(1, "EE"),
         merge_evts,
         _empty_cell_adjacency(),
+        scan_id=_sid(t2),
     )
 
     tracks = store.get_cell_tracks("r1")
@@ -411,6 +426,7 @@ def test_merge_into_new_cell_uid_sets_origin_type_merge(store):
         cells1,
         init2,
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
 
     merge_evts = pd.concat(
@@ -429,6 +445,7 @@ def test_merge_into_new_cell_uid_sets_origin_type_merge(store):
         _tracked_cells(1, "II"),
         merge_evts,
         _empty_cell_adjacency(),
+        scan_id=_sid(t2),
     )
 
     tracks = store.get_cell_tracks("r1")
@@ -446,6 +463,7 @@ def test_termination_sets_is_terminated_after_here_retroactively(store):
         _tracked_cells(1, "JJ"),
         _initiation_event(t1, "JJ", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
     store.write_scan(
         "r1",
@@ -460,9 +478,10 @@ def test_termination_sets_is_terminated_after_here_retroactively(store):
             ignore_index=True,
         ),
         _empty_cell_adjacency(),
+        scan_id=_sid(t2),
     )
 
-    prev = store.get_cells_by_scan("r1", t1)
+    prev = store.get_cells_by_scan("r1", _sid(t1))
     assert prev.iloc[0]["is_terminated_after_here"] == 1
 
 
@@ -477,6 +496,7 @@ def test_get_track_history_returns_ordered_rows(store):
         _tracked_cells(1, "LL"),
         _initiation_event(t1, "LL", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
     store.write_scan(
         "r1",
@@ -485,6 +505,7 @@ def test_get_track_history_returns_ordered_rows(store):
         _tracked_cells(1, "LL"),
         _continue_event(t2, "LL", 1, 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t2),
     )
     store.write_scan(
         "r1",
@@ -493,6 +514,7 @@ def test_get_track_history_returns_ordered_rows(store):
         _tracked_cells(1, "LL"),
         _continue_event(t3, "LL", 1, 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t3),
     )
 
     history = store.get_track_history("r1", "LL")
@@ -510,6 +532,7 @@ def test_upsert_does_not_churn_rows_on_repeat_write(store):
         _tracked_cells(1, "MM"),
         _initiation_event(t, "MM", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t),
     )
     store.write_scan(
         "r1",
@@ -518,9 +541,10 @@ def test_upsert_does_not_churn_rows_on_repeat_write(store):
         _tracked_cells(1, "MM"),
         _initiation_event(t, "MM", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t),
     )
 
-    cells = store.get_cells_by_scan("r1", t)
+    cells = store.get_cells_by_scan("r1", _sid(t))
     assert len(cells) == 1
 
 
@@ -533,6 +557,7 @@ def test_unique_constraint_rejects_duplicate_cell_label_per_scan(store):
         _tracked_cells(1, "NN"),
         _initiation_event(t, "NN", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t),
     )
 
     # Writing same cell_label with different cell_uid should raise on unique(cell_label)
@@ -544,6 +569,7 @@ def test_unique_constraint_rejects_duplicate_cell_label_per_scan(store):
             _tracked_cells(1, "OO"),
             _initiation_event(t, "OO", 1),
             _empty_cell_adjacency(),
+            scan_id=_sid(t),
         )
 
 
@@ -557,6 +583,7 @@ def test_track_events_has_both_source_and_target_scan_times(store):
         _tracked_cells(1, "PP"),
         _initiation_event(t1, "PP", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
     store.write_scan(
         "r1",
@@ -565,6 +592,7 @@ def test_track_events_has_both_source_and_target_scan_times(store):
         _tracked_cells(1, "PP"),
         _continue_event(t2, "PP", 1, 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t2),
     )
 
     events = store.get_cell_events("r1", "PP")
@@ -605,9 +633,11 @@ def test_cell_uid_fields_are_persisted_and_returned(store):
             }
         ]
     )
-    store.write_scan("r1", t, _cell_stats(1), tracked, events, _empty_cell_adjacency())
+    store.write_scan(
+        "r1", t, _cell_stats(1), tracked, events, _empty_cell_adjacency(), scan_id=_sid(t)
+    )
 
-    cells = store.get_cells_by_scan("r1", t)
+    cells = store.get_cells_by_scan("r1", _sid(t))
     assert "cell_uid" in cells.columns
     assert cells.iloc[0]["cell_uid"] == "UID1"
 
@@ -699,6 +729,7 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
                 _tracked_cells(1, "UID1"),
                 pd.DataFrame(),
                 _empty_cell_adjacency(),
+                scan_id=_sid(_t("2024-01-01T12:00:00")),
             )
 
         with TrackStore(db_path, readonly=True) as reader:
@@ -741,6 +772,7 @@ def test_duration_seconds_is_zero_at_first_sight(store):
         _tracked_cells(1, "DUR1"),
         _initiation_event(t, "DUR1", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t),
     )
 
     tracks = store.get_cell_tracks("r1")
@@ -758,6 +790,7 @@ def test_duration_seconds_spans_first_to_last_seen(store):
         _tracked_cells(1, "DUR2"),
         _initiation_event(t1, "DUR2", 1),
         _empty_cell_adjacency(),
+        scan_id=_sid(t1),
     )
     for t in (t2, t3):
         store.write_scan(
@@ -767,7 +800,154 @@ def test_duration_seconds_spans_first_to_last_seen(store):
             _tracked_cells(1, "DUR2"),
             _continue_event(t, "DUR2", 1, 1),
             _empty_cell_adjacency(),
+            scan_id=_sid(t),
         )
 
     tracks = store.get_cell_tracks("r1")
     assert tracks.iloc[0]["duration_seconds"] == pytest.approx(11 * 60.0)
+
+
+# ---------------------------------------------------------------------------
+# Scan identity: scan_id is the join key; scan_time is ordering metadata
+# ---------------------------------------------------------------------------
+
+
+def test_write_scan_requires_scan_id(store):
+    t = _t("2024-05-18T12:00:00")
+    with pytest.raises(TypeError):
+        store.write_scan(
+            run_id="r1",
+            scan_time=t,
+            cell_stats_df=_cell_stats(1),
+            tracked_cells_df=_tracked_cells(1, "AAAA"),
+            cell_events_df=_initiation_event(t, "AAAA", 1),
+            cell_adjacency_df=_empty_cell_adjacency(),
+        )
+
+
+def test_write_scan_rejects_empty_scan_id(store):
+    t = _t("2024-05-18T12:00:00")
+    with pytest.raises(ValueError, match="scan_id"):
+        store.write_scan(
+            run_id="r1",
+            scan_time=t,
+            cell_stats_df=_cell_stats(1),
+            tracked_cells_df=_tracked_cells(1, "AAAA"),
+            cell_events_df=_initiation_event(t, "AAAA", 1),
+            cell_adjacency_df=_empty_cell_adjacency(),
+            scan_id="",
+        )
+
+
+def test_rows_and_events_carry_scan_id(store, db_path):
+    t1, t2 = _t("2024-05-18T12:00:00"), _t("2024-05-18T12:05:00")
+    store.write_scan(
+        run_id="r1",
+        scan_time=t1,
+        cell_stats_df=_cell_stats(1),
+        tracked_cells_df=_tracked_cells(1, "AAAA"),
+        cell_events_df=_initiation_event(t1, "AAAA", 1),
+        cell_adjacency_df=_empty_cell_adjacency(),
+        scan_id="sid-scan-1",
+    )
+    store.write_scan(
+        run_id="r1",
+        scan_time=t2,
+        cell_stats_df=_cell_stats(1),
+        tracked_cells_df=_tracked_cells(1, "AAAA"),
+        cell_events_df=_continue_event(t2, "AAAA", 1, 1),
+        cell_adjacency_df=_empty_cell_adjacency(),
+        scan_id="sid-scan-2",
+    )
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        cells = conn.execute(
+            "SELECT scan_id, scan_time FROM cells_by_scan ORDER BY scan_time"
+        ).fetchall()
+        assert [(r["scan_id"], r["scan_time"]) for r in cells] == [
+            ("sid-scan-1", "2024-05-18T12:00:00Z"),
+            ("sid-scan-2", "2024-05-18T12:05:00Z"),
+        ]
+
+        init = conn.execute(
+            "SELECT source_scan_id, target_scan_id FROM cell_events WHERE event_type='INITIATION'"
+        ).fetchone()
+        assert init["source_scan_id"] is None  # no source scan for a birth
+        assert init["target_scan_id"] == "sid-scan-1"
+
+        cont = conn.execute(
+            "SELECT source_scan_id, target_scan_id FROM cell_events WHERE event_type='CONTINUE'"
+        ).fetchone()
+        assert cont["source_scan_id"] == "sid-scan-1"
+        assert cont["target_scan_id"] == "sid-scan-2"
+    finally:
+        conn.close()
+
+
+def test_duplicate_cell_uid_in_batch_raises(store):
+    # Two distinct cells with the same uid in one scan is silent data loss
+    # under upsert (issue #72): the second row overwrites the first. Reject loudly.
+    t = _t("2024-05-18T12:00:00")
+    tracked = pd.DataFrame(
+        [
+            {"cell_label": 1, "cell_uid": "AAAA", "area": 4.0, "max_reflectivity": 40.0},
+            {"cell_label": 2, "cell_uid": "AAAA", "area": 5.0, "max_reflectivity": 42.0},
+        ]
+    )
+    stats = pd.concat([_cell_stats(1), _cell_stats(2)], ignore_index=True)
+    with pytest.raises(ValueError, match="AAAA"):
+        store.write_scan(
+            run_id="r1",
+            scan_time=t,
+            cell_stats_df=stats,
+            tracked_cells_df=tracked,
+            cell_events_df=_initiation_event(t, "AAAA", 1),
+            cell_adjacency_df=_empty_cell_adjacency(),
+            scan_id="sid-scan-1",
+        )
+
+
+def test_duplicate_cell_label_in_batch_raises(store):
+    t = _t("2024-05-18T12:00:00")
+    tracked = pd.DataFrame(
+        [
+            {"cell_label": 1, "cell_uid": "AAAA", "area": 4.0, "max_reflectivity": 40.0},
+            {"cell_label": 1, "cell_uid": "BBBB", "area": 5.0, "max_reflectivity": 42.0},
+        ]
+    )
+    with pytest.raises(ValueError, match="cell_label"):
+        store.write_scan(
+            run_id="r1",
+            scan_time=t,
+            cell_stats_df=_cell_stats(1),
+            tracked_cells_df=tracked,
+            cell_events_df=_initiation_event(t, "AAAA", 1),
+            cell_adjacency_df=_empty_cell_adjacency(),
+            scan_id="sid-scan-1",
+        )
+
+
+def test_schema_without_scan_id_columns_raises(tmp_path):
+    # Pre-identity catalogs are not migrated: fail fast with recreate guidance.
+    legacy = tmp_path / "legacy_catalog.db"
+    legacy_ddl = "\n".join(
+        line
+        for line in _DDL.replace(
+            "PRIMARY KEY (run_id, scan_id, cell_uid)", "PRIMARY KEY (run_id, scan_time, cell_uid)"
+        )
+        .replace("UNIQUE (run_id, scan_id, cell_label)", "UNIQUE (run_id, scan_time, cell_label)")
+        .splitlines()
+        if "scan_id " not in line  # drop the scan_id / source_scan_id / target_scan_id columns
+    )
+    conn = sqlite3.connect(str(legacy))
+    conn.executescript(legacy_ddl)
+    conn.close()
+
+    s = TrackStore(legacy)
+    try:
+        with pytest.raises(RuntimeError, match="Recreate catalog.db"):
+            s.get_track_history("r1", "AAAA")
+    finally:
+        s.close()

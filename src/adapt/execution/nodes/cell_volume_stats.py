@@ -57,7 +57,7 @@ class CellVolumeStatsModule(BaseModule):
         SqliteTable(
             key="cell_volume_stats_rows",
             table="cell_volume_stats",
-            primary_key=("run_id", "scan_time", "cell_uid"),
+            primary_key=("run_id", "scan_id", "cell_uid"),
             index_columns=("scan_time", "cell_uid"),
         ),
     )

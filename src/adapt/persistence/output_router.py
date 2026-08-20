@@ -28,6 +28,7 @@ from adapt.contracts import (
 from adapt.persistence.module_output import ModuleOutputWriter
 from adapt.persistence.repository import DataRepository
 from adapt.persistence.track_store import TrackStore
+from adapt.utils.time import to_scan_iso
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,15 @@ class OutputRouter:
             )
         return meta.scan_time
 
+    @staticmethod
+    def _require_scan_id(module_name: str, spec, meta: PersistenceMeta) -> str:
+        if meta.scan_id is None:
+            raise ValueError(
+                f"{module_name}: {type(spec).__name__} needs scan_id but it is None — "
+                "refusing to persist rows without scan identity"
+            )
+        return meta.scan_id
+
     def _dispatch(
         self, module_name: str, spec: PersistenceSpec, result: dict, meta: PersistenceMeta
     ) -> None:
@@ -71,18 +81,24 @@ class OutputRouter:
                     file_path=path,
                     scan_time=scan_time,
                     producer=spec.producer,
+                    scan_id=self._require_scan_id(module_name, spec, meta),
                 )
             case NetcdfArtifact():
                 if spec.key not in result:
                     return
                 scan_time = self._require_scan_time(module_name, spec, meta)
+                scan_id = self._require_scan_id(module_name, spec, meta)
                 ds = result[spec.key]
-                # attrs key stays "radar" — stored-artifact format unchanged
+                # attrs key stays "radar" — stored-artifact format unchanged.
+                # scan_id/scan_time make the artifact self-describing: consumers
+                # key on attrs, never on filenames or the time coordinate.
                 ds.attrs.update(
                     {
                         "source": meta.source_file,
                         "radar": meta.dataset_id,
                         "description": spec.description,
+                        "scan_id": scan_id,
+                        "scan_time": to_scan_iso(scan_time),
                     }
                 )
                 self._repo.write_netcdf(
@@ -93,6 +109,7 @@ class OutputRouter:
                     parent_ids=[],
                     metadata={"components": list(ds.data_vars)},
                     filename_stem=Path(meta.source_file).stem,
+                    scan_id=scan_id,
                 )
             case ParquetArtifact():
                 df = result.get(spec.key)
@@ -104,6 +121,7 @@ class OutputRouter:
                     product_type=spec.product_type,
                     scan_time=scan_time,
                     producer=spec.producer,
+                    scan_id=self._require_scan_id(module_name, spec, meta),
                 )
             case TrackTablesWrite():
                 if spec.tracked_key not in result:
@@ -133,11 +151,12 @@ class OutputRouter:
                         tracked_cells_df=tracked,
                         cell_events_df=result[spec.events_key],
                         cell_adjacency_df=result[spec.adjacency_key],
+                        scan_id=self._require_scan_id(module_name, spec, meta),
                     )
             case SqliteTable():
                 df = result.get(spec.key)
                 if df is None or df.empty:
                     return
-                ModuleOutputWriter(self._repo.catalog.db_path, spec).write(df)
+                ModuleOutputWriter(self._repo.catalog.db_path, spec).write(df, scan_id=meta.scan_id)
             case _:
                 raise TypeError(f"{module_name}: unknown persistence spec {type(spec).__name__}")

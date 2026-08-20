@@ -39,7 +39,11 @@ def written_repo(tmp_path):
     RepositoryRegistry._instance = None
     repo = DataRepository(run_id="genericread1", base_dir=tmp_path, radar="KTST")
     meta = PersistenceMeta(
-        scan_time=SCAN_TIME, run_id=repo.run_id, source_file="src", dataset_id="KTST"
+        scan_time=SCAN_TIME,
+        scan_id="sid-test",
+        run_id=repo.run_id,
+        source_file="src",
+        dataset_id="KTST",
     )
 
     nc = tmp_path / "grid.nc"
@@ -115,6 +119,13 @@ class TestArtifacts:
     def test_time_window_filters(self, written_client):
         before = written_client.artifacts(radar="KTST", end=datetime(2026, 6, 1, 11, 0, tzinfo=UTC))
         assert before.empty
+
+    def test_time_window_is_boundary_inclusive(self, written_client):
+        # end == the artifact's own scan_time must include it: both sides
+        # compare in the one canonical string format (to_scan_iso), so the
+        # lexicographic boundary is exact.
+        at = written_client.artifacts(radar="KTST", start=SCAN_TIME, end=SCAN_TIME)
+        assert len(at) >= 1
 
 
 class TestOpenArtifact:

@@ -20,7 +20,9 @@ import threading
 import time
 from pathlib import Path
 
+from adapt.downloaders.nexrad import parse_scan_time
 from adapt.modules.acquisition.module import AwsNexradDownloader
+from adapt.utils.identity import scan_id_from_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +92,18 @@ class LocalDirectorySource(threading.Thread):
             if self.stopped():
                 break
             if self._result_queue is not None:
-                self._result_queue.put({"path": str(path), "queued_at": time.time()})
+                try:
+                    scan_time = parse_scan_time(path.name)
+                except ValueError:
+                    scan_time = None  # source has no stamp; ingest raises if time is required
+                self._result_queue.put(
+                    {
+                        "path": str(path),
+                        "scan_id": scan_id_from_bytes(path.read_bytes()),
+                        "scan_time": scan_time,
+                        "queued_at": time.time(),
+                    }
+                )
             self._queued += 1
         self._complete.set()
         logger.info(

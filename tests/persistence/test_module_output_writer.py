@@ -221,3 +221,45 @@ class TestSchemaEvolution:
 
         assert "extra" in cols
         assert [r[0] for r in extra_vals] == [7.0, 8.0]
+
+
+class TestScanIdentityStamp:
+    """Derived per-scan tables carry the scan identity the router hands them."""
+
+    @staticmethod
+    def _sid_spec() -> SqliteTable:
+        return SqliteTable(
+            key="rows",
+            table="identity_probe",
+            primary_key=("run_id", "scan_id", "cell_uid"),
+            index_columns=("scan_id",),
+        )
+
+    def test_write_stamps_scan_id_column(self, tmp_path):
+        db = tmp_path / "catalog.db"
+        ModuleOutputWriter(db, self._sid_spec()).write(_df(), scan_id="sid-derived-1")
+
+        conn = sqlite3.connect(str(db))
+        try:
+            rows = conn.execute("SELECT DISTINCT scan_id FROM identity_probe").fetchall()
+        finally:
+            conn.close()
+        assert rows == [("sid-derived-1",)]
+
+    def test_scan_id_primary_key_without_scan_id_raises(self, tmp_path):
+        db = tmp_path / "catalog.db"
+        with pytest.raises(ValueError, match="scan_id"):
+            ModuleOutputWriter(db, self._sid_spec()).write(_df())
+
+    def test_run_level_table_is_not_stamped(self, tmp_path):
+        # Postprocess (run-level) writes carry no scan identity; tables that do
+        # not key on scan_id stay untouched.
+        db = tmp_path / "catalog.db"
+        ModuleOutputWriter(db, _spec()).write(_df(), scan_id=None)
+
+        conn = sqlite3.connect(str(db))
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(analysis_probe)")}
+        finally:
+            conn.close()
+        assert "scan_id" not in cols

@@ -5,10 +5,12 @@ from datetime import UTC, datetime
 
 import numpy as np
 
-# The single authoritative scan-time string format. This is the cross-table join
-# key (cells_by_scan + every derived module table). Defined exactly once; serialize
-# with to_scan_iso, parse with from_scan_iso. Never hardcode this elsewhere —
-# tests/test_architecture.py enforces that the literal appears only in this file.
+# The single authoritative scan-time string format. Rows join on scan_id (the
+# content-derived scan identity); scan_time is ordering/display metadata — but
+# every table must still store the identical string or time-ordered reads
+# silently disagree. Defined exactly once; serialize with to_scan_iso, parse
+# with from_scan_iso. Never hardcode this elsewhere — tests/test_architecture.py
+# enforces that the literal appears only in this file.
 _SCAN_ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -59,10 +61,11 @@ def _to_utc_datetime(dt) -> datetime:
 
 
 def to_scan_iso(dt) -> str:
-    """Canonical scan-time string — the cross-table join key.
+    """Canonical scan-time string — ordering/display metadata, one format everywhere.
 
-    Matches ``cells_by_scan`` (track_store ``_to_iso``) so derived module tables join
-    on ``(run_id, scan_time, cell_uid)``. Whole-second resolution.
+    Rows join on ``scan_id``; scan_time orders and labels them. Matches
+    ``cells_by_scan`` (track_store ``_to_iso``) so every table's time strings
+    compare consistently. Whole-second resolution.
     """
     return _to_utc_datetime(dt).strftime(_SCAN_ISO_FORMAT)
 

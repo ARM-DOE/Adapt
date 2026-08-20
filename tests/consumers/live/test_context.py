@@ -3,6 +3,7 @@
 
 """AppContext — the session facts the dashboard shell shares with its tabs."""
 
+import pandas as pd
 import pytest
 
 import adapt.consumers.live._context as context_mod
@@ -38,28 +39,42 @@ def test_run_id_none_when_blank():
     assert _ctx(run_sel="  ").run_id() is None
 
 
-def test_nc_files_sorted_and_run_filtered_with_legacy_fallthrough(tmp_path):
-    analysis = tmp_path / "KLOT" / "analysis"
-    d1, d2 = analysis / "20260704", analysis / "20260705"
-    d1.mkdir(parents=True)
-    d2.mkdir()
+def test_scan_index_is_catalog_driven(tmp_path):
+    """Discovery reads the catalog through the client — no directory walk,
+    no filename parsing, no fall-through to other runs."""
+    radar_dir = tmp_path / "KLOT"
+    radar_dir.mkdir()
+    (radar_dir / "catalog.db").touch()
+
+    calls = []
+
+    class FakeClient:
+        def artifacts(self, product_type=None, radar=None, run_id=None):
+            calls.append({"product_type": product_type, "radar": radar, "run_id": run_id})
+            return pd.DataFrame(
+                {
+                    "scan_id": ["sid-a", "sid-b"],
+                    "scan_time": ["2026-07-04T23:00:00Z", "2026-07-05T01:00:00Z"],
+                    "file_path": ["analysis/a.nc", "analysis/b.nc"],
+                }
+            )
+
     run = "2026JUL04-1454-KLOT"
-    other = "2026JUL02-2319-KLOT"
-    b = d2 / f"KLOT20260705_010000_V06_{run}_analysis.nc"
-    a = d1 / f"KLOT20260704_230000_V06_{run}_analysis.nc"
-    c = d1 / f"KLOT20260704_235500_V06_{other}_analysis.nc"
-    for p in (a, b, c):
-        p.touch()
-
     ctx = _ctx(repo=str(tmp_path), radar="KLOT", run_sel=f"{run} …")
-    assert ctx.nc_files() == [a, b]  # chronological, other run excluded
+    ctx._client = FakeClient()
+    ctx._client_repo = ctx.repo()
 
-    # No filename matches the selected run → legacy fallback to the full list
-    ctx_legacy = _ctx(repo=str(tmp_path), radar="KLOT", run_sel="UNKNOWN-RUN …")
-    assert ctx_legacy.nc_files() == [a, c, b]
+    index = ctx.scan_index()
+
+    assert calls == [{"product_type": "segmentation2d", "radar": "KLOT", "run_id": run}]
+    assert index == [
+        ("sid-a", "2026-07-04T23:00:00Z", radar_dir / "analysis/a.nc"),
+        ("sid-b", "2026-07-05T01:00:00Z", radar_dir / "analysis/b.nc"),
+    ]
+    assert ctx.nc_files() == [radar_dir / "analysis/a.nc", radar_dir / "analysis/b.nc"]
 
 
-def test_nc_files_empty_when_analysis_dir_missing(tmp_path):
+def test_nc_files_empty_when_radar_has_no_catalog(tmp_path):
     ctx = _ctx(repo=str(tmp_path), radar="KLOT")
     assert ctx.nc_files() == []
 

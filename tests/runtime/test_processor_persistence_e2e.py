@@ -20,6 +20,7 @@ import xarray as xr
 from adapt.api.client import RepositoryClient
 from adapt.persistence.track_store import TrackStore
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.queue_msg import msg as _msg
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -84,8 +85,8 @@ def test_process_file_persists_all_declared_outputs(
     # executors don't carry the module configs it needs.
     monkeypatch.setattr(proc, "_post_executor", None)
 
-    assert proc.process_file("/fake/TEST_20240518_120000") is True
-    assert proc.process_file("/fake/TEST_20240518_120500") is True
+    assert proc.process_file(_msg("/fake/TEST_20240518_120000", scan_time=_T1)) is True
+    assert proc.process_file(_msg("/fake/TEST_20240518_120500", scan_time=_T2)) is True
 
     # Analysis NetCDF artifact written from tracking's declared analysis_ds spec.
     nc_items = test_repository.query(product_type="segmentation2d")
@@ -100,7 +101,7 @@ def test_process_file_persists_all_declared_outputs(
 
     # Tracking tables from the declared TrackTablesWrite spec.
     with TrackStore(test_repository.catalog.db_path) as store:
-        rows = store.get_cells_by_scan(test_repository.run_id, _T2)
+        rows = store.get_cells_by_scan(test_repository.run_id, "sid-TEST_20240518_120500")
     assert rows["cell_uid"].tolist() == ["uid-1"]
 
     # Generic read API discovers the core tables in the same repository.

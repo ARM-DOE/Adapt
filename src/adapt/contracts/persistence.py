@@ -52,6 +52,23 @@ class TrackTablesWrite:
 
 
 @dataclass(frozen=True)
+class ScanRecord:
+    """One scan's registration in the catalog; built by the runtime after persist.
+
+    ``scan_id`` is the content-derived identity (the join key); ``scan_time`` is
+    canonical UTC ordering/display metadata. ``start_time``/``end_time`` are
+    per-source coverage metadata — not every source has them.
+    """
+
+    run_id: str
+    scan_id: str
+    scan_time: datetime  # tz-aware UTC
+    source_file_name: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+
+@dataclass(frozen=True)
 class SqliteTable:
     """Upsert a DataFrame (context key) into an extension table in catalog.db."""
 
@@ -70,12 +87,18 @@ PersistenceSpec = (
 class PersistenceMeta:
     """Run-scoped metadata the persistence router needs; built by the runtime per scan.
 
+    ``scan_id`` is the content-derived scan identity minted at the source
+    boundary — the single join key across tracking tables, catalog rows, and
+    artifacts. It may be None only for run-level persists that aggregate many
+    scans; any per-scan write raises on a missing scan_id.
+
     ``scan_time`` may be None only for run-level persists whose specs do not
     stamp a time (SqliteTable rows carry their own); any time-stamped artifact
     write raises on a missing scan_time — wall-clock substitution is forbidden.
     """
 
-    scan_time: datetime | None  # tz-aware UTC
+    scan_time: datetime | None  # tz-aware UTC (ordering/display metadata)
+    scan_id: str | None  # content-derived scan identity (join key)
     run_id: str
     source_file: str  # source scan path -> filename_stem, ds.attrs["source"]
     dataset_id: str  # domain-neutral dataset identity; value = radar ID today

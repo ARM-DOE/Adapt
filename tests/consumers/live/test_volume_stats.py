@@ -59,10 +59,10 @@ def test_load_missing_table_returns_empty(tmp_path):
     assert out.empty
 
 
-def test_merge_joins_cloud_top_on_scan_time():
+def test_merge_joins_cloud_top_on_scan_id():
     track = pd.DataFrame(
         {
-            "scan_time": ["2026-06-06T00:00:00Z", "2026-06-06T00:05:00Z"],
+            "scan_id": ["sid-1", "sid-2"],
             "cell_uid": ["aaaa", "aaaa"],
             "cell_area_sqkm": [10.0, 12.0],
         }
@@ -70,7 +70,7 @@ def test_merge_joins_cloud_top_on_scan_time():
     vol = pd.DataFrame(
         {
             "run_id": ["run1", "run1"],
-            "scan_time": ["2026-06-06T00:00:00Z", "2026-06-06T00:05:00Z"],
+            "scan_id": ["sid-1", "sid-2"],
             "cell_uid": ["aaaa", "aaaa"],
             "cell_top_m": [9000.0, 11000.0],
         }
@@ -83,14 +83,23 @@ def test_merge_joins_cloud_top_on_scan_time():
 
 
 def test_merge_left_join_keeps_unmatched_track_rows():
-    track = pd.DataFrame({"scan_time": ["t1", "t2"], "v": [1, 2]})
-    vol = pd.DataFrame({"scan_time": ["t1"], "cell_top_m": [9000.0]})
+    track = pd.DataFrame({"scan_id": ["s1", "s2"], "v": [1, 2]})
+    vol = pd.DataFrame({"scan_id": ["s1"], "cell_top_m": [9000.0]})
     out = merge_volume_stats(track, vol)
     assert len(out) == 2
     assert out["cell_top_m"].isna().sum() == 1
 
 
 def test_merge_empty_volume_is_noop():
-    track = pd.DataFrame({"scan_time": ["t1"], "v": [1]})
+    track = pd.DataFrame({"scan_id": ["s1"], "v": [1]})
     out = merge_volume_stats(track, pd.DataFrame())
     pd.testing.assert_frame_equal(out, track)
+
+
+def test_merge_nonempty_frame_without_scan_id_raises():
+    # Only pre-identity data can produce volume rows lacking scan_id — that is
+    # a recreate condition, never a silent no-op merge.
+    track = pd.DataFrame({"scan_id": ["s1"], "v": [1]})
+    vol = pd.DataFrame({"scan_time": ["2026-06-06T00:00:00Z"], "cell_top_m": [9000.0]})
+    with pytest.raises(ValueError, match="Recreate"):
+        merge_volume_stats(track, vol)

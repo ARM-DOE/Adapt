@@ -48,6 +48,7 @@ def repo(tmp_path):
 def _meta(repo):
     return PersistenceMeta(
         scan_time=SCAN_TIME,
+        scan_id="sid-test",
         run_id=repo.run_id,
         source_file="KTST_20260601_120000_V06",
         dataset_id="KTST",
@@ -74,7 +75,9 @@ def _tracking_frames():
 
 
 def test_none_scan_time_raises_for_timed_artifact(repo):
-    bad = PersistenceMeta(scan_time=None, run_id="r", source_file="s", dataset_id="KTST")
+    bad = PersistenceMeta(
+        scan_time=None, scan_id="sid-test", run_id="r", source_file="s", dataset_id="KTST"
+    )
     mod = FakeModule(
         persistence=(ParquetArtifact(key="cells", product_type="analysis2d", producer="a"),)
     )
@@ -84,7 +87,9 @@ def test_none_scan_time_raises_for_timed_artifact(repo):
 
 def test_none_scan_time_allowed_for_sqlite_table(repo):
     """Run-level persists (postprocessor) carry no scan_time; rows bring their own."""
-    bad = PersistenceMeta(scan_time=None, run_id="r", source_file="s", dataset_id="KTST")
+    bad = PersistenceMeta(
+        scan_time=None, scan_id=None, run_id="r", source_file="s", dataset_id="KTST"
+    )
     mod = FakeModule(
         persistence=(SqliteTable(key="rows", table="runlevel_ext", primary_key=("run_id",)),)
     )
@@ -213,7 +218,7 @@ def test_track_tables_write_happy_path(repo):
         [mod], {"t": tracked, "e": events, "s": cell_stats, "a": adjacency}, _meta(repo)
     )
     with TrackStore(repo.catalog.db_path) as store:
-        rows = store.get_cells_by_scan(repo.run_id, SCAN_TIME)
+        rows = store.get_cells_by_scan(repo.run_id, "sid-test")
     assert rows["cell_uid"].tolist() == ["U1"]
 
 
@@ -250,3 +255,60 @@ def test_router_source_names_no_module_keys():
         assert f'"{key}"' not in source and f"'{key}'" not in source, (
             f"router hardcodes module key '{key}'"
         )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        RegisterFileArtifact(key="path", product_type="gridded3d", producer="i"),
+        NetcdfArtifact(key="ds", product_type="segmentation2d", producer="t", description="d"),
+        ParquetArtifact(key="cells", product_type="analysis2d", producer="a"),
+        TrackTablesWrite(
+            tracked_key="tracked",
+            events_key="events",
+            stats_key="cell_stats",
+            adjacency_key="cell_adjacency",
+        ),
+    ],
+    ids=["register-file", "netcdf", "parquet", "track-tables"],
+)
+def test_none_scan_id_raises_for_every_per_scan_spec(repo, tmp_path, spec):
+    """Every per-scan write requires scan identity — None raises, never defaults."""
+    nc = tmp_path / "some.nc"
+    xr.Dataset({"v": ("x", [1.0])}).to_netcdf(nc)
+    cell_stats, tracked, events, adjacency = _tracking_frames()
+    result = {
+        "path": str(nc),
+        "ds": xr.Dataset({"v": ("x", [1.0])}),
+        "cells": pd.DataFrame({"x": [1]}),
+        "tracked": tracked,
+        "events": events,
+        "cell_stats": cell_stats,
+        "cell_adjacency": adjacency,
+    }
+    meta = PersistenceMeta(
+        scan_time=SCAN_TIME, scan_id=None, run_id="r", source_file=str(nc), dataset_id="KTST"
+    )
+
+    with pytest.raises(ValueError, match="scan_id"):
+        OutputRouter(repo).persist([FakeModule(persistence=(spec,))], result, meta)
+
+
+def test_artifact_items_carry_scan_id(repo, tmp_path):
+    """Registered artifacts are discoverable by the scan identity in their item row."""
+    nc = tmp_path / "some.nc"
+    xr.Dataset({"v": ("x", [1.0])}).to_netcdf(nc)
+    mod = FakeModule(
+        persistence=(
+            RegisterFileArtifact(key="path", product_type="gridded3d", producer="i"),
+            ParquetArtifact(key="cells", product_type="analysis2d", producer="a"),
+        )
+    )
+    OutputRouter(repo).persist(
+        [mod], {"path": str(nc), "cells": pd.DataFrame({"x": [1]})}, _meta(repo)
+    )
+
+    for product_type in ("gridded3d", "analysis2d"):
+        items = repo.query(product_type=product_type, scan_id="sid-test")
+        assert len(items) == 1, product_type
+        assert items[0]["scan_id"] == "sid-test"

@@ -23,10 +23,9 @@ from adapt.consumers.live._targeting import (
     build_tse_config,
     discover_numeric_columns,
     draw_tse_map,
-    find_nc_for_scan,
     format_rationale,
-    nc_index_by_scan,
 )
+from adapt.consumers.live._utils import require_scan_identity
 from adapt.consumers.live._widgets import _CompactToolbar
 from adapt.consumers.target_selection import (
     TargetSelectionEngine,
@@ -279,6 +278,25 @@ class TargetSelectionTab:
             return []
         return sorted({from_scan_iso(str(s)) for s in hist["scan_time"].unique()})
 
+    def _nc_index_for_run(self, radar, run_id) -> dict:
+        """scan_time → analysis NC path, resolved through scan identity.
+
+        Joins cells_by_scan's per-scan (scan_id, scan_time) pairs to the
+        catalog's artifact index by scan_id — no filename parsing, no
+        tolerance matching.
+        """
+        hist = self.ctx.client().table("cells_by_scan", radar=radar, run_id=run_id)
+        if hist.empty:
+            return {}
+        require_scan_identity(hist)
+        path_by_sid = {sid: path for sid, _, path in self.ctx.scan_index()}
+        pairs = hist[["scan_id", "scan_time"]].drop_duplicates()
+        return {
+            from_scan_iso(str(row.scan_time)): path_by_sid[row.scan_id]
+            for row in pairs.itertuples()
+            if row.scan_id in path_by_sid
+        }
+
     def _ensure_session(self) -> bool:
         """Build cfg/client/engine + the run's scan list. False (with a dialog)
         on any missing selection or invalid rule."""
@@ -296,7 +314,10 @@ class TargetSelectionTab:
             return False
         try:
             scan_times = self._run_scan_times(radar, run_id)
+            nc_index = self._nc_index_for_run(radar, run_id)
         except Exception as exc:
+            # Surfaces the identity contract's loud errors (e.g. "Recreate
+            # catalog.db") in a dialog instead of dying in Tk's stderr handler.
             logger.exception("Failed to list scans for run %s", run_id)
             messagebox.showerror(
                 "Target Selection", f"Could not list scans: {exc}", parent=self.frame
@@ -310,7 +331,7 @@ class TargetSelectionTab:
         self._cfg = cfg
         self._run_id = run_id
         self._scan_times = scan_times
-        self._nc_index = nc_index_by_scan(self.ctx.nc_files())
+        self._nc_index = nc_index
         self._engine = TargetSelectionEngine(cfg)
         self._index = 0
         return True
@@ -360,8 +381,14 @@ class TargetSelectionTab:
             logger.exception("go_live scan re-query failed")
             times = self._scan_times
         if len(times) > len(self._scan_times):
+            try:
+                self._nc_index = self._nc_index_for_run(radar, self._run_id)
+            except Exception as exc:
+                logger.exception("go_live NC re-index failed")
+                self._status.config(text=f"■ Error — {exc}")
+                self._pause()
+                return
             self._scan_times = times
-            self._nc_index = nc_index_by_scan(self.ctx.nc_files())
             self._schedule(200)
             return
         last = self._scan_times[-1] if self._scan_times else None
@@ -405,7 +432,7 @@ class TargetSelectionTab:
 
     def _render(self, scan_ts, snap, selection, candidates):
         canvas, _fig, ax, _tb = self._canvas_refs
-        nc = find_nc_for_scan(self._nc_index, scan_ts)
+        nc = self._nc_index.get(scan_ts)
         draw_tse_map(ax, scan_ts, nc, snap, selection, candidates)
         canvas.draw_idle()
         self._update_status(scan_ts, snap, selection, candidates)
@@ -503,7 +530,7 @@ class TargetSelectionTab:
                 snap, selection, cands = latest
                 ax = fig.add_subplot(111)
                 ts = times[target]
-                draw_tse_map(ax, ts, find_nc_for_scan(nc_index, ts), snap, selection, cands)
+                draw_tse_map(ax, ts, nc_index.get(ts), snap, selection, cands, raise_errors=True)
 
             return MovieSpec(n_frames=i1 - i0 + 1, draw_frame=draw, figsize=(7.5, 7.0), dpi=100)
 

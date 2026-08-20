@@ -14,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 
 from adapt.api.client import RepositoryClient
-from adapt.consumers.live._targeting import filter_nc_paths_by_run
 
 
 class AppContext:
@@ -63,19 +62,30 @@ class AppContext:
             self._client_repo = repo
         return self._client
 
-    def nc_files(self) -> list[Path]:
-        """All analysis NC files for the radar, chronological, restricted to the
-        selected run (legacy files without a run id fall back to the full list)."""
-        analysis_dir = Path(self.repo()) / self.radar() / "analysis"
-        if not analysis_dir.exists():
+    def scan_index(self) -> list[tuple[str, str, Path]]:
+        """Ordered ``(scan_id, scan_time, path)`` for the radar's analysis scans.
+
+        Discovery goes through the catalog — never by walking directories or
+        parsing filenames. Restricted to the selected run; all runs when no run
+        is selected. An empty list means the radar has no cataloged data yet.
+        """
+        repo = Path(self.repo())
+        radar = self.radar()
+        if not (repo / radar / "catalog.db").exists():
+            return []  # no data yet for this radar
+        df = self.client().artifacts(
+            product_type="segmentation2d", radar=radar, run_id=self.run_id()
+        )
+        if df.empty:
             return []
-        all_nc: list[Path] = []
-        for date_dir in list(analysis_dir.iterdir()):  # eager: release FD immediately
-            if date_dir.is_dir() and len(date_dir.name) == 8 and date_dir.name.isdigit():
-                all_nc.extend(list(date_dir.glob("*_analysis.nc")))  # eager
-        all_nc = sorted(all_nc, key=lambda p: p.name)
-        filtered = filter_nc_paths_by_run(all_nc, self.run_id())
-        return filtered if filtered else all_nc
+        return [
+            (str(r.scan_id), str(r.scan_time), repo / radar / str(r.file_path))
+            for r in df.itertuples()
+        ]
+
+    def nc_files(self) -> list[Path]:
+        """Analysis NC paths in scan order — a path view of ``scan_index``."""
+        return [path for _, _, path in self.scan_index()]
 
     def close(self) -> None:
         if self._client is not None:

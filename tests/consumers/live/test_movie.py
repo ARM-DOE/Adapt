@@ -102,7 +102,11 @@ def _write_nc(path, hour):
             "y": np.arange(n) * 1000.0,
             "time": pd.Timestamp(f"2024-01-01T{hour:02d}:00:00").to_numpy(),
         },
-        attrs={"radar": "TEST"},
+        attrs={
+            "radar": "TEST",
+            "scan_id": f"sid-{hour:02d}",
+            "scan_time": f"2024-01-01T{hour:02d}:00:00Z",
+        },
     )
     ds.to_netcdf(path)
 

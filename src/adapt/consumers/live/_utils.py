@@ -182,6 +182,28 @@ def _visible_uids_in_scan(
     return {uid_map[lbl] for lbl in unique if lbl in uid_map}
 
 
+def require_scan_identity(df, table: str = "cells_by_scan") -> None:
+    """Raise with recreate guidance when a per-scan frame predates scan identity."""
+    if "scan_id" not in df.columns:
+        raise ValueError(
+            f"{table} carries no scan_id column — the repository predates "
+            "scan identity. Recreate it (delete and rerun the pipeline)."
+        )
+
+
+def cells_for_scan(df, scan_id: str, cell_id: int | None = None):
+    """Rows of a ``cells_by_scan`` frame belonging to one scan, by identity.
+
+    The join key is ``scan_id`` — never a timestamp comparison or tolerance
+    window.
+    """
+    require_scan_identity(df)
+    rows = df[df["scan_id"] == scan_id]
+    if cell_id is None:
+        return rows
+    return rows[rows["cell_label"] == cell_id]
+
+
 def format_run_labels(runs: Iterable) -> list[str]:
     """Format run records as ``"run_id  (MM-DD HH:MM)"`` toolbar labels."""
     labels = []

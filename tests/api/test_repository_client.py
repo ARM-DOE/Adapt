@@ -8,7 +8,6 @@ No network, no NEXRAD files, no pipeline needed.
 """
 
 import sqlite3
-from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
@@ -16,7 +15,7 @@ import pytest
 from adapt.api.client import RepositoryClient
 from adapt.api.domain import Run, Track
 from adapt.api.selection import FilterSpec
-from tests.api.synthetic_repo import _RADAR, _RUN_ID, _UID_A, _UID_B
+from tests.api.synthetic_repo import _RADAR, _RUN_ID, _SID0, _UID_A, _UID_B
 
 pytestmark = pytest.mark.unit
 
@@ -198,11 +197,11 @@ class TestTrackEvents:
 
 class TestCellsAtScan:
     def test_returns_rows_for_exact_scan(self, client):
-        df = client.cells_at_scan(_RUN_ID, datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC), radar=_RADAR)
+        df = client.cells_at_scan(_RUN_ID, _SID0, radar=_RADAR)
         assert list(df["cell_uid"]) == [_UID_A]
 
-    def test_empty_for_scan_with_no_cells(self, client):
-        df = client.cells_at_scan(_RUN_ID, datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC), radar=_RADAR)
+    def test_empty_for_unknown_scan(self, client):
+        df = client.cells_at_scan(_RUN_ID, "sid-unknown", radar=_RADAR)
         assert df.empty
 
 

@@ -44,7 +44,10 @@ class _NoGrid3D(BaseModule):
         return {"no_grid3d_rows": pd.DataFrame()}
 
 
-def _register_grid3d(repository, scan_time, tmp_path):
+_SID = "sid-grid3d-scan"
+
+
+def _register_grid3d(repository, scan_time, tmp_path, scan_id=_SID):
     nc = tmp_path / "g.nc"
     xr.Dataset(
         {"reflectivity": (("z", "y", "x"), np.zeros((2, 3, 3), dtype=np.float32))},
@@ -55,6 +58,7 @@ def _register_grid3d(repository, scan_time, tmp_path):
         file_path=str(nc),
         scan_time=scan_time,
         producer="ingest",
+        scan_id=scan_id,
     )
 
 
@@ -74,27 +78,25 @@ class TestProcessorProvidesGrid3D:
             scan_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
             _register_grid3d(test_repository, scan_time, tmp_path)
 
-            ctx = proc._build_enrich_context({}, scan_time)
+            ctx = proc._build_enrich_context({}, scan_time, _SID)
             assert "grid_ds_3d" in ctx
             assert "reflectivity" in ctx["grid_ds_3d"].data_vars
         finally:
             registry.unregister("needs_grid3d")
 
-    def test_grid_found_when_artifact_aware_but_context_scan_time_naive(
+    def test_grid_lookup_is_identity_exact(
         self, tmp_path, pipeline_config, pipeline_output_dirs, test_repository
     ):
-        """Production case: _save_results registers the artifact with a tz-aware
-        scan_time (+00:00); the enrich read must still find it when handed the
-        original naive scan_time. Both sides normalize to UTC."""
+        """The 3D grid is resolved by scan_id, never by timestamp comparison —
+        an artifact from a different scan at the same time is not injected."""
         registry.register(_NeedsGrid3D)
         try:
             proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
-            aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-            _register_grid3d(test_repository, aware, tmp_path)  # stored as +00:00
+            scan_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+            _register_grid3d(test_repository, scan_time, tmp_path, scan_id="sid-other")
 
-            naive = datetime(2024, 1, 1, 12, 0, 0)  # what process_file passed pre-fix
-            ctx = proc._build_enrich_context({}, naive)
-            assert "grid_ds_3d" in ctx
+            ctx = proc._build_enrich_context({}, scan_time, _SID)
+            assert "grid_ds_3d" not in ctx
         finally:
             registry.unregister("needs_grid3d")
 
@@ -110,7 +112,7 @@ class TestProcessorProvidesGrid3D:
             scan_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
             _register_grid3d(test_repository, scan_time, tmp_path)
 
-            ctx = proc._build_enrich_context({}, scan_time)
+            ctx = proc._build_enrich_context({}, scan_time, _SID)
             assert "grid_ds_3d" not in ctx
         finally:
             registry.unregister("no_grid3d")
@@ -123,7 +125,7 @@ class TestProcessorProvidesGrid3D:
             proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
             scan_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
             # No gridded3d registered → no key, no crash
-            ctx = proc._build_enrich_context({}, scan_time)
+            ctx = proc._build_enrich_context({}, scan_time, _SID)
             assert "grid_ds_3d" not in ctx
         finally:
             registry.unregister("needs_grid3d")

@@ -55,6 +55,8 @@ from adapt.consumers.live._utils import (
     _apply_overflow_action,
     _cell_uid_disp,
     _next_free_color_slot,
+    cells_for_scan,
+    require_scan_identity,
     safe_close,
 )
 from adapt.consumers.live._view_mode import Camera, ScanViewState
@@ -65,6 +67,7 @@ from adapt.consumers.live._volume_stats import (
     merge_volume_stats as _merge_volume_stats_fn,
 )
 from adapt.consumers.live._widgets import _CompactToolbar
+from adapt.utils.time import from_scan_iso
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +105,7 @@ _VOLUME_STATS_PREFIXES = ("cell_top", "cell_base", "cell_depth", "cell_volume", 
 
 # Plot-group variables with these prefixes come from the xlma_stat_minutes extension
 # table — empty unless `adapt postprocess --module xlma_stat` ran (see _lightning).
-_LIGHTNING_PREFIXES = ("flash_", "source_")
+_LIGHTNING_PREFIXES = ("flash_", "source_", "lightning_")
 
 
 class ScanViewTab:
@@ -116,9 +119,10 @@ class ScanViewTab:
         # Render state
         self._canvas_refs = None  # (canvas, fig, toolbar, bottom)
         self._current_nc_ds: xr.Dataset | None = None
-        self._current_cell_df = None  # cells_by_scan DataFrame or parquet fallback
+        self._current_cell_df = None  # cells_by_scan DataFrame for the selected run
         self._current_run_id = None  # run_id for the loaded cell data
-        self._current_scan_ts = None  # pd.Timestamp of current displayed scan
+        self._current_scan_id = None  # scan identity of the displayed scan (join key)
+        self._current_scan_ts = None  # pd.Timestamp of current displayed scan (display)
         self._cell_contours: dict[int, object] = {}  # cell_id → contour set
         self._hover_canvas = None
 
@@ -144,6 +148,7 @@ class ScanViewTab:
 
         self._last_rendered_nc = None  # path of last auto-rendered NC file
         self._all_nc_files: list = []  # full sorted NC list, updated every refresh
+        self._scan_labels: list[str] = []  # selector labels, parallel to _all_nc_files
         self._timers = AfterHandles(self.frame.after, self.frame.after_cancel)
 
         self._build_scan_tab(self.frame)
@@ -157,9 +162,7 @@ class ScanViewTab:
     def refresh(self) -> int:
         """Re-scan the NC timeline, sync the scan selector, and auto-render newly
         arrived data. Returns the scan count for the shell status bar."""
-        all_nc = self.ctx.nc_files()
-        self._all_nc_files = all_nc
-        labels = [self._nc_label(p) for p in all_nc]
+        all_nc, labels = self._load_scan_timeline()
 
         cur = self.scan_var.get()
         self.scan_cb["values"] = labels
@@ -370,17 +373,21 @@ class ScanViewTab:
 
     # ── NC file helpers ───────────────────────────────────────────────────────
 
+    def _load_scan_timeline(self) -> tuple[list, list[str]]:
+        """Ordered analysis paths + selector labels from the catalog scan index.
+
+        Labels display the canonical scan_time the pipeline stamped — never a
+        value parsed out of a filename.
+        """
+        index = self.ctx.scan_index()
+        self._all_nc_files = [path for _, _, path in index]
+        self._scan_labels = [self._scan_label(st, path) for _, st, path in index]
+        return self._all_nc_files, self._scan_labels
+
     @staticmethod
-    def _nc_label(p):
-        parts = p.stem.split("_")
-        # filename: RADAR_YYYYMMDD_HHMMSS_analysis  or similar
-        d = next((x for x in parts if len(x) == 8 and x.isdigit()), None)
-        t = next((x for x in parts if len(x) == 6 and x.isdigit()), None)
-        if d and t:
-            return f"{d[4:6]}-{d[6:8]} {t[:2]}:{t[2:4]}:{t[4:6]}  ({p.stem})"
-        if t:
-            return f"{t[:2]}:{t[2:4]}:{t[4:6]} UTC  ({p.stem})"
-        return p.stem
+    def _scan_label(scan_time: str, path) -> str:
+        dt = from_scan_iso(scan_time)
+        return f"{dt:%m-%d %H:%M:%S}  ({path.stem})"
 
     def _on_var_changed(self):
         """Apply a variable change: refresh its vmin/vmax defaults and re-render
@@ -395,8 +402,10 @@ class ScanViewTab:
     def _current_scan_idx(self) -> int:
         """Return index of the currently selected scan in _all_nc_files, or -1."""
         cur_label = self.scan_var.get()
-        stem = cur_label.split("(")[-1].rstrip(")") if "(" in cur_label else ""
-        return next((i for i, p in enumerate(self._all_nc_files) if p.stem == stem), -1)
+        try:
+            return self._scan_labels.index(cur_label)
+        except ValueError:
+            return -1
 
     def prev_scan(self):
         if not self._all_nc_files:
@@ -405,7 +414,7 @@ class ScanViewTab:
         step = max(1, self._bundle_var.get()) if self._bundle_var else 1
         new_idx = max(0, (idx if idx >= 0 else len(self._all_nc_files)) - step)
         if new_idx != idx:
-            self.scan_var.set(self._nc_label(self._all_nc_files[new_idx]))
+            self.scan_var.set(self._scan_labels[new_idx])
             self._inline_render()
 
     def next_scan(self):
@@ -416,7 +425,7 @@ class ScanViewTab:
         last = len(self._all_nc_files) - 1
         new_idx = min(last, (idx if idx >= 0 else -1) + step)
         if new_idx != idx:
-            self.scan_var.set(self._nc_label(self._all_nc_files[new_idx]))
+            self.scan_var.set(self._scan_labels[new_idx])
             self._inline_render()
 
     # ── Show latest scan (single frame, auto-live) ────────────────────────────
@@ -427,11 +436,13 @@ class ScanViewTab:
         radar = self.ctx.radar()
         if not repo or not radar:
             return
-        nc_files = self.ctx.nc_files()
+        nc_files, labels = self._load_scan_timeline()
         if not nc_files:
             messagebox.showinfo(
                 "No data",
-                f"No analysis files found in:\n{Path(repo) / radar / 'analysis'}",
+                f"No cataloged analysis scans for {radar} in:\n{repo}\n"
+                "(run the pipeline, or recreate the repository if files exist "
+                "but are not cataloged)",
                 parent=self.frame,
             )
             return
@@ -440,7 +451,6 @@ class ScanViewTab:
         self._sync_loop_button()
         self._load_cells_data(repo, radar)
         # Sync scan selector
-        labels = [self._nc_label(p) for p in nc_files]
         self.scan_cb["values"] = labels
         self.scan_var.set(labels[-1])
         self._last_rendered_nc = nc_files[-1]
@@ -496,19 +506,28 @@ class ScanViewTab:
             )
             return
 
-        nc_files = self.ctx.nc_files()
+        nc_files, labels = self._load_scan_timeline()
         if not nc_files:
             messagebox.showinfo(
                 "Not found",
-                f"No analysis files found in:\n{Path(repo) / radar / 'analysis'}",
+                f"No cataloged analysis scans for {radar} in:\n{repo}\n"
+                "(run the pipeline, or recreate the repository if files exist "
+                "but are not cataloged)",
                 parent=self.frame,
             )
             return
 
-        # Match selected label to NC file
+        # Match selected label to its scan — no nearest/latest substitution.
         sel = self.scan_var.get()
-        stem = sel.split("(")[-1].rstrip(")") if "(" in sel else ""
-        nc_path = next((p for p in nc_files if p.stem == stem), nc_files[-1])
+        if sel in labels:
+            nc_path = nc_files[labels.index(sel)]
+        else:
+            messagebox.showerror(
+                "Scan not found",
+                f"Selected scan is no longer in the catalog timeline:\n{sel}",
+                parent=self.frame,
+            )
+            return
 
         # Browsing to a chosen scan takes ownership of the display: stop any loop.
         self._state.enter_selected_scan()
@@ -532,40 +551,31 @@ class ScanViewTab:
     def _load_cells_data(self, repo, radar):
         """Load per-cell data for the selected run into self._current_cell_df.
 
-        Honours the Run selector: reads the chosen run's cells (falling back to
-        the newest run only when nothing is selected). Reads through the public
-        API. Falls back to parquet for legacy data.
+        Honours the Run selector (newest run when nothing is selected — a UI
+        default, not a data fallback). Reads through the public API only; a
+        pre-identity repository fails loudly with recreate guidance.
         """
         self._current_cell_df = None
         self._current_run_id = None
 
         db_path = Path(repo) / radar / "catalog.db"
-        if db_path.exists():
-            try:
-                run_id = self.ctx.run_id()
-                client = self.ctx.client()
-                if run_id is None:
-                    df = client.table("cells_by_scan", radar=radar)
-                    if not df.empty:
-                        run_id = df.loc[df["scan_time"].idxmax(), "run_id"]
-                        df = df[df["run_id"] == run_id]
-                else:
-                    df = client.table("cells_by_scan", radar=radar, run_id=run_id)
-                if not df.empty:
-                    self._current_cell_df = df.sort_values("scan_time", ignore_index=True)
-                    self._current_run_id = run_id
-                    return
-            except Exception:
-                logger.exception("Failed to load cells from repository client")
+        if not db_path.exists():
+            return  # repository has no data for this radar yet
 
-        # Fallback: parquet (may not contain cell_uid)
-        pqs = sorted((Path(repo) / radar / "analysis").glob("analysis2d_*.parquet"))
-        if pqs:
-            try:
-                dfs = [pd.read_parquet(p) for p in pqs]
-                self._current_cell_df = pd.concat(dfs, ignore_index=True)
-            except Exception:
-                logger.exception("Failed to load fallback parquet cell data")
+        run_id = self.ctx.run_id()
+        client = self.ctx.client()
+        if run_id is None:
+            df = client.table("cells_by_scan", radar=radar)
+            if not df.empty:
+                run_id = df.loc[df["scan_time"].idxmax(), "run_id"]
+                df = df[df["run_id"] == run_id]
+        else:
+            df = client.table("cells_by_scan", radar=radar, run_id=run_id)
+        if df.empty:
+            return
+        require_scan_identity(df)
+        self._current_cell_df = df.sort_values("scan_time", ignore_index=True)
+        self._current_run_id = run_id
 
     # ── NC loop render (cycle through N frames) ───────────────────────────────
 
@@ -709,20 +719,24 @@ class ScanViewTab:
             if xlim != (0.0, 1.0) or ylim != (0.0, 1.0):
                 self._state.save_camera(xlim, ylim)
 
-        # Close previous dataset
+        # Render FIRST: if render_scan raises (e.g. a file without identity
+        # attrs), the previous dataset and hover/click state stay consistent \u2014
+        # callers close the new ds and surface the error.
+        res = render_scan(
+            ax, self._cbar_ax, ds, self._current_view_state(), self._current_overlays()
+        )
+
+        # Commit state only after a successful render.
         if self._current_nc_ds is not None and self._current_nc_ds is not ds:
             safe_close(self._current_nc_ds, "scan dataset", logger)
         self._current_nc_ds = ds
         for var in self._hv.values():
             var.set("\u2014")
-
-        res = render_scan(
-            ax, self._cbar_ax, ds, self._current_view_state(), self._current_overlays()
-        )
         self._cell_contours = res.cell_contours
         self._track_overlay = res.track_overlays
         self.ctx.report_scan_time(res.scan_ts.to_pydatetime())
-        self._current_scan_ts = res.scan_ts  # for hover filtering
+        self._current_scan_id = res.scan_id  # identity key for hover/click lookups
+        self._current_scan_ts = res.scan_ts  # display metadata
 
     def _current_view_state(self) -> ViewState:
         """Freeze the Latest Scan controls into a renderer ViewState."""
@@ -828,42 +842,17 @@ class ScanViewTab:
         radar = self.ctx.radar()
         db_path = Path(repo) / radar / "catalog.db"
 
-        # Resolve cell_uid for clicked cell via the exact scan-time lookup
-        # (avoids scan_time string-format mismatches in the loaded frame)
+        # Resolve cell_uid for the clicked cell by scan identity — one exact
+        # lookup through the public API, no time windows, no fallback search.
         cell_uid = None
-        if self._current_run_id and db_path.exists() and self._current_scan_ts is not None:
-            try:
-                scan_time_dt = pd.Timestamp(self._current_scan_ts).to_pydatetime()
-                scan_cells = self.ctx.client().cells_at_scan(
-                    self._current_run_id, scan_time_dt, radar=radar
-                )
-                if not scan_cells.empty and "cell_label" in scan_cells.columns:
-                    matched = scan_cells[scan_cells["cell_label"] == cell_id]
-                    if not matched.empty:
-                        r = matched.iloc[0]
-                        cell_uid = r.get("cell_uid")
-            except Exception:
-                logger.exception("Failed to resolve cell UID via repository client")
-
-        # Fallback: search loaded cell df with 60-s time window
-        if cell_uid is None:
-            df = self._current_cell_df
-            if df is None or "cell_uid" not in df.columns:
-                return
-            if self._current_scan_ts is not None and "scan_time" in df.columns:
-                df_t = df.copy()
-                df_t["_st"] = pd.to_datetime(df_t["scan_time"], utc=True)
-                scan_ts = pd.Timestamp(self._current_scan_ts)
-                if scan_ts.tzinfo is None:
-                    scan_ts = scan_ts.tz_localize("UTC")
-                time_mask = (df_t["_st"] - scan_ts).abs() < pd.Timedelta(seconds=60)
-                scan_rows = df_t[time_mask & (df_t["cell_label"] == cell_id)]
-            else:
-                scan_rows = df[df["cell_label"] == cell_id]
-            if scan_rows.empty:
-                return
-            r = scan_rows.iloc[0]
-            cell_uid = r.get("cell_uid")
+        if self._current_run_id and self._current_scan_id and db_path.exists():
+            scan_cells = self.ctx.client().cells_at_scan(
+                self._current_run_id, self._current_scan_id, radar=radar
+            )
+            if not scan_cells.empty and "cell_label" in scan_cells.columns:
+                matched = scan_cells[scan_cells["cell_label"] == cell_id]
+                if not matched.empty:
+                    cell_uid = matched.iloc[0].get("cell_uid")
 
         if cell_uid is not None and (isinstance(cell_uid, float) and pd.isna(cell_uid)):
             cell_uid = None
@@ -964,11 +953,9 @@ class ScanViewTab:
         repo = self.ctx.repo()
         radar = self.ctx.radar()
         db_path = Path(repo) / radar / "catalog.db"
-        cur_t = (
-            pd.Timestamp(self._current_scan_ts, tz="UTC")
-            if self._current_scan_ts is not None
-            else None
-        )
+        # _current_scan_ts comes from the artifact's canonical scan_time attr
+        # and is always tz-aware UTC; re-wrapping with tz= would raise.
+        cur_t = self._current_scan_ts
 
         # Lightning columns come from the xlma_stat_minutes extension table —
         # read only when a selected group needs lightning.
@@ -1065,116 +1052,6 @@ class ScanViewTab:
             return
         _update_track_legend_fn(self._canvas_refs[1], self._selected_cells, self._color_slots)
 
-    def _update_time_series(self, history_df: pd.DataFrame | None = None) -> None:
-        if self._ts_axes is None:
-            return
-        ax_area, ax_dbz, ax_extra = self._ts_axes
-        if history_df is not None and not history_df.empty:
-            track_df = history_df.sort_values("scan_time")
-            cell_uid = None
-            if "cell_uid" in track_df.columns and track_df["cell_uid"].notna().any():
-                cell_uid = str(track_df["cell_uid"].dropna().iloc[0])
-        else:
-            # Fall back to first selected cell if no history_df provided
-            cell_uid = next(iter(self._selected_cells), None)
-            if (
-                not cell_uid
-                or self._current_cell_df is None
-                or "cell_uid" not in self._current_cell_df.columns
-            ):
-                return
-            track_df = self._current_cell_df[
-                self._current_cell_df["cell_uid"] == str(cell_uid)
-            ].sort_values("scan_time")
-            if track_df.empty:
-                return
-
-        for ax in (ax_area, ax_dbz, ax_extra):
-            ax.cla()
-
-        times = pd.to_datetime(track_df["scan_time"], utc=True)
-
-        # ── Area panel ────────────────────────────────────────────────────────
-        if "cell_area_sqkm" in track_df.columns:
-            vals = track_df["cell_area_sqkm"].values
-            ax_area.plot(times, vals, color="#7ec8e3", linewidth=1.5, label="total area")
-            ax_area.fill_between(times, vals, alpha=0.15, color="#7ec8e3")
-        if "area_40dbz_km2" in track_df.columns:
-            ax_area.plot(
-                times,
-                track_df["area_40dbz_km2"].values,
-                color="#ff9944",
-                linewidth=1.0,
-                linestyle="--",
-                label="≥40 dBZ core",
-            )
-        self._style_ts_ax(ax_area, "km²", f"Cell {_cell_uid_disp(cell_uid)} — Area")
-        if ax_area.get_lines():
-            ax_area.legend(
-                fontsize=6,
-                labelcolor="#444",
-                framealpha=0.5,
-                loc="upper left",
-                handlelength=1.2,
-            )
-
-        # ── Reflectivity panel ────────────────────────────────────────────────
-        if "radar_reflectivity_mean" in track_df.columns:
-            ax_dbz.plot(
-                times,
-                track_df["radar_reflectivity_mean"].values,
-                color="#88cc44",
-                linewidth=1.2,
-                label="mean Z",
-            )
-        if "radar_reflectivity_max" in track_df.columns:
-            ax_dbz.plot(
-                times,
-                track_df["radar_reflectivity_max"].values,
-                color="#ff6644",
-                linewidth=1.2,
-                label="max Z",
-            )
-        self._style_ts_ax(ax_dbz, "dBZ", "Reflectivity")
-        if ax_dbz.get_lines():
-            ax_dbz.legend(
-                fontsize=6,
-                labelcolor="#444",
-                framealpha=0.5,
-                loc="upper left",
-                handlelength=1.2,
-            )
-
-        # ── ZDR / extra panel ─────────────────────────────────────────────────
-        has_extra = False
-        if "radar_differential_reflectivity_max" in track_df.columns:
-            zdr = track_df["radar_differential_reflectivity_max"]
-            if zdr.notna().any():
-                ax_extra.plot(times, zdr.values, color="#cc88ff", linewidth=1.2, label="max ZDR")
-                has_extra = True
-        self._style_ts_ax(ax_extra, "dB", "ZDR")
-        if has_extra:
-            ax_extra.legend(
-                fontsize=6,
-                labelcolor="#444",
-                framealpha=0.5,
-                loc="upper left",
-                handlelength=1.2,
-            )
-        else:
-            ax_extra.text(
-                0.5,
-                0.5,
-                "no ZDR data",
-                transform=ax_extra.transAxes,
-                ha="center",
-                va="center",
-                color="#888",
-                fontsize=7,
-            )
-
-        self._apply_time_axis(ax_extra, self._ts_axes)
-
     def _clear_time_series(self) -> None:
         if self._ts_axes is None:
             return
@@ -1262,24 +1139,10 @@ class ScanViewTab:
                     self._hv[k].set(_em)
                 return
 
-            # ── Cell stats from cells_by_scan (filter by scan time AND cell_id) ─
+            # ── Cell stats from cells_by_scan (identity join: scan_id + label) ─
             df = self._current_cell_df
-            if df is not None and "cell_label" in df.columns:
-                if self._current_scan_ts is not None and "scan_time" in df.columns:
-                    df_time = df.copy()
-                    df_time["scan_time"] = pd.to_datetime(df_time["scan_time"], utc=True)
-                    scan_ts = (
-                        self._current_scan_ts.tz_localize("UTC")
-                        if self._current_scan_ts.tzinfo is None
-                        else self._current_scan_ts
-                    )
-                    valid_mask = df_time["scan_time"].notna()
-                    time_diff = abs(df_time.loc[valid_mask, "scan_time"] - scan_ts)
-                    time_mask = pd.Series(False, index=df_time.index)
-                    time_mask.loc[valid_mask] = time_diff < pd.Timedelta(minutes=1)
-                    rows = df_time[time_mask & (df_time["cell_label"] == cell_id)]
-                else:
-                    rows = df[df["cell_label"] == cell_id]
+            if df is not None and "cell_label" in df.columns and self._current_scan_id:
+                rows = cells_for_scan(df, self._current_scan_id, cell_id)
                 if not rows.empty:
                     r = rows.iloc[0]
 
@@ -1358,7 +1221,7 @@ class ScanViewTab:
             )
 
         return MovieSource(
-            labels=[self._nc_label(p) for p in paths],
+            labels=list(self._scan_labels),
             make_spec=make_spec,
             default_stem=f"{radar}_{view.var_name}",
         )

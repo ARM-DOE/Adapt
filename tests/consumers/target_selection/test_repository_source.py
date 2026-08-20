@@ -26,12 +26,12 @@ T1 = "2024-06-01T14:00:00Z"  # 120 min after T0
 # Real catalog schema: forward projections are 1-indexed (index 0 is the
 # registration centroid, stored separately) — projection{k} = k intervals ahead.
 _CBS_INSERT = (
-    "INSERT INTO cells_by_scan (run_id, scan_time, cell_label, cell_uid, "
+    "INSERT INTO cells_by_scan (run_id, scan_id, scan_time, cell_label, cell_uid, "
     "cell_area_sqkm, cell_centroid_mass_lat, cell_centroid_mass_lon, "
     "radar_reflectivity_max, age_seconds, "
     "cell_centroid_projection1_lat, cell_centroid_projection1_lon, "
     "cell_centroid_projection2_lat, cell_centroid_projection2_lon) "
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
 
 _TRACK_INSERT = (
@@ -50,23 +50,83 @@ def _extend_catalog(db_path):
     # uid_beta: two scans (area 100 -> 160), projections at T1.
     conn.execute(
         _CBS_INSERT,
-        (RUN_ID, T0, 2, "uid_beta", 100.0, 35.0, -97.0, 48.1, 0.0, None, None, None, None),
+        (
+            RUN_ID,
+            f"sid-{T0}",
+            T0,
+            2,
+            "uid_beta",
+            100.0,
+            35.0,
+            -97.0,
+            48.1,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+        ),
     )
     conn.execute(
         _CBS_INSERT,
-        (RUN_ID, T1, 2, "uid_beta", 160.0, 35.05, -97.0, 55.0, 7200.0, 35.1, -97.0, 35.2, -97.0),
+        (
+            RUN_ID,
+            f"sid-{T1}",
+            T1,
+            2,
+            "uid_beta",
+            160.0,
+            35.05,
+            -97.0,
+            55.0,
+            7200.0,
+            35.1,
+            -97.0,
+            35.2,
+            -97.0,
+        ),
     )
     # uid_gamma: first seen at T1, no projections.
     conn.execute(
         _CBS_INSERT,
-        (RUN_ID, T1, 3, "uid_gamma", 50.0, 34.9, -97.2, 30.0, 0.0, None, None, None, None),
+        (
+            RUN_ID,
+            f"sid-{T1}",
+            T1,
+            3,
+            "uid_gamma",
+            50.0,
+            34.9,
+            -97.2,
+            30.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+        ),
     )
     conn.execute(_TRACK_INSERT, (RUN_ID, "uid_gamma", T1, T1, 1, "INITIATION", 0.0))
     # uid_delta: seen only at T0, WITH projections — at T0 the run has a single
     # scan time, so lead times are underivable (the first-scan realtime case).
     conn.execute(
         _CBS_INSERT,
-        (RUN_ID, T0, 4, "uid_delta", 60.0, 35.2, -97.1, 40.0, 0.0, 35.25, -97.1, 35.3, -97.1),
+        (
+            RUN_ID,
+            f"sid-{T0}",
+            T0,
+            4,
+            "uid_delta",
+            60.0,
+            35.2,
+            -97.1,
+            40.0,
+            0.0,
+            35.25,
+            -97.1,
+            35.3,
+            -97.1,
+        ),
     )
     conn.execute(_TRACK_INSERT, (RUN_ID, "uid_delta", T0, T0, 1, "INITIATION", 0.0))
     conn.commit()

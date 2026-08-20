@@ -15,6 +15,12 @@ import xarray as xr
 
 from adapt.contracts import ContractViolation
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.queue_msg import msg as _msg
+
+# Distinct per-file times: two different scans sharing one nominal second
+# is rejected by the scans registry (UNIQUE(run_id, scan_time)).
+_MT1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+_MT2 = datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC)
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -63,7 +69,7 @@ def test_process_file_pipeline_exception_returns_false(
 
     monkeypatch.setattr(proc._executors[1], "run", _boom)
 
-    ok = proc.process_file("/fake/path/file")
+    ok = proc.process_file(_msg("/fake/path/file"))
     assert ok is False
 
 
@@ -73,10 +79,9 @@ def test_process_file_contract_violation_stops_processor(
     """ContractViolation during multi-frame executor causes processor to stop."""
     proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
 
-    scan_times = [
-        datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-        datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
-    ]
+    t1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+    t2 = datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC)
+    scan_times = [t1, t2]
 
     def _fake_single(context):
         return _fake_single_result(scan_times.pop(0))
@@ -87,8 +92,8 @@ def test_process_file_contract_violation_stops_processor(
     monkeypatch.setattr(proc._executors[1], "run", _fake_single)
     monkeypatch.setattr(proc._executors[2], "run", _boom_multi)
 
-    ok1 = proc.process_file("/fake/path/file_1")
-    ok2 = proc.process_file("/fake/path/file_2")
+    ok1 = proc.process_file(_msg("/fake/path/file_1", scan_time=t1))
+    ok2 = proc.process_file(_msg("/fake/path/file_2", scan_time=t2))
     assert ok1 is True
     assert ok2 is False
     assert proc.stopped()
@@ -126,8 +131,8 @@ def test_process_file_success_saves_netcdf_and_returns_true(
         proc._router, "persist", lambda modules, result, meta: persisted.append(meta)
     )
 
-    ok1 = proc.process_file("/fake/path/file_1")
-    ok2 = proc.process_file("/fake/path/file_2")
+    ok1 = proc.process_file(_msg("/fake/path/file_1", scan_time=_MT1))
+    ok2 = proc.process_file(_msg("/fake/path/file_2", scan_time=_MT2))
     assert ok1 is True
     assert ok2 is True
     assert len(persisted) == 2  # router invoked once per processed file
@@ -151,6 +156,6 @@ def test_process_file_skips_already_analyzed(
         lambda ctx: called.append(1) or _fake_single_result(datetime.now(UTC)),
     )
 
-    ok = proc.process_file("/fake/path/file")
+    ok = proc.process_file(_msg("/fake/path/file"))
     assert ok is True
     assert called == []  # single executor was NOT called

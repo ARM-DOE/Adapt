@@ -28,9 +28,11 @@ from typing import TYPE_CHECKING, Optional
 import pandas as pd
 import xarray as xr
 
+from adapt.contracts.persistence import ScanRecord
 from adapt.persistence.catalog import RadarCatalog
 from adapt.persistence.execution_history import ExecutionHistory
 from adapt.persistence.registry import RepositoryRegistry
+from adapt.utils.time import to_scan_iso
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -244,6 +246,7 @@ class DataRepository:
         producer: str = "unknown",
         parent_ids: list[str] | None = None,
         metadata: dict | None = None,
+        scan_id: str | None = None,
     ) -> str:
         """Register an artifact in the RadarCatalog.
 
@@ -294,7 +297,8 @@ class DataRepository:
             item_id=artifact_id,
             run_id=self.run_id,
             item_type=product_type,
-            scan_time=scan_time.isoformat() if scan_time else None,
+            scan_id=scan_id,
+            scan_time=to_scan_iso(scan_time) if scan_time else None,
             file_path=str(relative_path),
             parent_ids=parent_ids,
             metadata=catalog_metadata,
@@ -385,12 +389,17 @@ class DataRepository:
         else:
             raise ValueError(f"Cannot open as table: {product_type}")
 
+    def register_scan(self, record: ScanRecord) -> None:
+        """Register one processed scan in the catalog (processor is the single writer)."""
+        self.catalog.register_scan(record)
+
     def query(
         self,
         product_type: str | None = None,
         time_range: tuple[datetime, datetime] | None = None,
         radar: str | None = None,
         limit: int | None = None,
+        scan_id: str | None = None,
     ) -> list[dict]:
         """Query artifacts by criteria.
 
@@ -404,6 +413,8 @@ class DataRepository:
             Ignored — repository is already scoped to one radar
         limit : int, optional
             Maximum results
+        scan_id : str, optional
+            Exact scan-identity filter
 
         Returns
         -------
@@ -416,9 +427,12 @@ class DataRepository:
         if df.empty:
             return []
 
+        if scan_id:
+            df = df[df["scan_id"] == scan_id]
+
         if time_range:
-            t0 = time_range[0].isoformat()
-            t1 = time_range[1].isoformat()
+            t0 = to_scan_iso(time_range[0])
+            t1 = to_scan_iso(time_range[1])
             df = df[(df["scan_time"] >= t0) & (df["scan_time"] <= t1)]
 
         if limit:
@@ -535,6 +549,7 @@ class DataRepository:
         parent_ids: list[str] | None = None,
         metadata: dict | None = None,
         filename_stem: str | None = None,
+        scan_id: str | None = None,
     ) -> str:
         """Write xarray Dataset to NetCDF and register artifact.
 
@@ -578,6 +593,7 @@ class DataRepository:
             producer=producer,
             parent_ids=parent_ids,
             metadata=metadata,
+            scan_id=scan_id,
         )
 
     def write_parquet(
@@ -588,6 +604,7 @@ class DataRepository:
         producer: str = "processor",
         parent_ids: list[str] | None = None,
         metadata: dict | None = None,
+        scan_id: str | None = None,
     ) -> str:
         """Append a DataFrame to the run's Parquet store for ``product_type``.
 
@@ -664,15 +681,21 @@ class DataRepository:
         item_metadata["num_cells"] = len(df)
         item_metadata["producer"] = producer
 
-        import uuid
-
-        item_id = str(uuid.uuid4())[:16]
+        # Same deterministic mint as every other artifact (one id scheme).
+        item_id = self.generate_artifact_id(
+            product_type=product_type,
+            radar=self.radar,
+            scan_time=scan_time,
+            run_id=self.run_id,
+            content_hint=str(parquet_path),
+        )
 
         self.catalog.register_item(
             item_id=item_id,
             run_id=self.run_id,
             item_type=product_type,
-            scan_time=scan_time.isoformat(),
+            scan_id=scan_id,
+            scan_time=to_scan_iso(scan_time),
             file_path=str(parquet_path.relative_to(self.catalog.radar_dir)),
             processing_stage=producer,
             status="complete",

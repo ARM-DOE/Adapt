@@ -14,6 +14,12 @@ import pytest
 import xarray as xr
 
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.queue_msg import msg as _msg
+
+# Distinct per-file times: two different scans sharing one nominal second
+# is rejected by the scans registry (UNIQUE(run_id, scan_time)).
+_MT1 = datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC)
+_MT2 = datetime(2024, 5, 18, 12, 5, 0, tzinfo=UTC)
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -60,7 +66,7 @@ def test_processor_accepts_fake_grid(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi_result)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    ok1 = proc.process_file("/fake/file_1")
-    ok2 = proc.process_file("/fake/file_2")
+    ok1 = proc.process_file(_msg("/fake/file_1", scan_time=_MT1))
+    ok2 = proc.process_file(_msg("/fake/file_2", scan_time=_MT2))
     assert ok1 is True
     assert ok2 is True

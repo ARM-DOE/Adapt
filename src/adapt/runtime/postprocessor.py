@@ -144,6 +144,7 @@ class PostProcessor:
         """
         meta = PersistenceMeta(
             scan_time=None,
+            scan_id=None,
             run_id=self.repository.run_id,
             source_file="",
             dataset_id=self.repository.radar,

@@ -26,7 +26,8 @@ from adapt.consumers.live._renderer import (
 
 pytestmark = pytest.mark.unit
 
-_SCAN_TS = pd.Timestamp("2024-01-01T12:00:00")
+_SCAN_TS = pd.Timestamp("2024-01-01T12:00:00Z")
+_SID = "sid-render-scan"
 
 
 def _make_ds(*, with_projections=False, with_flow=False):
@@ -54,9 +55,11 @@ def _make_ds(*, with_projections=False, with_flow=False):
         coords={
             "x": np.arange(n) * 1000.0,
             "y": np.arange(n) * 1000.0,
-            "time": _SCAN_TS.to_numpy(),
+            # A different clock than the stamped scan_time — identity must
+            # come from attrs, never from this coordinate.
+            "time": (_SCAN_TS + pd.Timedelta(seconds=7)).to_numpy(),
         },
-        attrs={"radar": "TEST"},
+        attrs={"radar": "TEST", "scan_id": _SID, "scan_time": "2024-01-01T12:00:00Z"},
     )
 
 
@@ -87,6 +90,7 @@ def _cell_df(uid="u1"):
     return pd.DataFrame(
         {
             "run_id": ["r"] * 3,
+            "scan_id": ["sid-1150", "sid-1155", _SID],
             "scan_time": ["2024-01-01T11:50:00Z", "2024-01-01T11:55:00Z", "2024-01-01T12:00:00Z"],
             "cell_uid": [uid] * 3,
             "cell_label": [1, 1, 1],
@@ -315,3 +319,42 @@ def test_cached_basemap_replay_preserves_axes_aspect(monkeypatch):
     renderer_mod.add_basemap(ax, ds, x_km, y_km)  # cached replay
 
     assert ax.get_aspect() == aspect_after_fetch
+
+
+# ── Scan identity from artifact attrs (never the time coordinate) ────────────
+
+
+def test_render_scan_result_carries_identity_from_attrs():
+    _, ax, cbar_ax = _fig_axes()
+    res = render_scan(ax, cbar_ax, _make_ds(), _view(), _NO_OVERLAYS)
+    assert res.scan_id == _SID
+    assert res.scan_ts == _SCAN_TS  # stamped scan_time, not the shifted time coord
+    assert res.scan_ts.tzinfo is not None  # always tz-aware UTC — consumers rely on it
+    assert "2024-01-01 12:00:00" in ax.get_title()
+
+
+def test_missing_identity_attrs_raises_recreate():
+    _, ax, cbar_ax = _fig_axes()
+    ds = _make_ds()
+    del ds.attrs["scan_id"], ds.attrs["scan_time"]
+    with pytest.raises(ValueError, match="Recreate the repository"):
+        render_scan(ax, cbar_ax, ds, _view(), _NO_OVERLAYS)
+
+
+def test_draw_track_overlays_keys_on_attrs_scan_id():
+    # The star resolves through the scan_id identity join even though the
+    # dataset's time coordinate is a different clock (+7 s here).
+    _, ax, _ = _fig_axes()
+    overlays = OverlayData(cell_df=_cell_df(), track_histories={})
+    result = draw_overlays_fn(ax, _make_ds(), _view(selected_cells={"u1": 0}), overlays)
+    assert len(result["u1"]) == 3  # line + dots + current-scan star
+
+
+def test_no_star_when_rows_belong_to_another_scan():
+    # Rows from other scans never match — no window, no nearest-time rescue.
+    _, ax, _ = _fig_axes()
+    df = _cell_df()
+    df["scan_id"] = ["sid-1150", "sid-1155", "sid-other"]
+    overlays = OverlayData(cell_df=df, track_histories={})
+    result = draw_overlays_fn(ax, _make_ds(), _view(selected_cells={"u1": 0}), overlays)
+    assert len(result["u1"]) == 2  # track line + dots only

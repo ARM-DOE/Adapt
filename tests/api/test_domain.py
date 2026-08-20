@@ -124,41 +124,39 @@ class TestTrack:
 
 
 class TestScan:
-    def test_scan_stores_required_fields(self):
-        scan = Scan(
-            scan_time=_T0,
-            radar_id="KDIX",
+    def _scan(self):
+        return Scan(
+            scan_id="sid-aaaa",
             run_id="r1",
-            n_cells=12,
-            max_reflectivity=58.0,
-            has_tracks=True,
+            radar_id="KDIX",
+            scan_time=_T0,
+            source_file_name="KDIX_20240601_120000_V06",
+            status="complete",
         )
+
+    def test_scan_stores_required_fields(self):
+        scan = self._scan()
+        assert scan.scan_id == "sid-aaaa"
         assert scan.scan_time == _T0
-        assert scan.n_cells == 12
-        assert scan.has_tracks is True
+        assert scan.source_file_name == "KDIX_20240601_120000_V06"
+        assert scan.status == "complete"
+        assert scan.start_time is None and scan.end_time is None
 
     def test_scan_is_immutable(self):
-        scan = Scan(
-            scan_time=_T0,
-            radar_id="KDIX",
-            run_id="r1",
-            n_cells=0,
-            max_reflectivity=0.0,
-            has_tracks=False,
-        )
-        with pytest.raises((AttributeError, TypeError, dataclasses.FrozenInstanceError)):
-            scan.n_cells = 99  # type: ignore[misc]
+        scan = self._scan()
+        with pytest.raises(AttributeError):
+            scan.scan_id = "other"
 
 
 class TestScanBundle:
     def test_bundle_holds_scan_and_optionals(self):
         scan = Scan(
-            scan_time=_T0,
-            radar_id="KDIX",
+            scan_id="sid-aaaa",
             run_id="r1",
-            n_cells=0,
-            max_reflectivity=0.0,
-            has_tracks=False,
+            radar_id="KDIX",
+            scan_time=_T0,
+            source_file_name="KDIX_20240601_120000_V06",
+            status="complete",
         )
         bundle = ScanBundle(scan=scan, segmentation=None, cells=None)
         assert bundle.scan is scan
@@ -168,12 +166,12 @@ class TestScanBundle:
 
     def test_bundle_cells_accepts_dataframe(self):
         scan = Scan(
-            scan_time=_T0,
-            radar_id="KDIX",
+            scan_id="sid-aaaa",
             run_id="r1",
-            n_cells=2,
-            max_reflectivity=45.0,
-            has_tracks=True,
+            radar_id="KDIX",
+            scan_time=_T0,
+            source_file_name="KDIX_20240601_120000_V06",
+            status="complete",
         )
         df = pd.DataFrame({"cell_uid": ["a", "b"], "area": [10.0, 20.0]})
         bundle = ScanBundle(scan=scan, segmentation=None, cells=df)
@@ -181,12 +179,12 @@ class TestScanBundle:
 
     def test_bundle_tracks_list_is_mutable(self):
         scan = Scan(
-            scan_time=_T0,
-            radar_id="KDIX",
+            scan_id="sid-aaaa",
             run_id="r1",
-            n_cells=0,
-            max_reflectivity=0.0,
-            has_tracks=False,
+            radar_id="KDIX",
+            scan_time=_T0,
+            source_file_name="KDIX_20240601_120000_V06",
+            status="complete",
         )
         track = Track(
             run_id="r1",

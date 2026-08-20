@@ -12,7 +12,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from adapt.contracts import ScanRecord
 from adapt.persistence.catalog import RadarCatalog
+from adapt.utils.time import to_scan_iso
 
 pytestmark = pytest.mark.unit
 
@@ -120,83 +122,111 @@ class TestProgress:
 
 
 class TestScans:
-    def test_register_scan_is_idempotent(self, catalog):
-        first = catalog.register_scan(_T0, _RUN, nexrad_file_name="KTST_f1")
-        second = catalog.register_scan(_T0, _RUN)
+    """Scan registry: identity-keyed rows, times as metadata (lean, store-aligned)."""
 
-        assert first == second
+    @staticmethod
+    def _record(scan_id="sid-aaaa", scan_time=_T0, source="KTST_20240601_120000_V06", **kw):
+        return ScanRecord(
+            run_id=_RUN,
+            scan_id=scan_id,
+            scan_time=scan_time,
+            source_file_name=source,
+            **kw,
+        )
 
-    def test_get_scan_returns_registered_record(self, catalog):
-        catalog.register_scan(_T0, _RUN)
+    def test_register_scan_stores_identity_and_canonical_time(self, catalog):
+        catalog.register_scan(self._record())
 
-        scan = catalog.get_scan(_T0)
+        scan = catalog.get_scan(_RUN, "sid-aaaa")
 
         assert scan["run_id"] == _RUN
-        assert scan["processing_status"] == "pending"
+        assert scan["scan_id"] == "sid-aaaa"
+        assert scan["scan_time"] == to_scan_iso(_T0)
+        assert scan["scan_date"] == "20240601"
+        assert scan["source_file_name"] == "KTST_20240601_120000_V06"
+        assert scan["processing_status"] == "complete"
 
-    def test_get_scan_unknown_time_returns_none(self, catalog):
-        assert catalog.get_scan(_T1) is None
+    def test_register_scan_upserts_on_run_and_scan_id(self, catalog):
+        catalog.register_scan(self._record())
+        catalog.register_scan(self._record(source="KTST_renamed_V06"))
 
-    def test_get_scan_by_id(self, catalog):
-        scan_id = catalog.register_scan(_T0, _RUN)
+        df = catalog.list_scans(run_id=_RUN)
 
-        assert catalog.get_scan_by_id(scan_id)["scan_id"] == scan_id
-        assert catalog.get_scan_by_id("nope") is None
+        assert len(df) == 1
+        assert df["source_file_name"].tolist() == ["KTST_renamed_V06"]
 
-    def test_link_item_marks_scan_partial(self, catalog):
-        catalog.register_scan(_T0, _RUN)
-        _register(catalog, item_id="seg-1", item_type="segmentation2d")
+    def test_get_scan_unknown_returns_none(self, catalog):
+        assert catalog.get_scan(_RUN, "sid-none") is None
 
-        catalog.link_item_to_scan(_T0, "segmentation2d", "seg-1", num_cells=3)
+    def test_same_scan_in_two_runs_is_independent(self, catalog):
+        catalog.register_scan(self._record())
+        catalog.register_scan(
+            ScanRecord(
+                run_id="run002",
+                scan_id="sid-aaaa",
+                scan_time=_T0,
+                source_file_name="KTST_20240601_120000_V06",
+            )
+        )
 
-        scan = catalog.get_scan(_T0)
-        assert scan["segmentation2d_item_id"] == "seg-1"
-        assert scan["num_cells"] == 3
-        assert scan["processing_status"] == "partial"
+        assert len(catalog.list_scans()) == 2
+        assert catalog.get_scan("run002", "sid-aaaa")["run_id"] == "run002"
 
-    def test_linking_all_core_items_marks_scan_complete(self, catalog):
-        catalog.register_scan(_T0, _RUN)
-        for item_type in ("gridded3d", "segmentation2d", "analysis2d"):
-            _register(catalog, item_id=f"{item_type}-1", item_type=item_type)
-            catalog.link_item_to_scan(_T0, item_type, f"{item_type}-1")
+    def test_coverage_times_are_optional_per_source_metadata(self, catalog):
+        catalog.register_scan(self._record())
+        catalog.register_scan(
+            self._record(scan_id="sid-bbbb", scan_time=_T1, start_time=_T1, end_time=_T1)
+        )
 
-        assert catalog.get_scan(_T0)["processing_status"] == "complete"
+        bare = catalog.get_scan(_RUN, "sid-aaaa")
+        rich = catalog.get_scan(_RUN, "sid-bbbb")
 
-    def test_link_unknown_item_type_is_ignored(self, catalog):
-        catalog.register_scan(_T0, _RUN)
-
-        catalog.link_item_to_scan(_T0, "bogus_type", "x-1")
-
-        assert catalog.get_scan(_T0)["processing_status"] == "pending"
+        assert bare["start_time"] is None and bare["end_time"] is None
+        assert rich["start_time"] is not None and rich["end_time"] is not None
 
     def test_list_scans_filters_by_time_window_and_run(self, catalog):
-        catalog.register_scan(_T0, _RUN)
-        catalog.register_scan(_T1, _RUN)
+        catalog.register_scan(self._record())
+        catalog.register_scan(self._record(scan_id="sid-bbbb", scan_time=_T1))
 
         df = catalog.list_scans(start_time=_T1, run_id=_RUN)
 
-        assert df["scan_time"].tolist() == [_T1.isoformat()]
+        assert df["scan_time"].tolist() == [to_scan_iso(_T1)]
+        assert df["scan_id"].tolist() == ["sid-bbbb"]
 
-    def test_list_scans_filters_by_status(self, catalog):
-        catalog.register_scan(_T0, _RUN)
+    def test_list_scans_ordered_by_scan_time(self, catalog):
+        catalog.register_scan(self._record(scan_id="sid-bbbb", scan_time=_T1))
+        catalog.register_scan(self._record())
 
-        assert catalog.list_scans(status="complete").empty
-        assert len(catalog.list_scans(status="pending")) == 1
+        df = catalog.list_scans(run_id=_RUN)
 
-    def test_get_latest_scan_returns_newest_complete(self, catalog):
-        for t in (_T0, _T1):
-            catalog.register_scan(t, _RUN)
-            for item_type in ("gridded3d", "segmentation2d", "analysis2d"):
-                item_id = f"{item_type}-{t:%H%M}"
-                _register(catalog, item_id=item_id, item_type=item_type, scan_time=t)
-                catalog.link_item_to_scan(t, item_type, item_id)
+        assert df["scan_id"].tolist() == ["sid-aaaa", "sid-bbbb"]
 
-        latest = catalog.get_latest_scan(run_id=_RUN)
+    def test_two_different_scans_at_one_time_raise(self, catalog):
+        # A second scan_id at the same (run, scan_time) is a data problem
+        # (e.g. duplicate download) — registration surfaces it loudly instead
+        # of letting time-ordered reads silently pick one.
+        import sqlite3
 
-        assert latest["scan_time"] == _T1.isoformat()
-        assert catalog.get_latest_scan()["scan_time"] == _T1.isoformat()
+        catalog.register_scan(self._record())
+        with pytest.raises(sqlite3.IntegrityError):
+            catalog.register_scan(self._record(scan_id="sid-other"))
 
-    def test_get_latest_scan_none_when_nothing_complete(self, catalog):
-        catalog.register_scan(_T0, _RUN)
 
-        assert catalog.get_latest_scan() is None
+def test_pre_identity_catalog_raises_recreate_at_open(tmp_path):
+    # Opening a catalog created before scan identity must fail with recreate
+    # guidance — BEFORE the schema script trips an ugly OperationalError on
+    # the scan_id index it cannot create against the old items table.
+    import sqlite3
+
+    radar_dir = tmp_path / "KOLD"
+    radar_dir.mkdir()
+    conn = sqlite3.connect(str(radar_dir / "catalog.db"))
+    conn.execute(
+        "CREATE TABLE items (item_id TEXT PRIMARY KEY, run_id TEXT, item_type TEXT, "
+        "scan_time TEXT, file_path TEXT)"  # pre-identity: no scan_id column
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="Recreate catalog.db"):
+        RadarCatalog(radar_dir)

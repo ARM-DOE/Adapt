@@ -121,10 +121,13 @@ def test_module_does_not_import_execution_or_runtime(pkg: str) -> None:
 
 
 # ── Canonical scan-time serialization (single source of truth) ────────────────
-# scan_time is the cross-table join key: cells_by_scan and every derived module
-# table must store the identical string, or joins silently fail. The format lives
-# in exactly one function — adapt.utils.time.to_scan_iso. This fitness function
-# fails if any other code formats scan-time independently (drift = broken joins).
+# scan_id is the cross-table join key; scan_time is ordering/display METADATA —
+# but it must still serialize identically everywhere (one canonical format), or
+# time-ordered reads and displays silently disagree. The format lives in exactly
+# one function — adapt.utils.time.to_scan_iso. This fitness function fails if
+# any other code formats scan-time independently. (Evidence for the join-key
+# change: the pre-identity dashboard failure class — wall-clock-corrupted rows,
+# "+00:00" vs "Z" divergence, and ±60/±90 s consumer tolerance windows.)
 
 _SCAN_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _SRC_ADAPT = Path(__file__).parents[1] / "src" / "adapt"
@@ -140,7 +143,7 @@ def _rel(py_file: Path, root: Path) -> str:
 
 
 def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
-    """The scan-time join-key format may appear only in adapt.utils.time."""
+    """The canonical scan-time metadata format may appear only in adapt.utils.time."""
     offenders: list[str] = []
     for py_file in _SRC_ADAPT.rglob("*.py"):
         if _SCAN_TIME_FORMAT in py_file.read_text(encoding="utf-8"):
@@ -150,7 +153,8 @@ def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
         "scan-time format must be centralized in adapt.utils.time.to_scan_iso — "
         f"found the literal {_SCAN_TIME_FORMAT!r} in: {offenders}. "
         "Serialize scan_time via to_scan_iso (or let ModuleOutputWriter do it); "
-        "never hardcode the format, or derived tables will not join cells_by_scan."
+        "never hardcode the format. Rows JOIN on scan_id; scan_time is the "
+        "single-format ordering/display metadata."
     )
 
 
@@ -219,6 +223,28 @@ def test_module_does_not_read_wall_clock_or_global_rng(pkg: str) -> None:
     )
 
 
+def test_execution_nodes_do_not_read_wall_clock() -> None:
+    """Graph nodes must be deterministic too, not just modules/*.
+
+    The pre-identity wall-clock scan_time fallback lived in
+    execution/nodes/ingest.py — exactly where the per-module fitness function
+    above does not look. Scan times come from the source boundary; nothing in
+    the execution layer may substitute a clock.
+    """
+    execution_dir = _SRC_ADAPT / "execution"
+    violations: list[str] = []
+    for py_file in execution_dir.rglob("*.py"):
+        violations.extend(
+            f"  {_rel(py_file, execution_dir)}: {hit}" for hit in _nondeterminism_calls(py_file)
+        )
+
+    assert not violations, (
+        "\nadapt.execution reads the wall clock or global RNG — scan times are "
+        "owned by the source boundary and identical inputs must give identical "
+        "outputs:\n" + "\n".join(violations)
+    )
+
+
 # ── Heavy third-party dependencies stay in their owning component ──────────────
 # Each heavy or domain-specific dependency is imported by exactly one component.
 # If one leaks (e.g. matplotlib into modules/, cv2 into runtime/), the core
@@ -282,7 +308,7 @@ _CONTEXT_SEED_KEYS = frozenset(
         "scan_history",  # rolling window of prior segmented scans
         "grid_ds_3d",  # full 3D grid sliced in by the processor
         "run_id",  # repository run identifier
-        "scan_time",  # ingest outputs it; processor re-seeds it in phase 2
+        "scan_time",  # owned by the source boundary; processor seeds it every scan
         "ingest_config",
         "detection_config",
         "projection_config",
@@ -349,7 +375,6 @@ def test_module_inputs_are_produced_or_seeded() -> None:
 # shrink: never add to it — write a check_* validator in adapt.contracts instead.
 _UNCONTRACTED_OUTPUTS = {
     ("ingest", "grid_ds"),
-    ("ingest", "scan_time"),
     ("ingest", "grid_nc_path"),
     ("detection", "num_cells"),
 }

@@ -20,6 +20,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import IO
 
+import yaml
+
 from adapt.consumers.live._context import AppContext
 from adapt.consumers.live._timers import AfterHandles
 from adapt.consumers.live._utils import (
@@ -374,6 +376,18 @@ class PipelineController:
                     cmd += ["--start-time", start]
                 if end:
                     cmd += ["--end-time", end]
+            # The pipeline writes to the base_dir INSIDE the config — adopt
+            # that directory, not wherever the yaml file happens to live.
+            cfg_base_dir = (yaml.safe_load(config_file.read_text()) or {}).get("base_dir")
+            if not cfg_base_dir:
+                messagebox.showerror(
+                    "No base_dir",
+                    f"{config_file} sets no base_dir — the dashboard cannot know "
+                    "where the pipeline will write. Add base_dir to the config.",
+                    parent=wizard_win,
+                )
+                return
+            repo_dir = str(cfg_base_dir)
 
         else:
             # ── User created (or will use) config in a directory ──────────────
@@ -406,9 +420,9 @@ class PipelineController:
                     cmd += ["--start-time", start]
                 if end:
                     cmd += ["--end-time", end]
+            repo_dir = str(p)  # --base-dir above: pipeline writes exactly here
 
         # Auto-select the repo in the dashboard so panels load from this run
-        repo_dir = str(p) if p.is_dir() else str(p.parent)
         self._adopt_repo(repo_dir)
 
         wizard_win.destroy()

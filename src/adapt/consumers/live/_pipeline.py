@@ -28,6 +28,7 @@ from adapt.consumers.live._utils import (
     _pipeline_pid_from_file,
     _pipeline_running,
     adapt_cmd,
+    is_repository,
     safe_close,
 )
 from adapt.utils.process import detached_process_kwargs, terminate_process_tree
@@ -120,7 +121,7 @@ class PipelineController:
         win.resizable(False, False)
 
         path_var = tk.StringVar(value=self.ctx.repo())
-        radar_var = tk.StringVar(value=self.ctx.radar())
+        radar_var = tk.StringVar(value=self.ctx.collection())
         mode_var = tk.StringVar(value="realtime")
         start_var = tk.StringVar(value="")
         end_var = tk.StringVar(value="")
@@ -422,6 +423,11 @@ class PipelineController:
                     cmd += ["--end-time", end]
             repo_dir = str(p)  # --base-dir above: pipeline writes exactly here
 
+        # The pipeline refuses uninitialized roots: initialize the store first
+        # (a legacy pre-store root surfaces the explicit obsolete-layout error).
+        if not self._ensure_store(repo_dir, wizard_win):
+            return
+
         # Auto-select the repo in the dashboard so panels load from this run
         self._adopt_repo(repo_dir)
 
@@ -436,6 +442,21 @@ class PipelineController:
             )
 
     # ── Launch / observe / stop ───────────────────────────────────────────────
+
+    @staticmethod
+    def _ensure_store(repo_dir: str, parent) -> bool:
+        """Run ``adapt init`` for a fresh directory; surface failures loudly."""
+        if is_repository(Path(repo_dir)):
+            return True
+        result = subprocess.run([*adapt_cmd(), "init", repo_dir], capture_output=True, text=True)
+        if result.returncode != 0:
+            messagebox.showerror(
+                "Store initialization failed",
+                result.stderr.strip() or result.stdout.strip() or "adapt init failed",
+                parent=parent,
+            )
+            return False
+        return True
 
     def _launch_pipeline(self, cmd: list) -> None:
         """Launch adapt pipeline, redirect all output to LOG_FILE, start watcher threads."""
@@ -581,7 +602,7 @@ class PipelineController:
         rc = self._proc.returncode if self._proc else None
         self._proc = None
         rc_str = f"exit {rc}" if rc is not None else "unknown"
-        self._status_var.set(f"Stopped  |  {self.ctx.radar()}")
+        self._status_var.set(f"Stopped  |  {self.ctx.collection()}")
         self._append_log(f"[{datetime.now():%H:%M:%S}] Pipeline ended ({rc_str})", "info")
         self.update_badge()
         self.flush_log()

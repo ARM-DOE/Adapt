@@ -224,11 +224,10 @@ def test_overlay_has_three_entry_legend():
 
 
 def test_draw_tse_map_draws_backdrop_overlay_and_title(tmp_path):
-    nc_path = tmp_path / "scan.nc"
-    _ds().to_netcdf(nc_path)
+    ds = _ds()
     snap = Snapshot(scan_time=_T26, cells=(_cell("sel", mass=(50, 50)),))
     fig, ax = plt.subplots()
-    draw_tse_map(ax, _T26, nc_path, snap, _selection("sel"), {"sel"})
+    draw_tse_map(ax, _T26, ds, snap, _selection("sel"), {"sel"})
     meshes = [c for c in ax.collections if type(c).__name__ == "QuadMesh"]
     assert meshes  # reflectivity backdrop
     assert ax.get_legend() is not None

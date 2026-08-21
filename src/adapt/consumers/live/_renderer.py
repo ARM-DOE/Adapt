@@ -9,9 +9,8 @@ view for the same :class:`ViewState`.
 """
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import cmweather  # noqa: F401 — registers ChaseSpectral and other radar colormaps
@@ -382,19 +381,23 @@ def draw_track_overlays(
 
 
 def scan_frame_drawer(
-    nc_paths: Sequence[Path], view: ViewState, overlays: OverlayData
+    open_raster: Callable[[int], Any], view: ViewState, overlays: OverlayData
 ) -> Callable[[Figure, int], None]:
-    """Return a movie draw_frame callable rendering nc_paths[i] via render_scan."""
+    """Return a movie draw_frame callable rendering frame *i* via render_scan.
+
+    ``open_raster(i)`` yields the frame's in-memory ScanRaster; it is closed
+    after drawing, so a movie export never accumulates datasets across frames.
+    """
 
     def draw(fig: Figure, i: int) -> None:
         gs = fig.add_gridspec(1, 2, width_ratios=[1, 0.045])
         ax = fig.add_subplot(gs[0])
         cbar_ax = fig.add_subplot(gs[1])
-        ds = xr.open_dataset(nc_paths[i])
+        raster = open_raster(i)
         try:
-            render_scan(ax, cbar_ax, ds, view, overlays)
+            render_scan(ax, cbar_ax, raster.dataset, view, overlays)
         finally:
-            ds.close()
+            raster.close()
 
     return draw
 

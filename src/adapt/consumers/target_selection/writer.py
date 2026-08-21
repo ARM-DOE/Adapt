@@ -3,8 +3,8 @@
 
 """Append-only JSONL log of selections.
 
-Lives at a user-configured path outside the Adapt repository — consumers
-never write into catalog.db. The parent directory must exist.
+Lives at a user-configured path outside the Adapt store — consumers never
+write into the store's databases. The parent directory must exist.
 """
 
 import json

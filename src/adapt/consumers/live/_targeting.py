@@ -13,11 +13,9 @@ import logging
 import math
 import re
 from collections.abc import Iterable, Sequence
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib import colormaps
 from matplotlib.lines import Line2D
 
@@ -215,27 +213,27 @@ def draw_target_overlay(ax, ds, snapshot, selection, candidate_uids: Sequence[st
 
 
 def draw_tse_map(
-    ax, scan_ts, nc_path: Path | None, snapshot, selection, candidate_uids, *, raise_errors=False
+    ax, scan_ts, ds, snapshot, selection, candidate_uids, *, raise_errors=False
 ) -> None:
     """Draw one Target Selection replay frame onto *ax* (clears it first).
 
-    Shared by the live tab canvas and the movie exporter, so exported frames
-    match the on-screen replay by construction. The live canvas shows a
-    placeholder on a draw failure (the replay keeps stepping); an exporter
-    passes ``raise_errors=True`` so a bad frame aborts the file instead of
-    silently baking "render error" into it.
+    ``ds`` is the scan's in-memory analysis dataset (or None when the scan has
+    no raster). Shared by the live tab canvas and the movie exporter, so
+    exported frames match the on-screen replay by construction. The live
+    canvas shows a placeholder on a draw failure (the replay keeps stepping);
+    an exporter passes ``raise_errors=True`` so a bad frame aborts the file
+    instead of silently baking "render error" into it.
     """
     ax.clear()
     title = pd.Timestamp(scan_ts).strftime("%Y-%m-%d %H:%M:%S UTC")
-    if nc_path is not None:
+    if ds is not None:
         try:
-            with xr.open_dataset(nc_path) as ds:
-                draw_reflectivity_backdrop(ax, ds)
-                draw_target_overlay(ax, ds, snapshot, selection, candidate_uids)
+            draw_reflectivity_backdrop(ax, ds)
+            draw_target_overlay(ax, ds, snapshot, selection, candidate_uids)
         except Exception:
             if raise_errors:
                 raise
-            logger.exception("Failed to draw replay frame for %s", nc_path)
+            logger.exception("Failed to draw replay frame for %s", scan_ts)
             ax.text(0.5, 0.5, "render error", ha="center", transform=ax.transAxes)
     else:
         title += "  (no scan raster)"

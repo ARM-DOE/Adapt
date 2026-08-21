@@ -125,18 +125,46 @@ def _view(zoom=None):
     )
 
 
-def test_scan_frame_drawer_one_frame_per_nc(tmp_path):
+def _raster_opener(paths):
+    """In-memory raster opener over test NC files; records per-frame closes."""
+    from datetime import UTC, datetime
+
+    from adapt.api.domain import ScanRaster, ScanRef
+
+    closed: list[int] = []
+
+    class _CountingRaster(ScanRaster):
+        def __init__(self, dataset, ref, index):
+            super().__init__(dataset, ref, "segmentation2d")
+            self._index = index
+
+        def close(self):
+            closed.append(self._index)
+            super().close()
+
+    def open_raster(i):
+        ds = xr.load_dataset(paths[i])
+        ref = ScanRef("run-1", ds.attrs["scan_id"], datetime(2024, 1, 1, tzinfo=UTC))
+        return _CountingRaster(ds, ref, i)
+
+    return open_raster, closed
+
+
+def test_scan_frame_drawer_one_frame_per_scan_and_closes_each(tmp_path):
     paths = []
     for h in (10, 11, 12):
         p = tmp_path / f"scan_{h}.nc"
         _write_nc(p, h)
         paths.append(p)
-    draw = scan_frame_drawer(paths, _view(), OverlayData(cell_df=None, track_histories={}))
+    open_raster, closed = _raster_opener(paths)
+    draw = scan_frame_drawer(open_raster, _view(), OverlayData(cell_df=None, track_histories={}))
     spec = MovieSpec(n_frames=3, draw_frame=draw, figsize=(4.0, 3.0), dpi=50)
     out = tmp_path / "scan.gif"
     list(write_movie_frames(spec, out, fps=2))
     with Image.open(out) as im:
         assert im.n_frames == 3
+    # Every frame's raster was closed — a movie export never accumulates datasets.
+    assert closed == [0, 1, 2]
 
 
 def test_scan_frame_drawer_applies_frozen_zoom(tmp_path):
@@ -146,7 +174,10 @@ def test_scan_frame_drawer_applies_frozen_zoom(tmp_path):
     p = tmp_path / "scan.nc"
     _write_nc(p, 10)
     zoom = ((2.0, 6.0), (1.0, 7.0))
-    draw = scan_frame_drawer([p], _view(zoom=zoom), OverlayData(cell_df=None, track_histories={}))
+    open_raster, _ = _raster_opener([p])
+    draw = scan_frame_drawer(
+        open_raster, _view(zoom=zoom), OverlayData(cell_df=None, track_histories={})
+    )
     fig = Figure(figsize=(4.0, 3.0), dpi=50)
     FigureCanvasAgg(fig)
     draw(fig, 0)

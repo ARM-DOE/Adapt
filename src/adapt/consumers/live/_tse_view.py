@@ -5,7 +5,7 @@
 
 Replays the Target Selection Engine over the selected run scan-by-scan on a
 reflectivity map (after()-driven; never blocks the UI), then goes live. All
-repository access goes through the AppContext's RepositoryClient.
+store access goes through the AppContext's StoreClient.
 """
 
 import contextlib
@@ -62,7 +62,7 @@ class TargetSelectionTab:
         self._cfg = None  # TSEConfig | None
         self._run_id: str = ""
         self._scan_times: list = []  # sorted scan datetimes of the run
-        self._nc_index: dict = {}  # scan_time → analysis NC path
+        self._ref_index: dict = {}  # scan_time → ScanRef
         self._index = 0  # count of scans processed/shown so far
         self._running = False
         self._step_after_id = None  # single in-flight replay step (never two)
@@ -202,10 +202,11 @@ class TargetSelectionTab:
     def _populate_columns(self):
         """Fill the six rule dropdowns from the selected run's numeric columns."""
         run_id = self.ctx.run_id()
-        if not (run_id and self.ctx.repo() and self.ctx.radar()) or run_id == self._columns_run:
+        selected = run_id and self.ctx.repo() and self.ctx.collection()
+        if not selected or run_id == self._columns_run:
             return
         try:
-            df = self.ctx.client().table("cells_by_scan", radar=self.ctx.radar(), run_id=run_id)
+            df = self.ctx.client().cells(run_id, self.ctx.collection())
         except Exception:
             logger.exception("Failed to read columns for run %s", run_id)
             return
@@ -269,42 +270,47 @@ class TargetSelectionTab:
             self._step_after_id = None
         self._play_btn.config(text="▶ Play")
 
-    def _run_scan_times(self, radar, run_id):
+    def _run_scan_times(self, collection, run_id):
         """Distinct scan datetimes of a run, from cells_by_scan (the authoritative
-        per-scan table build_snapshot itself reads — so the timeline always
-        matches, unlike the optional scans registry)."""
-        hist = self.ctx.client().table("cells_by_scan", radar=radar, run_id=run_id)
+        per-scan table build_snapshot itself reads — so the replay timeline always
+        matches the snapshots)."""
+        hist = self.ctx.client().cells(run_id, collection)
         if hist.empty or "scan_time" not in hist.columns:
             return []
         return sorted({from_scan_iso(str(s)) for s in hist["scan_time"].unique()})
 
-    def _nc_index_for_run(self, radar, run_id) -> dict:
-        """scan_time → analysis NC path, resolved through scan identity.
+    def _ref_index_for_run(self, collection, run_id) -> dict:
+        """scan_time → ScanRef, resolved through scan identity.
 
         Joins cells_by_scan's per-scan (scan_id, scan_time) pairs to the
-        catalog's artifact index by scan_id — no filename parsing, no
-        tolerance matching.
+        run's scan timeline by scan_id — no filename parsing, no tolerance
+        matching. Scans without a complete raster are simply absent (the
+        replay frame shows "no scan raster" for them).
         """
-        hist = self.ctx.client().table("cells_by_scan", radar=radar, run_id=run_id)
+        hist = self.ctx.client().cells(run_id, collection)
         if hist.empty:
             return {}
         require_scan_identity(hist)
-        path_by_sid = {sid: path for sid, _, path in self.ctx.scan_index()}
+        ref_by_sid = {
+            ref.scan_id: ref for ref in self.ctx.client().scan_timeline(collection, run_id)
+        }
         pairs = hist[["scan_id", "scan_time"]].drop_duplicates()
         return {
-            from_scan_iso(str(row.scan_time)): path_by_sid[row.scan_id]
+            from_scan_iso(str(row.scan_time)): ref_by_sid[row.scan_id]
             for row in pairs.itertuples()
-            if row.scan_id in path_by_sid
+            if row.scan_id in ref_by_sid
         }
 
     def _ensure_session(self) -> bool:
         """Build cfg/client/engine + the run's scan list. False (with a dialog)
         on any missing selection or invalid rule."""
-        radar = self.ctx.radar()
+        collection = self.ctx.collection()
         run_id = self.ctx.run_id()
-        if not (self.ctx.repo() and radar and run_id):
+        if not (self.ctx.repo() and collection and run_id):
             messagebox.showinfo(
-                "Target Selection", "Select a repository, radar, and run first.", parent=self.frame
+                "Target Selection",
+                "Select a store, collection, and run first.",
+                parent=self.frame,
             )
             return False
         try:
@@ -313,11 +319,11 @@ class TargetSelectionTab:
             messagebox.showerror("Invalid rules", str(exc), parent=self.frame)
             return False
         try:
-            scan_times = self._run_scan_times(radar, run_id)
-            nc_index = self._nc_index_for_run(radar, run_id)
+            scan_times = self._run_scan_times(collection, run_id)
+            ref_index = self._ref_index_for_run(collection, run_id)
         except Exception as exc:
             # Surfaces the identity contract's loud errors (e.g. "Recreate
-            # catalog.db") in a dialog instead of dying in Tk's stderr handler.
+            # the repository") in a dialog instead of dying in Tk's stderr handler.
             logger.exception("Failed to list scans for run %s", run_id)
             messagebox.showerror(
                 "Target Selection", f"Could not list scans: {exc}", parent=self.frame
@@ -331,7 +337,7 @@ class TargetSelectionTab:
         self._cfg = cfg
         self._run_id = run_id
         self._scan_times = scan_times
-        self._nc_index = nc_index
+        self._ref_index = ref_index
         self._engine = TargetSelectionEngine(cfg)
         self._index = 0
         return True
@@ -361,7 +367,7 @@ class TargetSelectionTab:
             snap = build_snapshot(
                 self.ctx.client(),
                 self._run_id,
-                self.ctx.radar(),
+                self.ctx.collection(),
                 growth_window_scans=self._cfg.snapshot.growth_window_scans,
                 at=scan_ts,
             )
@@ -374,17 +380,17 @@ class TargetSelectionTab:
 
     def _go_live(self):
         """Reached the newest scan: pick up new scans, or wait while live."""
-        radar = self.ctx.radar()
+        collection = self.ctx.collection()
         try:
-            times = self._run_scan_times(radar, self._run_id)
+            times = self._run_scan_times(collection, self._run_id)
         except Exception:
             logger.exception("go_live scan re-query failed")
             times = self._scan_times
         if len(times) > len(self._scan_times):
             try:
-                self._nc_index = self._nc_index_for_run(radar, self._run_id)
+                self._ref_index = self._ref_index_for_run(collection, self._run_id)
             except Exception as exc:
-                logger.exception("go_live NC re-index failed")
+                logger.exception("go_live scan re-index failed")
                 self._status.config(text=f"■ Error — {exc}")
                 self._pause()
                 return
@@ -395,7 +401,7 @@ class TargetSelectionTab:
         stamp = last.strftime("%H:%M:%S") if last else "—"
         live = False
         try:
-            live = self.ctx.client().is_pipeline_running(radar)
+            live = self.ctx.client().is_pipeline_running(collection)
         except Exception:
             logger.exception("is_pipeline_running failed")
         if live:
@@ -432,8 +438,14 @@ class TargetSelectionTab:
 
     def _render(self, scan_ts, snap, selection, candidates):
         canvas, _fig, ax, _tb = self._canvas_refs
-        nc = self._nc_index.get(scan_ts)
-        draw_tse_map(ax, scan_ts, nc, snap, selection, candidates)
+        ref = self._ref_index.get(scan_ts)
+        raster = self.ctx.open_raster(ref) if ref is not None else None
+        try:
+            ds = raster.dataset if raster else None
+            draw_tse_map(ax, scan_ts, ds, snap, selection, candidates)
+        finally:
+            if raster is not None:
+                raster.close()
         canvas.draw_idle()
         self._update_status(scan_ts, snap, selection, candidates)
         self._set_rationale(format_rationale(snap, self._cfg, selection, candidates))
@@ -497,10 +509,11 @@ class TargetSelectionTab:
             return None
         cfg = self._cfg
         times = list(self._scan_times)
-        nc_index = dict(self._nc_index)
+        ref_index = dict(self._ref_index)
         run_id = self._run_id
-        radar = self.ctx.radar()
+        collection = self.ctx.collection()
         client = self.ctx.client()
+        open_raster = self.ctx.open_raster
 
         def make_spec(i0: int, i1: int) -> MovieSpec:
             # Engine state is path-dependent (switch margin, observation dwell):
@@ -513,7 +526,7 @@ class TargetSelectionTab:
                 snap = build_snapshot(
                     client,
                     run_id,
-                    radar,
+                    collection,
                     growth_window_scans=cfg.snapshot.growth_window_scans,
                     at=times[i],
                 )
@@ -530,12 +543,26 @@ class TargetSelectionTab:
                 snap, selection, cands = latest
                 ax = fig.add_subplot(111)
                 ts = times[target]
-                draw_tse_map(ax, ts, nc_index.get(ts), snap, selection, cands, raise_errors=True)
+                ref = ref_index.get(ts)
+                raster = open_raster(ref) if ref is not None else None
+                try:
+                    draw_tse_map(
+                        ax,
+                        ts,
+                        raster.dataset if raster else None,
+                        snap,
+                        selection,
+                        cands,
+                        raise_errors=True,
+                    )
+                finally:
+                    if raster is not None:
+                        raster.close()
 
             return MovieSpec(n_frames=i1 - i0 + 1, draw_frame=draw, figsize=(7.5, 7.0), dpi=100)
 
         return MovieSource(
             labels=[t.strftime("%Y-%m-%d %H:%M:%S") for t in times],
             make_spec=make_spec,
-            default_stem=f"{radar}_target_selection",
+            default_stem=f"{collection}_target_selection",
         )

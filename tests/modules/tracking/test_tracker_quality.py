@@ -110,11 +110,11 @@ def test_gap_exceeded_terminates_and_restarts():
     t1 = np.datetime64("2024-01-01T12:20:00")  # 20 min > 10-min hard limit
 
     ds0, stats0 = _one_cell_scan(t0, 2)
-    _, events0 = tracker.track(ds0, stats0)
+    _, events0 = tracker.track(ds0, stats0, scan_id="site001scan")
     uid0 = str(events0[events0["event_type"] == "INITIATION"].iloc[0]["target_cell_uid"])
 
     ds1, stats1 = _one_cell_scan(t1, 2)
-    tracked1, events1 = tracker.track(ds1, stats1)
+    tracked1, events1 = tracker.track(ds1, stats1, scan_id="site002scan")
 
     assert (events1["event_type"] == "CONTINUE").sum() == 0, "No match may cross the hard gap"
     assert uid0 in set(events1[events1["event_type"] == "TERMINATION"]["source_cell_uid"]), (
@@ -134,11 +134,11 @@ def test_non_monotonic_time_resets_without_crash():
     t_back = np.datetime64("2024-01-01T12:00:00")  # earlier than t0
 
     ds0, stats0 = _one_cell_scan(t0, 2)
-    _, events0 = tracker.track(ds0, stats0)
+    _, events0 = tracker.track(ds0, stats0, scan_id="site003scan")
     uid0 = str(events0[events0["event_type"] == "INITIATION"].iloc[0]["target_cell_uid"])
 
     ds1, stats1 = _one_cell_scan(t_back, 2)
-    _, events1 = tracker.track(ds1, stats1)  # must not raise
+    _, events1 = tracker.track(ds1, stats1, scan_id="site004scan")  # must not raise
 
     assert (events1["event_type"] == "CONTINUE").sum() == 0
     assert uid0 in set(events1[events1["event_type"] == "TERMINATION"]["source_cell_uid"])
@@ -154,9 +154,9 @@ def test_normal_gap_still_continues():
     t1 = np.datetime64("2024-01-01T12:05:00")  # 5 min < 20-min limit
 
     ds0, stats0 = _one_cell_scan(t0, 2)
-    tracker.track(ds0, stats0)
+    tracker.track(ds0, stats0, scan_id="site005scan")
     ds1, stats1 = _one_cell_scan(t1, 2, proj_labels=ds0["cell_labels"].values)
-    _, events1 = tracker.track(ds1, stats1)
+    _, events1 = tracker.track(ds1, stats1, scan_id="site006scan")
 
     assert (events1["event_type"] == "CONTINUE").sum() == 1
 
@@ -176,12 +176,12 @@ def test_velocity_exceeded_rejects_match():
     t1 = np.datetime64("2024-01-01T12:05:00")
 
     ds0, stats0 = _one_cell_scan(t0, 2)
-    _, events0 = tracker.track(ds0, stats0)
+    _, events0 = tracker.track(ds0, stats0, scan_id="site007scan")
     uid0 = str(events0[events0["event_type"] == "INITIATION"].iloc[0]["target_cell_uid"])
 
     # Projection predicts the jumped position exactly → overlap exists, but speed cap bites.
     ds1, stats1 = _one_cell_scan(t1, 6)
-    _, events1 = tracker.track(ds1, stats1)
+    _, events1 = tracker.track(ds1, stats1, scan_id="site008scan")
 
     assert (events1["event_type"] == "CONTINUE").sum() == 0
     assert uid0 in set(events1[events1["event_type"] == "TERMINATION"]["source_cell_uid"])
@@ -203,13 +203,13 @@ def test_acceleration_exceeded_rejects_match():
     t2 = np.datetime64("2024-01-01T12:10:00")
 
     ds0, stats0 = _one_cell_scan(t0, 2)
-    tracker.track(ds0, stats0)
+    tracker.track(ds0, stats0, scan_id="site009scan")
     ds1, stats1 = _one_cell_scan(t1, 3)
-    _, events1 = tracker.track(ds1, stats1)
+    _, events1 = tracker.track(ds1, stats1, scan_id="site010scan")
     assert (events1["event_type"] == "CONTINUE").sum() == 1, "slow step must continue"
 
     ds2, stats2 = _one_cell_scan(t2, 6)
-    _, events2 = tracker.track(ds2, stats2)
+    _, events2 = tracker.track(ds2, stats2, scan_id="site011scan")
     assert (events2["event_type"] == "CONTINUE").sum() == 0, "accelerating step must be rejected"
 
 
@@ -228,11 +228,11 @@ def test_unique_candidate_resolved_by_constraint_propagation():
     t1 = np.datetime64("2024-01-01T12:05:00")
 
     ds0, stats0 = _one_cell_scan(t0, 2)
-    _, events0 = tracker.track(ds0, stats0)
+    _, events0 = tracker.track(ds0, stats0, scan_id="site012scan")
     uid0 = str(events0[events0["event_type"] == "INITIATION"].iloc[0]["target_cell_uid"])
 
     ds1, stats1 = _one_cell_scan(t1, 3)  # single cell, single prediction → unique
-    tracked1, events1 = tracker.track(ds1, stats1)
+    tracked1, events1 = tracker.track(ds1, stats1, scan_id="site013scan")
 
     cont = events1[events1["event_type"] == "CONTINUE"]
     assert len(cont) == 1
@@ -260,14 +260,16 @@ def test_ambiguous_group_uses_hungarian():
             {"id": 2, "area": 4.0, "cx": 6500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0},
         ],
     )
-    tracker.track(_synthetic_ds(t0, labels0, proj_labels=labels0), stats0)
+    tracker.track(_synthetic_ds(t0, labels0, proj_labels=labels0), stats0, scan_id="site014scan")
 
     labels1 = labels0.copy()  # current cells at the same positions
     # Disjoint hulls on separate rows, each spanning both current cells' columns.
     proj1 = np.zeros((6, 12), dtype=np.int32)
     proj1[2, 3:8] = 1  # row 2 spans cols 3..7 → overlaps both cells' row 2
     proj1[3, 3:8] = 2  # row 3 spans cols 3..7 → overlaps both cells' row 3
-    _, events1 = tracker.track(_synthetic_ds(t1, labels1, proj_labels=proj1), stats0)
+    _, events1 = tracker.track(
+        _synthetic_ds(t1, labels1, proj_labels=proj1), stats0, scan_id="site015scan"
+    )
 
     cont = events1[events1["event_type"] == "CONTINUE"]
     assert len(cont) >= 1
@@ -288,10 +290,10 @@ def test_continue_event_carries_diagnostics():
     t1 = np.datetime64("2024-01-01T12:05:00")
 
     ds0, stats0 = _one_cell_scan(t0, 2)
-    tracker.track(ds0, stats0)
+    tracker.track(ds0, stats0, scan_id="site016scan")
     # cell moves one pixel; projection predicts it → unique overlap match
     ds1, stats1 = _one_cell_scan(t1, 3)
-    _, events1 = tracker.track(ds1, stats1)
+    _, events1 = tracker.track(ds1, stats1, scan_id="site017scan")
 
     cont = events1[events1["event_type"] == "CONTINUE"]
     assert len(cont) == 1
@@ -311,7 +313,7 @@ def test_initiation_event_has_null_diagnostics():
     cfg = _make_config()
     tracker = CellTracker(cfg)
     ds0, stats0 = _one_cell_scan(np.datetime64("2024-01-01T12:00:00"), 2)
-    _, events0 = tracker.track(ds0, stats0)
+    _, events0 = tracker.track(ds0, stats0, scan_id="site018scan")
     init = events0[events0["event_type"] == "INITIATION"].iloc[0]
     assert pd.isna(init["candidate_opc"])
     assert pd.isna(init["match_method"])
@@ -337,9 +339,9 @@ def test_heading_penalty_breaks_ambiguous_match_toward_consistent_track():
 
     # scan0→1 establish a +x velocity (heading 0) for track label 1.
     ds0, stats0 = _one_cell_scan(t0, 2)
-    tracker.track(ds0, stats0)
+    tracker.track(ds0, stats0, scan_id="site019scan")
     ds1, stats1 = _one_cell_scan(t1, 4)  # perfect projection → CONTINUE, vx>0
-    tracker.track(ds1, stats1)
+    tracker.track(ds1, stats1, scan_id="site020scan")
 
     # scan2: the registration hull (label 1) fills the whole row band, so it
     # overlaps P and Q identically (equal IoU). P and Q are equidistant from the
@@ -359,7 +361,7 @@ def test_heading_penalty_breaks_ambiguous_match_toward_consistent_track():
         ],
     )
     ds2 = _synthetic_ds(t2, labels2, proj_labels=proj2)
-    _, events2 = tracker.track(ds2, stats2)
+    _, events2 = tracker.track(ds2, stats2, scan_id="site021scan")
 
     cont = events2[events2["event_type"] == "CONTINUE"]
     assert len(cont) == 1, "the track should continue to exactly one cell"

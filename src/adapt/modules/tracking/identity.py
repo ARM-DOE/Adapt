@@ -3,22 +3,18 @@
 
 """Stable cell-uid generation.
 
-A cell's birth state (quantized time, location, intensity, area) is hashed into a
-short base36 token. Quantization makes the token robust to small input variation;
-the hash makes it stable and reproducible. Pure functions only — no I/O, no state.
+A cell's birth identity — the scan it was born in (scan_id, sha256 of the
+raw file bytes) and its label within that scan — is hashed into a short
+base36 token. scan_id is a pure function of the input and labels are unique
+within a scan, so the uid is deterministic and collision-free by
+construction, independent of which physics fields the source provides.
+Pure functions only — no I/O, no state.
 """
 
 import hashlib
 import string
 
 BASE36_UPPER = string.digits + string.ascii_uppercase
-
-
-def _quantize(value: float, step: float) -> int:
-    # this is for creating stable hashes that are robust to small variations in the input values
-    if step <= 0:
-        raise ValueError("step must be positive")
-    return int(round(value / step))
 
 
 def _encode_base36(value: int) -> str:
@@ -38,26 +34,16 @@ def _encode_base36_fixed(value: int, width: int) -> str:
     return token.rjust(width, "0")
 
 
-def _track_signature_from_birth(
-    scan_start_time_epoch_s: float,
-    centroid_lat_deg: float,
-    centroid_lon_deg: float,
-    max_dbz: float,
-    max_zdr: float,
-    area40_km2: float,
-    *,
-    time_step_s: int,
-    latlon_step_deg: float,
-    area_step_km2: float,
-    signature_version: str = "v1",
-) -> str:
-    tq = _quantize(scan_start_time_epoch_s, time_step_s)
-    latq = _quantize(centroid_lat_deg, latlon_step_deg)
-    lonq = _quantize(centroid_lon_deg, latlon_step_deg)
-    dbzq = int(round(max_dbz))
-    zdrq = int(round(max_zdr * 10.0))
-    a40q = _quantize(area40_km2, area_step_km2)
-    return f"{signature_version}|{tq}|{latq}|{lonq}|{dbzq}|{zdrq}|{a40q}"
+def track_signature_v2(scan_id: str, cell_label: int) -> str:
+    """Birth signature: pure function of scan identity + label.
+
+    scan_id is sha256 of the raw scan bytes; labels are unique within a
+    scan — so the signature is deterministic and collision-free by
+    construction, and independent of which physics fields exist.
+    """
+    if not scan_id:
+        raise ValueError("track_signature_v2: scan_id is required")
+    return f"v2|{scan_id}|{int(cell_label)}"
 
 
 def _cell_uid_from_signature(signature: str, width: int) -> str:

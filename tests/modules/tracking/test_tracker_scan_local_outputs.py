@@ -105,7 +105,7 @@ def test_birth_and_continue_events(tracker):
         ],
     )
 
-    tracked1, events1 = tracker.track(ds1, stats1)
+    tracked1, events1 = tracker.track(ds1, stats1, scan_id="site001scan")
     assert len(tracked1) == 1
     assert "cell_uid" in tracked1.columns
     assert pd.notna(tracked1.iloc[0]["cell_uid"])
@@ -128,7 +128,7 @@ def test_birth_and_continue_events(tracker):
         ],
     )
 
-    tracked2, events2 = tracker.track(ds2, stats2)
+    tracked2, events2 = tracker.track(ds2, stats2, scan_id="site002scan")
     assert len(tracked2) == 1
     assert str(tracked2.iloc[0]["cell_uid"]) == uid1
     assert "source_cell_uid" in events2.columns
@@ -157,7 +157,7 @@ def test_split_event(tracker):
             }
         ],
     )
-    tracker.track(ds1, stats1)
+    tracker.track(ds1, stats1, scan_id="site003scan")
 
     labels2 = np.zeros((8, 8), dtype=np.int32)
     labels2[3:5, 2:4] = 1
@@ -186,7 +186,7 @@ def test_split_event(tracker):
         ],
     )
 
-    tracked2, events2 = tracker.track(ds2, stats2)
+    tracked2, events2 = tracker.track(ds2, stats2, scan_id="site004scan")
     assert len(tracked2) == 2
     assert len(events2[events2["event_type"] == "SPLIT"]) == 1
     assert tracked2["cell_uid"].nunique() == 2
@@ -221,7 +221,7 @@ def test_merge_event_emits_death(tracker):
             },
         ],
     )
-    tracker.track(ds1, stats1)
+    tracker.track(ds1, stats1, scan_id="site005scan")
 
     labels2 = np.zeros((10, 10), dtype=np.int32)
     labels2[4:6, 3:7] = 1
@@ -243,7 +243,7 @@ def test_merge_event_emits_death(tracker):
         ],
     )
 
-    tracked2, events2 = tracker.track(ds2, stats2)
+    tracked2, events2 = tracker.track(ds2, stats2, scan_id="site006scan")
     assert len(tracked2) == 1
     assert len(events2[events2["event_type"] == "MERGE"]) == 1
     deaths = events2[events2["event_type"] == "TERMINATION"]
@@ -292,8 +292,12 @@ def test_prediction_residual_raises_continue_cost():
 
     def _cost(proj):
         tracker = CellTracker(cfg)
-        tracker.track(_synthetic_ds(t0, labels0, proj_labels=labels0), stats0)
-        _, events = tracker.track(_synthetic_ds(t1, labels1, proj_labels=proj), stats1)
+        tracker.track(
+            _synthetic_ds(t0, labels0, proj_labels=labels0), stats0, scan_id="site007scan"
+        )
+        _, events = tracker.track(
+            _synthetic_ds(t1, labels1, proj_labels=proj), stats1, scan_id="site008scan"
+        )
         cont = events[events["event_type"] == "CONTINUE"]
         assert len(cont) == 1
         return float(cont.iloc[0]["cost"])

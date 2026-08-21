@@ -228,11 +228,13 @@ class TrackerConfig(AdaptBaseModel):
     """Cell tracking configuration."""
 
     class CellUidConfig(AdaptBaseModel):
-        """Track ID generation configuration."""
+        """Track ID generation configuration.
 
-        time_step_s: int = Field(10, ge=1)
-        latlon_step_deg: float = Field(0.1, gt=0.0)
-        area_step_km2: float = Field(5.0, gt=0.0)
+        v2 uids hash (scan_id, cell_label) — deterministic and
+        collision-free by construction; only the token width/alphabet
+        remain configurable.
+        """
+
         width: int = Field(10, ge=1)
         alphabet: Literal["base36_upper"] = "base36_upper"
 

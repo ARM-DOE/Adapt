@@ -162,9 +162,6 @@ class InternalTrackerConfig(AdaptBaseModel):
     class InternalCellUidConfig(AdaptBaseModel):
         """Runtime cell UID configuration."""
 
-        time_step_s: int = Field(ge=1)
-        latlon_step_deg: float = Field(gt=0.0)
-        area_step_km2: float = Field(gt=0.0)
         width: int = Field(ge=1)
         alphabet: Literal["base36_upper"]
 

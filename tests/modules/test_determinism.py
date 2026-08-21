@@ -101,7 +101,9 @@ def test_tracking_is_deterministic(tracking_module_config):
         tracker = CellTracker(tracking_module_config)
         frames = []
         for t in (t1, t2):
-            tracked, events = tracker.track(_tracking_scan(t, labels), _tracking_stats(t, 1))
+            tracked, events = tracker.track(
+                _tracking_scan(t, labels), _tracking_stats(t, 1), scan_id=f"scan-{t}"
+            )
             frames.append((tracked, events))
         return frames
 

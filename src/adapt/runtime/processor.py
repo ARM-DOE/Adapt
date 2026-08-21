@@ -324,8 +324,11 @@ class RadarProcessor(threading.Thread):
             # ── Build base context with all module configs ─────────────────
             base_ctx: dict = {
                 "nexrad_file": filepath,
-                # The source boundary owns scan_time; normalized once so every
-                # consumer (modules, persistence, history) sees tz-aware UTC.
+                # The source boundary owns scan identity: scan_id (sha256 of
+                # the raw bytes) is the uid-v2 birth input and the join key;
+                # scan_time is normalized once so every consumer (modules,
+                # persistence, history) sees tz-aware UTC.
+                "scan_id": scan_id,
                 "scan_time": self._normalize_scan_time(queued_scan_time),
                 **self._module_configs,
             }
@@ -482,6 +485,7 @@ class RadarProcessor(threading.Thread):
         ctx = {
             **result,
             "run_id": self.run_id,
+            "scan_id": scan_id,
             "scan_time": scan_time,
         }
         if any("grid_ds_3d" in m.inputs for m in self._post_modules):

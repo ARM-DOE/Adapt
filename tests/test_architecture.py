@@ -307,6 +307,7 @@ _CONTEXT_SEED_KEYS = frozenset(
         "scan_history",  # rolling window of prior segmented scans
         "grid_ds_3d",  # full 3D grid sliced in by the processor
         "run_id",  # repository run identifier
+        "scan_id",  # sha256[:16] of raw bytes; processor seeds it every scan (uid-v2 birth input)
         "scan_time",  # owned by the source boundary; processor seeds it every scan
         "ingest_config",
         "detection_config",
@@ -522,10 +523,17 @@ def test_create_table_statements_have_one_home() -> None:
 
 
 def test_obs_context_fields_never_in_module_io() -> None:
-    """No ObsContext field name may be a module input/output key."""
+    """No ObsContext field name may be a module input/output key.
+
+    Runtime-seeded SCIENCE identity keys are exempt: ``scan_id`` is the
+    store join key (sha256 of raw bytes) and the uid-v2 birth input —
+    ObsContext.scan_id is a correlation id DERIVED from it, not the
+    reverse, so a module declaring it consumes science identity, not
+    telemetry.
+    """
     from adapt.contracts.observability import ObsContext
 
-    obs_fields = set(ObsContext.__dataclass_fields__)
+    obs_fields = set(ObsContext.__dataclass_fields__) - _CONTEXT_SEED_KEYS
     leaks: list[str] = []
     for module in _registered_default_modules():
         for key in list(module.inputs) + list(module.outputs):

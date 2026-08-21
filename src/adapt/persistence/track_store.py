@@ -174,31 +174,6 @@ _TRACK_INDEX_DDL = (
     "CREATE INDEX idx_cell_tracks_run ON cell_tracks(run_id)",
 )
 
-_FIXED_CBS_COLS = {
-    "run_id",
-    "scan_id",
-    "scan_time",
-    "cell_label",
-    "cell_uid",
-    "age_seconds",
-    "cell_area_sqkm",
-    "cell_centroid_mass_lat",
-    "cell_centroid_mass_lon",
-    "cell_centroid_geom_x",
-    "cell_centroid_geom_y",
-    "radar_reflectivity_max",
-    "radar_reflectivity_mean",
-    "radar_differential_reflectivity_max",
-    "area_40dbz_km2",
-    "n_adjacent_cells",
-    "adjacent_cell_uids_json",
-    "is_initiated_here",
-    "is_split_target_here",
-    "is_merge_target_here",
-    "is_split_source_here",
-    "is_merge_source_here",
-    "is_terminated_after_here",
-}
 
 _SKIP_FROM_CELL_STATS = {
     # tracked internally by tracked_cells with different names; avoid duplicate writes

@@ -483,7 +483,6 @@ _DDL_ALLOWED_PY = {
     "persistence/products.py",
     # Legacy bespoke DDL — shrink-only; consolidate into schemas/*.sql.
     "persistence/track_store.py",
-    "persistence/execution_history.py",
 }
 
 # Case-sensitive: SQL here is uppercase by convention; lowercase "Create

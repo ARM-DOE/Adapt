@@ -41,7 +41,6 @@ dependencies = [
     "opencv-python",
     "boto3",
     "pyarrow",
-    "duckdb",
 ]
 
 [project.urls]

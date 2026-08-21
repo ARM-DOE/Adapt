@@ -35,6 +35,8 @@ from scipy.ndimage import label
 from skimage.morphology import h_maxima
 from skimage.segmentation import watershed
 
+from adapt.contracts import ContractViolation
+
 __all__ = ["RadarCellSegmenter"]
 
 logger = logging.getLogger(__name__)
@@ -253,6 +255,13 @@ class RadarCellSegmenter:
             (0 = background, 1..N = cells by decreasing size). Label attrs
             record method, threshold, z-level, and size-filter settings.
         """
+        if self.refl_name not in ds.data_vars:
+            raise ContractViolation(
+                f"Detection: configured tracking field {self.refl_name!r} is "
+                f"not in the grid (available: "
+                f"{sorted(str(v) for v in ds.data_vars)}). Check "
+                "global_.tracking_field and reader.field_map/fields."
+            )
         refl = ds[self.refl_name].values
         binary_mask = self._convective_mask(refl, grid_ds)
 

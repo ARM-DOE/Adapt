@@ -212,4 +212,22 @@ def resolve_config(
                 "Please provide end_time in user config or CLI arguments."
             )
 
+    # The tracking field must actually exist for the core to run on it:
+    # the analyzer mints the per-cell stats the tracker reads, and the
+    # reader.fields selection decides which variables survive ingest.
+    # Failing here beats a KeyError three modules into the first scan.
+    field = internal.global_.tracking_field
+    if field not in internal.analyzer.radar_variables:
+        raise ConfigError(
+            f"global.tracking_field {field!r} is not in analyzer.radar_variables "
+            f"{internal.analyzer.radar_variables} — the analyzer would never mint "
+            "the per-cell statistics the tracker needs. Add it to the whitelist."
+        )
+    if internal.reader.fields and field not in internal.reader.fields:
+        raise ConfigError(
+            f"global.tracking_field {field!r} is excluded by reader.fields "
+            f"{internal.reader.fields} — the tracked field would never survive "
+            "ingest. Add it to reader.fields or clear the list."
+        )
+
     return internal

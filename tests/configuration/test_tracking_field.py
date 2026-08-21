@@ -8,7 +8,10 @@ canonicalized at ingest via reader.field_map)."""
 import pytest
 from pydantic import ValidationError
 
+from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.param import ParamConfig
+from adapt.configuration.schemas.resolve import resolve_config
+from adapt.configuration.schemas.user import UserConfig
 
 pytestmark = pytest.mark.unit
 
@@ -23,3 +26,31 @@ def test_tracking_field_default_and_override():
 def test_var_names_section_is_gone():
     with pytest.raises(ValidationError):
         ParamConfig(**{"global": {"var_names": {"reflectivity": "x"}}})
+
+
+def test_tracking_field_must_be_in_analyzer_whitelist():
+    # A tracked field the analyzer never computes stats for would fail
+    # mid-run in tracking; fail loudly at resolve time instead.
+    user = UserConfig(base_dir="/tmp", radar="KHTX")
+    with pytest.raises(ConfigError, match="tracking_field"):
+        resolve_config(
+            ParamConfig(**{"global": {"tracking_field": "pressure"}}), user, None
+        )
+
+
+def test_tracking_field_must_survive_reader_fields_selection():
+    user = UserConfig(base_dir="/tmp", radar="KHTX")
+    with pytest.raises(ConfigError, match="reader.fields"):
+        resolve_config(ParamConfig(reader={"fields": ["velocity"]}), user, None)
+
+
+def test_tracking_field_valid_when_whitelisted_and_selected():
+    user = UserConfig(base_dir="/tmp", radar="KHTX")
+    cfg = resolve_config(
+        ParamConfig(
+            reader={"fields": ["reflectivity", "velocity"]},
+        ),
+        user,
+        None,
+    )
+    assert cfg.global_.tracking_field == "reflectivity"

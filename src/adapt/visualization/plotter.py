@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from adapt.contracts import CELL_LABELS_VAR  # noqa: E402  (layer-legal: contracts is a leaf)
+
 matplotlib.use("Agg")
 import contextlib
 
@@ -144,9 +146,9 @@ class RadarPlotter:
         """Get variable name from config."""
         if self.config:
             if var_key == "reflectivity":
-                return self.config.global_.var_names.reflectivity
+                return self.config.global_.tracking_field
             elif var_key == "cell_labels":
-                return self.config.global_.var_names.cell_labels
+                return CELL_LABELS_VAR
         return default
 
     def _get_coord_name(self, coord_key: str, default: str) -> str:

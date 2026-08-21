@@ -84,8 +84,8 @@ class RadarCellAnalyzer:
     Config dict structure:
 
     - `global` : dict, optional
-        - `var_names` : dict
-            Variable naming mapping (reflectivity, cell_labels, etc.)
+        - `tracking_field` : str
+            Canonical field the pipeline detects/tracks on (default: "reflectivity")
 
     - `radar_variables` : list, optional
         Whitelist of variables to analyze (default: common radar fields).

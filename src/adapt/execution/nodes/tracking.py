@@ -2,6 +2,7 @@
 # See LICENSE for terms and disclaimer.
 
 from adapt.contracts import (
+    CELL_LABELS_VAR,
     NetcdfArtifact,
     TrackTablesWrite,
     check_cell_events,
@@ -84,8 +85,8 @@ class TrackingModule(BaseModule):
             uid_latlon_step_deg=cfg.tracker.cell_uid.latlon_step_deg,
             uid_area_step_km2=cfg.tracker.cell_uid.area_step_km2,
             uid_width=cfg.tracker.cell_uid.width,
-            field_var=cfg.global_.var_names.reflectivity,
-            labels_var=cfg.global_.var_names.cell_labels,
+            field_var=cfg.global_.tracking_field,
+            labels_var=CELL_LABELS_VAR,
             max_tracking_gap_minutes=cfg.tracker.max_tracking_gap_minutes,
             max_speed_ms=cfg.tracker.max_speed_ms,
             max_speed_multiplier=cfg.tracker.max_speed_multiplier,

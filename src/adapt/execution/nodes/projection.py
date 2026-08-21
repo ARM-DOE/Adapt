@@ -60,7 +60,7 @@ class ProjectionModule(BaseModule):
             max_flow_magnitude=cfg.projector.max_flow_magnitude,
             registration_step_minutes=cfg.projector.registration_step_minutes,
             projection_horizon_minutes=cfg.projector.projection_horizon_minutes,
-            reflectivity_var=cfg.global_.var_names.reflectivity,
+            reflectivity_var=cfg.global_.tracking_field,
         )
 
     def __init__(self) -> None:

@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from adapt.contracts import check_grid_ds_2d, check_segmented_ds
+from adapt.contracts import CELL_LABELS_VAR, check_grid_ds_2d, check_segmented_ds
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.detection.config import DetectionConfig
@@ -54,8 +54,8 @@ class DetectModule(BaseModule):
             min_cellsize_gridpoint=seg.min_cellsize_gridpoint,
             max_cellsize_gridpoint=seg.max_cellsize_gridpoint,
             h_maxima=seg.h_maxima,
-            reflectivity_var=cfg.global_.var_names.reflectivity,
-            labels_var=cfg.global_.var_names.cell_labels,
+            reflectivity_var=cfg.global_.tracking_field,
+            labels_var=CELL_LABELS_VAR,
             z_level=cfg.global_.z_level,
         )
 

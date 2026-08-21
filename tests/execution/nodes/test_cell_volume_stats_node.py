@@ -62,10 +62,10 @@ class TestBuildConfigFixA:
     def test_build_config_injects_globals_without_error(self, internal_config):
         cfg = CellVolumeStatsModule.build_config(internal_config)
         assert isinstance(cfg, CellVolumeStatsConfig)
-        assert cfg.reflectivity_var == internal_config.global_.var_names.reflectivity
-        assert cfg.labels_var == internal_config.global_.var_names.cell_labels
+        assert cfg.reflectivity_var == internal_config.global_.tracking_field
+        assert cfg.labels_var == "cell_labels"
         assert cfg.z_coord == internal_config.global_.coord_names.z
-        # polarimetric var names fall back to config defaults (not in global var_names)
+        # polarimetric var names fall back to config defaults (module-owned, not global)
         assert cfg.zdr_var == "differential_reflectivity"
 
 

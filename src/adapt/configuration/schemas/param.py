@@ -115,13 +115,6 @@ class SegmenterConfig(AdaptBaseModel):
     )
 
 
-class VarNamesConfig(AdaptBaseModel):
-    """Variable name mappings."""
-
-    reflectivity: str = "reflectivity"
-    cell_labels: str = "cell_labels"
-
-
 class CoordNamesConfig(AdaptBaseModel):
     """Coordinate name mappings."""
 
@@ -135,7 +128,14 @@ class GlobalConfig(AdaptBaseModel):
     """Global pipeline settings."""
 
     z_level: float = Field(2000.0, description="Analysis altitude in meters")
-    var_names: VarNamesConfig = Field(default_factory=VarNamesConfig)  # type: ignore[arg-type]
+    tracking_field: str = Field(
+        "reflectivity",
+        description=(
+            "Canonical field that drives detection, projection, and "
+            "tracking. Any canonical variable present after ingest "
+            "(see reader.field_map/fields) is valid."
+        ),
+    )
     coord_names: CoordNamesConfig = Field(default_factory=CoordNamesConfig)  # type: ignore[arg-type]
 
     @field_validator("z_level", mode="before")

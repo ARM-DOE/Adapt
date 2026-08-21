@@ -66,7 +66,6 @@ class UserGlobalConfig(_UserSection):
     """User-facing global config."""
 
     z_level: float | None = None
-    var_names: dict[str, str] | None = None
     coord_names: dict[str, str] | None = None
 
     @field_validator("z_level", mode="before")
@@ -341,9 +340,7 @@ class UserConfig(AdaptBaseModel):
             global_cfg["z_level"] = self.z_level
 
         if self.reflectivity_var is not None:
-            var_names: dict[str, str] = global_cfg.get("var_names", {})
-            var_names["reflectivity"] = self.reflectivity_var
-            global_cfg["var_names"] = var_names
+            global_cfg["tracking_field"] = self.reflectivity_var
 
         # Merge with explicit global config
         if self.global_ is not None:

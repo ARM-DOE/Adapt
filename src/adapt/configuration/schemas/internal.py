@@ -105,13 +105,6 @@ class InternalSegmenterConfig(AdaptBaseModel):
         return data
 
 
-class InternalVarNamesConfig(AdaptBaseModel):
-    """Runtime variable name mappings."""
-
-    reflectivity: str
-    cell_labels: str
-
-
 class InternalCoordNamesConfig(AdaptBaseModel):
     """Runtime coordinate name mappings."""
 
@@ -125,7 +118,7 @@ class InternalGlobalConfig(AdaptBaseModel):
     """Runtime global settings."""
 
     z_level: float
-    var_names: InternalVarNamesConfig
+    tracking_field: str
     coord_names: InternalCoordNamesConfig
 
 

@@ -22,7 +22,7 @@ import logging
 
 import pandas as pd
 
-from adapt.contracts import ProductTableWrite, check_cell_volume_stats
+from adapt.contracts import CELL_LABELS_VAR, ProductTableWrite, check_cell_volume_stats
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig
@@ -62,12 +62,12 @@ class CellVolumeStatsModule(BaseModule):
 
     @classmethod
     def build_config(cls, cfg) -> CellVolumeStatsConfig:
-        # Only inject names that exist in the canonical global var_names; polarimetric
+        # Only inject the global tracking_field + fixed labels name; polarimetric
         # var names fall back to config defaults (or user module_params).
         params = cfg.module_params.get("cell_volume_stats", {})
         return CellVolumeStatsConfig(
-            reflectivity_var=cfg.global_.var_names.reflectivity,
-            labels_var=cfg.global_.var_names.cell_labels,
+            reflectivity_var=cfg.global_.tracking_field,
+            labels_var=CELL_LABELS_VAR,
             z_coord=cfg.global_.coord_names.z,
             y_coord=cfg.global_.coord_names.y,
             x_coord=cfg.global_.coord_names.x,

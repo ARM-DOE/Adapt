@@ -33,9 +33,7 @@ def test_tracking_field_must_be_in_analyzer_whitelist():
     # mid-run in tracking; fail loudly at resolve time instead.
     user = UserConfig(base_dir="/tmp", radar="KHTX")
     with pytest.raises(ConfigError, match="tracking_field"):
-        resolve_config(
-            ParamConfig(**{"global": {"tracking_field": "pressure"}}), user, None
-        )
+        resolve_config(ParamConfig(**{"global": {"tracking_field": "pressure"}}), user, None)
 
 
 def test_tracking_field_must_survive_reader_fields_selection():
@@ -53,4 +51,23 @@ def test_tracking_field_valid_when_whitelisted_and_selected():
         user,
         None,
     )
+    assert cfg.global_.tracking_field == "reflectivity"
+
+
+def test_user_config_can_set_tracking_field():
+    from adapt.configuration.schemas.user import UserGlobalConfig
+
+    user = UserConfig(
+        base_dir="/tmp", radar="KHTX", global_=UserGlobalConfig(tracking_field="velocity")
+    )
+    cfg = resolve_config(ParamConfig(), user, None)
+    assert cfg.global_.tracking_field == "velocity"  # velocity is whitelisted
+
+
+def test_reflectivity_var_alias_is_a_rename_not_a_role_change():
+    # REFLECTIVITY_VAR="dbz" = "my file calls reflectivity dbz": ingest
+    # renames dbz -> reflectivity; the core keeps tracking 'reflectivity'.
+    user = UserConfig(base_dir="/tmp", radar="KHTX", reflectivity_var="dbz")
+    cfg = resolve_config(ParamConfig(), user, None)
+    assert cfg.reader.field_map == {"dbz": "reflectivity"}
     assert cfg.global_.tracking_field == "reflectivity"

@@ -66,6 +66,7 @@ class UserGlobalConfig(_UserSection):
     """User-facing global config."""
 
     z_level: float | None = None
+    tracking_field: str | None = None
     coord_names: dict[str, str] | None = None
 
     @field_validator("z_level", mode="before")
@@ -339,9 +340,6 @@ class UserConfig(AdaptBaseModel):
         if self.z_level is not None:
             global_cfg["z_level"] = self.z_level
 
-        if self.reflectivity_var is not None:
-            global_cfg["tracking_field"] = self.reflectivity_var
-
         # Merge with explicit global config
         if self.global_ is not None:
             global_cfg.update(self.global_.model_dump(exclude_none=True))
@@ -383,5 +381,15 @@ class UserConfig(AdaptBaseModel):
         for key, value in (self.model_extra or {}).items():
             if key in _PASSTHROUGH_SECTIONS and isinstance(value, dict):
                 overrides[key] = value
+
+        # REFLECTIVITY_VAR means "my file calls reflectivity <name>" — a NAME
+        # mapping, so it becomes an ingest rename to the canonical name, not
+        # a change of which field the core tracks on. Applied after the
+        # passthrough loop so an explicit reader section is merged, not
+        # clobbered; an explicit field_map entry for the same source wins.
+        if self.reflectivity_var is not None and self.reflectivity_var != "reflectivity":
+            reader = overrides.setdefault("reader", {})
+            field_map = reader.setdefault("field_map", {})
+            field_map.setdefault(self.reflectivity_var, "reflectivity")
 
         return overrides

@@ -71,7 +71,9 @@ def test_process_file_persists_all_declared_outputs(
         "cell_adjacency": pd.DataFrame(
             {"cell_label_a": [], "cell_label_b": [], "touching_boundary_pixels": []}
         ),
-        "tracked_cells": pd.DataFrame({"cell_label": [1], "cell_uid": ["uid-1"]}),
+        "tracked_cells": pd.DataFrame(
+            {"cell_label": [1], "cell_uid": ["uid-1"], "area": [10.0], "max_reflectivity": [45.0]}
+        ),
         "cell_events": pd.DataFrame(
             {
                 "event_type": ["INITIATION"],

@@ -788,9 +788,12 @@ class TrackStore:
         uid_col = _uid_col(tracked_cells_df)
         for _, tc in tracked_cells_df.iterrows():
             tid = str(tc[uid_col])
+            # Strict reads: these columns are part of the tracked_cells
+            # contract; a missing one is an upstream bug and a silent 0.0
+            # here would corrupt every lifecycle summary undetected.
             active[tid] = {
-                "area": float(tc.get("area", 0) or 0),
-                "refl": float(tc.get("max_reflectivity", 0) or 0),
+                "area": float(tc["area"]),
+                "refl": float(tc["max_reflectivity"]),
             }
 
         # Classify events for origin/termination

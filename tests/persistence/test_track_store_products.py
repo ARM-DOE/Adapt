@@ -176,3 +176,19 @@ class TestScience:
         assert s1_cells.loc[0, "is_split_source_here"] == 1
         assert events_df.loc[0, "source_scan_id"] == "s1"
         assert events_df.loc[0, "target_scan_id"] == "s2"
+
+
+class TestStrictTrackedColumns:
+    def test_missing_max_reflectivity_column_raises(self, collection, ledger):
+        # A tracked_cells frame without max_reflectivity must raise loudly,
+        # never write 0.0 into cell_tracks (silent corruption).
+        bad_tracked = pd.DataFrame({"cell_label": [1], "cell_uid": ["u1"], "area": [10.0]})
+        with pytest.raises(KeyError, match="max_reflectivity"):
+            _write(collection, ledger, "s1", tracked=bad_tracked)
+
+    def test_missing_area_column_raises(self, collection, ledger):
+        bad_tracked = pd.DataFrame(
+            {"cell_label": [1], "cell_uid": ["u1"], "max_reflectivity": [45.0]}
+        )
+        with pytest.raises(KeyError, match="area"):
+            _write(collection, ledger, "s1", tracked=bad_tracked)

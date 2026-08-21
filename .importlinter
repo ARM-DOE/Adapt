@@ -42,9 +42,6 @@ include_external_packages = False
 # contracts      types + check_* validators; zero adapt imports
 # downloaders    boto3/S3 isolation; zero adapt imports
 # utils          shared pure functions; zero adapt imports
-#
-# `data` and `extensions` are empty reserved packages, ignored here.
-# Delete them (and the exhaustive_ignores line) or give them a layer.
 
 [importlinter:contract:layers]
 name = Adapt layer stack
@@ -52,9 +49,6 @@ type = layers
 containers =
     adapt
 exhaustive = true
-exhaustive_ignores =
-    data
-    extensions
 layers =
     cli
     consumers | visualization
@@ -85,23 +79,3 @@ forbidden_modules =
     adapt.runtime
     adapt.execution
 allow_indirect_imports = True
-
-# ==========================================================
-# 3. Core must not depend on optional extensions
-# ==========================================================
-#
-# adapt.extensions is reserved for optional plug-ins and is excluded
-# from the layer stack, so this explicit ban keeps core independent
-# of it. If core imports extensions, they stop being optional.
-
-[importlinter:contract:core_not_depend_on_extensions]
-name = Core packages do not depend on extensions
-type = forbidden
-source_modules =
-    adapt.modules
-    adapt.runtime
-    adapt.persistence
-    adapt.execution
-    adapt.configuration
-forbidden_modules =
-    adapt.extensions

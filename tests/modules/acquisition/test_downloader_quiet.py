@@ -18,7 +18,7 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_download_scan_suppresses_conn_stdout(tmp_path, fake_scan, make_config, capsys):
+def test_download_scan_suppresses_conn_stdout(fake_scan, fake_gateway, make_config, capsys):
     class PrintingConn:
         def download(self, files, basepath, keep_aws_folders=False):
             print("Downloaded KOHX_TEST")  # backend chatter
@@ -30,9 +30,9 @@ def test_download_scan_suppresses_conn_stdout(tmp_path, fake_scan, make_config, 
 
             return _Results()
 
-    d = AwsNexradDownloader(make_config(), output_dir=tmp_path, conn=PrintingConn())
+    d = AwsNexradDownloader(make_config(), acquire=fake_gateway, conn=PrintingConn())
 
-    d._download_scan(fake_scan("KOHX_TEST", datetime.now(UTC)), tmp_path / "out.nc")
+    d._download_scan(fake_scan("KOHX_TEST", datetime.now(UTC)))
 
     out = capsys.readouterr().out
     assert "out of 1 files downloaded" not in out

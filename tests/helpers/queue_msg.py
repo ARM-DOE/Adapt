@@ -1,24 +1,28 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Processor queue-message builder for tests.
+"""Acquired-scan queue-message builder for tests.
 
-The processor rejects bare path strings: every message carries the scan_id
-minted at the source boundary plus the source-parsed scan_time.
+The processor resolves the raw object through the store, so a test message
+must come from a real acquisition: this helper writes a synthetic raw file
+and commits it through the run's acquisition gateway.
 """
 
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 _DEFAULT_SCAN_TIME = datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC)
 
 
-def msg(path: str, scan_id: str | None = None, scan_time: datetime | None = _DEFAULT_SCAN_TIME):
-    """Queue message for *path*; scan_id defaults to a stem-derived test id."""
-    return {
-        "path": path,
-        "scan_id": scan_id or f"sid-{Path(path).stem}",
-        "scan_time": scan_time,
-        "queued_at": time.time(),
-    }
+def msg(
+    store_env,
+    tmp_path,
+    name: str,
+    scan_time: datetime | None = _DEFAULT_SCAN_TIME,
+    payload: bytes | None = None,
+) -> dict:
+    """Acquire a synthetic raw file named *name*; returns the queue message."""
+    filename = Path(name).name
+    path = Path(tmp_path) / filename
+    path.write_bytes(payload if payload is not None else filename.encode())
+    return store_env.acquirer.acquire_file(path, source_uri=str(path), scan_time=scan_time)

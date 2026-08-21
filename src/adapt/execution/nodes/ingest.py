@@ -59,6 +59,8 @@ class LoadModule(BaseModule):
     def build_config(cls, cfg) -> IngestConfig:
         return IngestConfig(
             file_format=cfg.reader.file_format,
+            field_map=cfg.reader.field_map,
+            fields=tuple(cfg.reader.fields),
             grid_shape=cfg.regridder.grid_shape,
             grid_limits=cfg.regridder.grid_limits,
             roi_func=cfg.regridder.roi_func,

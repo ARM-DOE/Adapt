@@ -14,6 +14,8 @@ class IngestConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     file_format: str
+    field_map: dict[str, str]
+    fields: tuple[str, ...]
     grid_shape: tuple[int, int, int]
     grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
     roi_func: str

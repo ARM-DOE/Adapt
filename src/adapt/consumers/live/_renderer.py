@@ -157,8 +157,7 @@ def render_scan(
         # Visible fallback until the role binding reaches renderers
         # (phase 3 of the field-generic plan): never substitute silently.
         logger.warning(
-            "Selected variable %r not in scan (available: %s) — falling back "
-            "to 'reflectivity'",
+            "Selected variable %r not in scan (available: %s) — falling back to 'reflectivity'",
             view.var_name,
             sorted(str(v) for v in ds.data_vars),
         )

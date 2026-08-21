@@ -103,4 +103,3 @@ class StoreExecutionHistory:
             scans_processed=summary.scans_processed,
             scans_failed=summary.failures,
         )
-

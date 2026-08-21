@@ -17,6 +17,7 @@ Key capabilities:
 Author: Bhupendra Raut
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,8 @@ class RadarDataLoader:
         >>> loader = RadarDataLoader(config)
         """
         self.file_format = config.file_format
+        self.field_map = dict(config.field_map)
+        self.fields = tuple(config.fields)
         self.grid_shape = config.grid_shape
         self.grid_limits = config.grid_limits
         self.roi_func = config.roi_func
@@ -231,10 +234,43 @@ class RadarDataLoader:
         ds = grid.to_xarray()
         logger.debug("Success: regrid to xarray.Dataset")
 
+        ds = self._canonicalize_fields(ds)
+
         ds.attrs["radar_latitude"] = float(radar.latitude["data"][0])
         ds.attrs["radar_longitude"] = float(radar.longitude["data"][0])
         ds.attrs["radar_altitude"] = float(radar.altitude["data"][0])
 
+        return ds
+
+    def _canonicalize_fields(self, ds: xr.Dataset) -> xr.Dataset:
+        """Source names -> canonical names, once, at the boundary.
+
+        Renames per config field_map (entries whose source variable is
+        absent are ignored — the fields check below decides whether that
+        is an error), then drops variables not in the explicit fields
+        list. Records which source field produced each canonical variable
+        in attrs["source_fields_json"].
+        """
+        applied = {src: canon for src, canon in self.field_map.items() if src in ds.data_vars}
+        if applied:
+            ds = ds.rename(applied)
+
+        if self.fields:
+            missing = [f for f in self.fields if f not in ds.data_vars]
+            if missing:
+                raise ValueError(
+                    f"Ingest field selection failed: canonical field(s) "
+                    f"{', '.join(missing)} not present after applying "
+                    f"reader.field_map. Available: "
+                    f"{sorted(str(v) for v in ds.data_vars)}. Fix "
+                    "reader.field_map / reader.fields in the run "
+                    "configuration."
+                )
+            ds = ds[list(self.fields)]
+
+        ds.attrs["source_fields_json"] = json.dumps(
+            {canon: src for src, canon in applied.items()}, sort_keys=True
+        )
         return ds
 
     def load_and_regrid(

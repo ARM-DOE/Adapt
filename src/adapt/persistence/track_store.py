@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""TrackStore — read/write the three track persistence tables in catalog.db.
+"""TrackStore — read/write the three track persistence tables.
 
 Tables managed:
 - cells_by_scan : one row per active tracked cell per scan (wide canonical table)
@@ -10,24 +10,169 @@ Tables managed:
 
 A "track" is a single connected chain of cell observations across scans identified by
 a stable cell_uid.
+
+The tables live in the collection's products.db: created with bespoke DDL
+(composite UNIQUE + retroactive-update SQL the generic writer cannot express)
+and frozen through the shared SchemaLedger on the first write — new columns
+are rejected forever after; there is no ALTER.
 """
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import sqlite3
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from adapt.persistence.errors import StoreError
+from adapt.persistence.products import (
+    TableDeclaration,
+    _sqlite_type,
+)
 from adapt.utils.time import from_scan_iso, to_scan_iso
+
+if TYPE_CHECKING:
+    from adapt.persistence.products import SchemaLedger
 
 __all__ = ["TrackStore"]
 
 logger = logging.getLogger(__name__)
+
+# Fixed cells_by_scan columns (name, type) in DDL order; per-run cell_stats
+# payload columns are appended at first-frame freeze.
+_CBS_FIXED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("run_id", "TEXT"),
+    ("scan_id", "TEXT"),
+    ("scan_time", "TEXT"),
+    ("cell_label", "INTEGER"),
+    ("cell_uid", "TEXT"),
+    ("cell_area_sqkm", "REAL"),
+    ("cell_centroid_mass_lat", "REAL"),
+    ("cell_centroid_mass_lon", "REAL"),
+    ("cell_centroid_geom_x", "REAL"),
+    ("cell_centroid_geom_y", "REAL"),
+    ("radar_reflectivity_max", "REAL"),
+    ("radar_reflectivity_mean", "REAL"),
+    ("radar_differential_reflectivity_max", "REAL"),
+    ("area_40dbz_km2", "REAL"),
+    ("n_adjacent_cells", "INTEGER"),
+    ("adjacent_cell_uids_json", "TEXT"),
+    ("is_initiated_here", "INTEGER"),
+    ("is_split_target_here", "INTEGER"),
+    ("is_merge_target_here", "INTEGER"),
+    ("age_seconds", "REAL"),
+    ("is_split_source_here", "INTEGER"),
+    ("is_merge_source_here", "INTEGER"),
+    ("is_terminated_after_here", "INTEGER"),
+)
+
+_CBS_NOT_NULL = {"run_id", "scan_id", "scan_time", "cell_label", "cell_uid"}
+
+_CELL_EVENTS_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("event_id", "INTEGER"),
+    ("run_id", "TEXT"),
+    ("source_scan_id", "TEXT"),
+    ("target_scan_id", "TEXT"),
+    ("source_scan_time", "TEXT"),
+    ("target_scan_time", "TEXT"),
+    ("event_type", "TEXT"),
+    ("source_cell_uid", "TEXT"),
+    ("target_cell_uid", "TEXT"),
+    ("source_cell_label", "INTEGER"),
+    ("target_cell_label", "INTEGER"),
+    ("cost", "REAL"),
+    ("is_dominant", "INTEGER"),
+    ("event_group_id", "TEXT"),
+    ("candidate_opc", "REAL"),
+    ("candidate_ocp", "REAL"),
+    ("candidate_centroid_distance_m", "REAL"),
+    ("candidate_speed_ms", "REAL"),
+    ("candidate_heading_change_deg", "REAL"),
+    ("candidate_area_ratio", "REAL"),
+    ("candidate_final_cost", "REAL"),
+    ("match_method", "TEXT"),
+)
+
+_CELL_TRACKS_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("run_id", "TEXT"),
+    ("cell_uid", "TEXT"),
+    ("first_seen_time", "TEXT"),
+    ("last_seen_time", "TEXT"),
+    ("n_scans", "INTEGER"),
+    ("origin_type", "TEXT"),
+    ("origin_event_group_id", "TEXT"),
+    ("origin_n_parents", "INTEGER"),
+    ("origin_primary_parent_cell_uid", "TEXT"),
+    ("termination_type", "TEXT"),
+    ("termination_event_group_id", "TEXT"),
+    ("terminated_into_cell_uid", "TEXT"),
+    ("duration_seconds", "REAL"),
+    ("max_area_sqkm", "REAL"),
+    ("max_reflectivity", "REAL"),
+)
+
+_CELL_EVENTS_DDL = """
+CREATE TABLE cell_events (
+    event_id           INTEGER PRIMARY KEY,
+    run_id             TEXT NOT NULL,
+    source_scan_id     TEXT,
+    target_scan_id     TEXT,
+    source_scan_time   TEXT,
+    target_scan_time   TEXT,
+    event_type         TEXT NOT NULL,
+    source_cell_uid    TEXT,
+    target_cell_uid    TEXT,
+    source_cell_label  INTEGER,
+    target_cell_label  INTEGER,
+    cost               REAL,
+    is_dominant        INTEGER NOT NULL DEFAULT 0,
+    event_group_id     TEXT NOT NULL,
+    candidate_opc                      REAL,
+    candidate_ocp                      REAL,
+    candidate_centroid_distance_m      REAL,
+    candidate_speed_ms                 REAL,
+    candidate_heading_change_deg       REAL,
+    candidate_area_ratio               REAL,
+    candidate_final_cost               REAL,
+    match_method                       TEXT
+)
+"""
+
+_CELL_TRACKS_DDL = """
+CREATE TABLE cell_tracks (
+    run_id                          TEXT NOT NULL,
+    cell_uid                        TEXT NOT NULL,
+    first_seen_time                 TEXT NOT NULL,
+    last_seen_time                  TEXT NOT NULL,
+    n_scans                         INTEGER NOT NULL DEFAULT 0,
+    origin_type                     TEXT NOT NULL,
+    origin_event_group_id           TEXT,
+    origin_n_parents                INTEGER NOT NULL DEFAULT 0,
+    origin_primary_parent_cell_uid  TEXT,
+    termination_type                TEXT NOT NULL DEFAULT 'ACTIVE_AT_END',
+    termination_event_group_id      TEXT,
+    terminated_into_cell_uid        TEXT,
+    duration_seconds                REAL NOT NULL DEFAULT 0,
+    max_area_sqkm                   REAL,
+    max_reflectivity                REAL,
+    PRIMARY KEY (run_id, cell_uid)
+)
+"""
+
+_TRACK_INDEX_DDL = (
+    "CREATE INDEX idx_cbs_track ON cells_by_scan(run_id, cell_uid, scan_time)",
+    "CREATE INDEX idx_cbs_scan  ON cells_by_scan(run_id, scan_id)",
+    "CREATE INDEX idx_cbs_time  ON cells_by_scan(run_id, scan_time)",
+    "CREATE INDEX idx_cbs_label ON cells_by_scan(run_id, cell_label, scan_time)",
+    "CREATE INDEX idx_ce_source ON cell_events(run_id, source_cell_uid)",
+    "CREATE INDEX idx_ce_target ON cell_events(run_id, target_cell_uid)",
+    "CREATE INDEX idx_ce_group  ON cell_events(run_id, event_group_id)",
+    "CREATE INDEX idx_cell_tracks_run ON cell_tracks(run_id)",
+)
 
 _FIXED_CBS_COLS = {
     "run_id",
@@ -77,15 +222,14 @@ def _target_uid(ev: pd.Series):
 
 
 class TrackStore:
-    """Read/write track persistence tables in catalog.db.
+    """Read/write track persistence tables in a collection's products.db.
 
     Thread-safe via SQLite WAL mode and an internal lock.
-    Opens its own connection to the same catalog.db used by RadarCatalog.
     """
 
-    def __init__(self, db_path: Path, readonly: bool = False):
+    def __init__(self, db_path: Path, ledger: SchemaLedger):
         self._db_path = Path(db_path)
-        self._readonly = readonly
+        self._ledger = ledger
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
 
@@ -101,29 +245,14 @@ class TrackStore:
 
     def _connect(self) -> sqlite3.Connection:
         if self._conn is None:
-            if self._readonly:
-                # immutable=1 bypasses WAL processing entirely — the reader sees
-                # only checkpointed (committed) data in the main db file and never
-                # writes to the shm/wal sidecar files. This lets the dashboard
-                # open a pipeline's catalog.db without needing write access to
-                # the directory.
-                uri = f"file:{self._db_path}?mode=ro&immutable=1"
-                self._conn = sqlite3.connect(
-                    uri,
-                    uri=True,
-                    check_same_thread=False,
-                    isolation_level=None,
-                )
-            else:
-                self._conn = sqlite3.connect(
-                    str(self._db_path),
-                    check_same_thread=False,
-                    isolation_level="DEFERRED",
-                )
-                self._conn.execute("PRAGMA journal_mode=WAL")
-                self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn = sqlite3.connect(
+                str(self._db_path),
+                check_same_thread=False,
+                isolation_level="DEFERRED",
+            )
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.row_factory = sqlite3.Row
-            self._assert_schema(self._conn)
         return self._conn
 
     def close(self) -> None:
@@ -171,8 +300,8 @@ class TrackStore:
         conn = self._connect()
 
         with self._lock:
-            # 1. Ensure all cell_stats columns exist in cells_by_scan
-            self._ensure_columns(conn, cell_stats_df)
+            # 1. First write freezes the schema; new columns are rejected after.
+            self._ensure_frozen(conn, cell_stats_df)
 
             # 1b. Fetch first_seen_time for all active tracks (age computation)
             uid_col = _uid_col(tracked_cells_df)
@@ -276,68 +405,6 @@ class TrackStore:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _assert_schema(self, conn: sqlite3.Connection) -> None:
-        """Fail-fast check for expected (post-rename) schema.
-
-        This codebase intentionally does not attempt to migrate older schemas.
-        If a legacy schema is detected, instruct the user to recreate catalog.db.
-        """
-        tables = {
-            r["name"]
-            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
-
-        legacy = sorted(t for t in ("tracks", "track_events") if t in tables)
-        if legacy:
-            raise RuntimeError(
-                f"Legacy tracking schema detected (tables={legacy}). "
-                "Recreate catalog.db (delete it and rerun the pipeline)."
-            )
-
-        required = {"cells_by_scan", "cell_events", "cell_tracks"}
-        missing = sorted(required - tables)
-        if missing:
-            raise RuntimeError(
-                f"Missing required tracking tables {missing}. "
-                "Ensure catalog.db was created with the current schema."
-            )
-
-        cbs_cols = {r[1] for r in conn.execute("PRAGMA table_info(cells_by_scan)").fetchall()}
-        if "n_adjacent_tracks" in cbs_cols or any(c.endswith("_index") for c in cbs_cols):
-            raise RuntimeError(
-                "Legacy index/adjacency columns detected in cells_by_scan. "
-                "Recreate catalog.db (delete it and rerun the pipeline)."
-            )
-        if "n_adjacent_cells" not in cbs_cols:
-            raise RuntimeError(
-                "cells_by_scan schema mismatch (missing n_adjacent_cells). "
-                "Ensure catalog.db was created with the current schema."
-            )
-        if "scan_id" not in cbs_cols:
-            raise RuntimeError(
-                "cells_by_scan predates scan identity (missing scan_id column). "
-                "Recreate catalog.db (delete it and rerun the pipeline)."
-            )
-
-        ct_cols = {r[1] for r in conn.execute("PRAGMA table_info(cell_tracks)").fetchall()}
-        if any(c.endswith("_index") for c in ct_cols):
-            raise RuntimeError(
-                "Legacy index columns detected in cell_tracks. "
-                "Recreate catalog.db (delete it and rerun the pipeline)."
-            )
-
-        ce_cols = {r[1] for r in conn.execute("PRAGMA table_info(cell_events)").fetchall()}
-        if any(c.endswith("_index") for c in ce_cols):
-            raise RuntimeError(
-                "Legacy index columns detected in cell_events. "
-                "Recreate catalog.db (delete it and rerun the pipeline)."
-            )
-        if not {"source_scan_id", "target_scan_id"} <= ce_cols:
-            raise RuntimeError(
-                "cell_events predates scan identity (missing source/target_scan_id). "
-                "Recreate catalog.db (delete it and rerun the pipeline)."
-            )
-
     def _build_uid_adjacency_summary(
         self,
         tracked_cells_df: pd.DataFrame,
@@ -407,15 +474,70 @@ class TrackStore:
                 "upsert (an observation would be silently overwritten)"
             )
 
-    def _ensure_columns(self, conn: sqlite3.Connection, cell_stats_df: pd.DataFrame) -> None:
-        existing = {r[1] for r in conn.execute("PRAGMA table_info(cells_by_scan)").fetchall()}
-        for col in cell_stats_df.columns:
-            if col in _SKIP_FROM_CELL_STATS or col in _FIXED_CBS_COLS or col in existing:
-                continue
-            sql_type = _infer_sql_type(col)
-            with contextlib.suppress(sqlite3.OperationalError):
-                conn.execute(f"ALTER TABLE cells_by_scan ADD COLUMN {col} {sql_type}")
-                # logger.info("cells_by_scan: added column %s %s", col, sql_type)
+    def _ensure_frozen(self, conn: sqlite3.Connection, cell_stats_df: pd.DataFrame) -> None:
+        """First tracking write freezes all three tables; new columns raise forever after."""
+        frozen = self._ledger.frozen("cells_by_scan")
+        if frozen is not None:
+            frozen_names = {name for name, _ in frozen.columns}
+            novel = sorted(
+                c
+                for c in cell_stats_df.columns
+                if c not in _SKIP_FROM_CELL_STATS and c not in frozen_names
+            )
+            if novel:
+                raise StoreError(
+                    f"cells_by_scan: column(s) {', '.join(novel)} are not in the frozen "
+                    "first-frame schema — module outputs may not add columns mid-run"
+                )
+            return
+
+        extra = tuple(
+            (c, _sqlite_type(cell_stats_df[c]))
+            for c in cell_stats_df.columns
+            if c not in _SKIP_FROM_CELL_STATS and c not in {name for name, _ in _CBS_FIXED_COLUMNS}
+        )
+        cbs_columns = _CBS_FIXED_COLUMNS + extra
+        col_defs = ", ".join(
+            f"{name} {sql_type}{' NOT NULL' if name in _CBS_NOT_NULL else ''}"
+            for name, sql_type in cbs_columns
+        )
+        conn.execute(
+            f"CREATE TABLE cells_by_scan ({col_defs}, "
+            "PRIMARY KEY (run_id, scan_id, cell_uid), UNIQUE (run_id, scan_id, cell_label))"
+        )
+        conn.execute(_CELL_EVENTS_DDL)
+        conn.execute(_CELL_TRACKS_DDL)
+        for ddl in _TRACK_INDEX_DDL:
+            conn.execute(ddl)
+        conn.commit()
+
+        for decl in (
+            TableDeclaration(
+                table="cells_by_scan",
+                owner_module="tracking",
+                granularity="scan",
+                primary_key=("run_id", "scan_id", "cell_uid"),
+                index_columns=("cell_uid", "scan_time", "cell_label"),
+                columns=cbs_columns,
+            ),
+            TableDeclaration(
+                table="cell_events",
+                owner_module="tracking",
+                granularity="run",
+                primary_key=("event_id",),
+                index_columns=("source_cell_uid", "target_cell_uid", "event_group_id"),
+                columns=_CELL_EVENTS_COLUMNS,
+            ),
+            TableDeclaration(
+                table="cell_tracks",
+                owner_module="tracking",
+                granularity="run",
+                primary_key=("run_id", "cell_uid"),
+                index_columns=(),
+                columns=_CELL_TRACKS_COLUMNS,
+            ),
+        ):
+            self._ledger.register_external(decl)
 
     def _build_cells_rows(
         self,
@@ -795,26 +917,3 @@ def _to_iso(dt: datetime) -> str:
     # Single authoritative scan-time format lives in adapt.utils.time.to_scan_iso
     # so cells_by_scan and every derived module table share one join-key string.
     return to_scan_iso(dt)
-
-
-def _infer_sql_type(col: str) -> str:
-    col_l = col.lower()
-    _real_suffixes = (
-        "_lat",
-        "_lon",
-        "_mean",
-        "_max",
-        "_min",
-        "_sqkm",
-        "_km2",
-        "_std",
-        "_p25",
-        "_p75",
-    )
-    if any(col_l.endswith(s) for s in _real_suffixes):
-        return "REAL"
-    if any(col_l.endswith(s) for s in ("_x", "_y", "_count", "_pixels", "_index")):
-        return "INTEGER"
-    if col_l.startswith("radar_"):
-        return "REAL"
-    return "TEXT"

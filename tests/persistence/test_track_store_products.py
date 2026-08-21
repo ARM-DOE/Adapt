@@ -1,0 +1,169 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
+"""TrackStore on products.db: first-write freeze via SchemaLedger, no ALTER ever."""
+
+import sqlite3
+from datetime import UTC, datetime, timedelta
+
+import pandas as pd
+import pytest
+
+from adapt.persistence.errors import StoreError
+from adapt.persistence.products import SchemaLedger
+from adapt.persistence.store import Store, init_store
+from adapt.persistence.track_store import TrackStore
+
+pytestmark = pytest.mark.unit
+
+SCAN_TIME = datetime(2026, 8, 13, 17, 31, 58, tzinfo=UTC)
+RUN = "run-1"
+
+
+def _stats(labels, extra_cols=None):
+    data = {"cell_label": labels, "cell_area_sqkm": [10.0] * len(labels)}
+    data.update(extra_cols or {})
+    return pd.DataFrame(data)
+
+
+def _tracked(pairs):
+    return pd.DataFrame(
+        {
+            "cell_label": [label for label, _ in pairs],
+            "cell_uid": [uid for _, uid in pairs],
+            "area": [10.0] * len(pairs),
+            "max_reflectivity": [45.0] * len(pairs),
+        }
+    )
+
+
+def _no_events():
+    return pd.DataFrame()
+
+
+def _no_adjacency():
+    return pd.DataFrame(columns=["cell_label_a", "cell_label_b", "touching_boundary_pixels"])
+
+
+@pytest.fixture
+def collection(tmp_path):
+    root = init_store(tmp_path / "store")
+    store = Store.open(root)
+    yield store.collection("KILX")
+    store.close()
+
+
+@pytest.fixture
+def ledger(collection):
+    return SchemaLedger(collection.products_path, collection.catalog)
+
+
+def _write(collection, ledger, scan_id, offset_s=0, stats=None, tracked=None, events=None):
+    with TrackStore(collection.products_path, ledger=ledger) as ts:
+        ts.write_scan(
+            run_id=RUN,
+            scan_time=SCAN_TIME + timedelta(seconds=offset_s),
+            cell_stats_df=_stats([1]) if stats is None else stats,
+            tracked_cells_df=_tracked([(1, "u1")]) if tracked is None else tracked,
+            cell_events_df=_no_events() if events is None else events,
+            cell_adjacency_df=_no_adjacency(),
+            scan_id=scan_id,
+        )
+
+
+def _table_info(collection, table):
+    conn = sqlite3.connect(collection.products_path)
+    try:
+        return conn.execute(f"PRAGMA table_info({table})").fetchall()
+    finally:
+        conn.close()
+
+
+class TestFreezeOnFirstWrite:
+    def test_first_write_creates_three_tables_and_snapshots(self, collection, ledger):
+        _write(collection, ledger, "s1", stats=_stats([1], {"custom_metric": [3.5]}))
+
+        for table in ("cells_by_scan", "cell_events", "cell_tracks"):
+            frozen = ledger.frozen(table)
+            assert frozen is not None, table
+            assert frozen.owner_module == "tracking"
+            assert _table_info(collection, table), table
+
+        cbs_cols = {name for name, _ in ledger.frozen("cells_by_scan").columns}
+        assert "custom_metric" in cbs_cols
+        assert {"run_id", "scan_id", "scan_time", "cell_uid", "cell_label"} <= cbs_cols
+
+    def test_duplicate_label_within_scan_raises(self, collection, ledger):
+        _write(collection, ledger, "s1")
+
+        with pytest.raises(ValueError, match="duplicate"):
+            _write(
+                collection,
+                ledger,
+                "s2",
+                offset_s=300,
+                stats=_stats([1, 1]),
+                tracked=_tracked([(1, "u1"), (1, "u2")]),
+            )
+
+    def test_new_stats_column_after_freeze_raises(self, collection, ledger):
+        _write(collection, ledger, "s1")
+
+        with pytest.raises(StoreError, match="late_arrival"):
+            _write(
+                collection,
+                ledger,
+                "s2",
+                offset_s=300,
+                stats=_stats([1], {"late_arrival": [1.0]}),
+            )
+
+    def test_construction_requires_the_ledger(self, collection):
+        with pytest.raises(TypeError):
+            TrackStore(collection.products_path)  # type: ignore[call-arg]
+
+
+class TestScience:
+    def test_track_continuity_and_age_across_scans(self, collection, ledger):
+        _write(collection, ledger, "s1")
+        _write(collection, ledger, "s2", offset_s=300)
+
+        with TrackStore(collection.products_path, ledger=ledger) as ts:
+            history = ts.get_track_history(RUN, "u1")
+            tracks = ts.get_cell_tracks(RUN)
+        assert list(history["scan_id"]) == ["s1", "s2"]
+        assert history["age_seconds"].tolist() == [0.0, 300.0]
+        assert tracks.loc[0, "n_scans"] == 2
+
+    def test_retroactive_split_flag_on_previous_scan(self, collection, ledger):
+        _write(collection, ledger, "s1")
+        events = pd.DataFrame(
+            [
+                {
+                    "event_type": "SPLIT",
+                    "source_cell_uid": "u1",
+                    "target_cell_uid": "u2",
+                    "source_cell_label": 1,
+                    "target_cell_label": 2,
+                    "cost": 0.1,
+                    "is_dominant": True,
+                    "event_group_id": "g1",
+                }
+            ]
+        )
+        _write(
+            collection,
+            ledger,
+            "s2",
+            offset_s=300,
+            stats=_stats([1, 2]),
+            tracked=_tracked([(1, "u1"), (2, "u2")]),
+            events=events,
+        )
+
+        with TrackStore(collection.products_path, ledger=ledger) as ts:
+            s1_cells = ts.get_cells_by_scan(RUN, "s1")
+            events_df = ts.get_cell_events(RUN, "u1")
+        assert s1_cells.loc[0, "is_split_source_here"] == 1
+        assert events_df.loc[0, "source_scan_id"] == "s1"
+        assert events_df.loc[0, "target_scan_id"] == "s2"

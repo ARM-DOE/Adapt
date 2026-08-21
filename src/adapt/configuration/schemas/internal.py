@@ -32,6 +32,8 @@ class InternalReaderConfig(AdaptBaseModel):
     """Runtime reader configuration."""
 
     file_format: Literal["nexrad_archive"]
+    field_map: dict[str, str]
+    fields: list[str]
 
 
 class InternalDownloaderConfig(AdaptBaseModel):

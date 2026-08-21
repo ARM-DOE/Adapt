@@ -32,6 +32,20 @@ class ReaderConfig(AdaptBaseModel):
     """Radar file reader configuration."""
 
     file_format: Literal["nexrad_archive"] = "nexrad_archive"
+    field_map: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Source-to-canonical variable renames applied once at ingest, "
+            "e.g. {corrected_reflectivity: reflectivity}. Empty = no renames."
+        ),
+    )
+    fields: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Canonical variable names to keep (post-rename). Empty = keep "
+            "every field the source file provides."
+        ),
+    )
 
 
 class DownloaderConfig(AdaptBaseModel):

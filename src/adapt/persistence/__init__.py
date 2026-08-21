@@ -1,11 +1,22 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Core infrastructure for Adapt radar processing pipeline.
+"""The Adapt data store: registry + per-collection catalog/products/objects.
 
-This module provides centralized data management through the DataRepository class.
+The store layout is created by ``adapt init`` (see :func:`init_store`); the
+runtime composes these components, and every consumer reads through
+``adapt.api.StoreClient``.
 """
 
-from adapt.persistence.repository import DataRepository, ProductType
+from adapt.persistence.errors import AlreadyInitializedError, StoreError
+from adapt.persistence.store import Collection, Store, init_store
+from adapt.persistence.store_registry import StoreRegistry
 
-__all__ = ["DataRepository", "ProductType"]
+__all__ = [
+    "AlreadyInitializedError",
+    "Collection",
+    "Store",
+    "StoreError",
+    "StoreRegistry",
+    "init_store",
+]

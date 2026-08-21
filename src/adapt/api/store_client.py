@@ -19,6 +19,7 @@ and close the NetCDF file before returning.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -175,6 +176,26 @@ class StoreClient:
         if row is None:
             raise StoreError(f"Run '{run_id}' does not exist")
         return self._run_from_row(row)
+
+    def run_config(self, run_id: str) -> dict:
+        """The resolved configuration this run was executed with.
+
+        Parsed from the run provenance record (registry runs.config_json) —
+        the single authoritative record of per-run settings such as
+        ``global_.tracking_field`` and ``reader.field_map``. Keys use the
+        InternalConfig field spelling (``global_``, not ``global``).
+        """
+        row = (
+            self._registry_conn()
+            .execute("SELECT config_json FROM runs WHERE run_id = ?", (run_id,))
+            .fetchone()
+        )
+        if row is None:
+            raise StoreError(f"Run '{run_id}' does not exist")
+        raw = row["config_json"]
+        if not raw:
+            raise StoreError(f"Run '{run_id}' carries no config provenance")
+        return json.loads(raw)
 
     @staticmethod
     def _run_from_row(row: sqlite3.Row) -> Run:

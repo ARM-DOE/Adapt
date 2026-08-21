@@ -149,3 +149,14 @@ class TestTable:
             client.table(
                 "cell_stats", COLLECTION, filters={"cell_label": {"op": "like", "value": "x"}}
             )
+
+
+class TestRunConfig:
+    def test_run_config_returns_parsed_resolved_config(self, client):
+        cfg = client.run_config(RUN_1)
+        assert cfg["global_"]["tracking_field"] == "reflectivity"
+        assert cfg["global_"]["z_level"] == 2000.0
+
+    def test_run_config_unknown_run_raises(self, client):
+        with pytest.raises(StoreError, match="no-such-run"):
+            client.run_config("no-such-run")

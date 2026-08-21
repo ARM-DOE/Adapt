@@ -14,6 +14,7 @@ read exactly what production writes. Layout built here:
 - a second running run ``run-2`` over the same first volume (cross-run union).
 """
 
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -144,7 +145,12 @@ def build_synthetic_store(tmp_path) -> SimpleNamespace:
                 run_id=run_id,
                 collection_id=COLLECTION,
                 config_hash=f"hash-{run_id}",
-                config_json="{}",
+                # Persisted-key spelling matches production: the orchestrator
+                # writes InternalConfig.model_dump_json() (no aliases), so the
+                # global section is stored under "global_".
+                config_json=json.dumps(
+                    {"global_": {"tracking_field": "reflectivity", "z_level": 2000.0}}
+                ),
                 pipeline_version="1.0",
                 environment_json="{}",
             )

@@ -255,6 +255,41 @@ def test_add_basemap_reuses_cached_tiles_for_unchanged_extent(monkeypatch):
     assert len(ax.images) == 1  # basemap still present on the redrawn frame
 
 
+def test_add_basemap_does_not_retry_a_failed_fetch_for_unchanged_extent(monkeypatch):
+    """An offline fetch failure must be cached like a success: the 500 ms loop
+    redraws the same extent every frame, and re-attempting the network each
+    time stalls the UI for the connect timeout. A changed extent retries."""
+    import adapt.consumers.live._renderer as renderer_mod
+
+    class _OfflineCtx:
+        class providers:
+            class OpenStreetMap:
+                Mapnik = "osm"
+
+        attempts = 0
+
+        @classmethod
+        def add_basemap(cls, ax, **kw):
+            cls.attempts += 1
+            raise ConnectionError("network unreachable")
+
+    monkeypatch.setattr(renderer_mod, "HAS_CTX", True)
+    monkeypatch.setattr(renderer_mod, "ctx", _OfflineCtx)
+
+    _, ax, _ = _fig_axes()
+    x_km = np.arange(10.0)
+    y_km = np.arange(10.0)
+    ds = _located_ds()
+
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)
+    ax.clear()
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)  # same extent: no retry
+    assert _OfflineCtx.attempts == 1
+
+    renderer_mod.add_basemap(ax, ds, np.arange(5.0), np.arange(5.0))  # zoom: retry
+    assert _OfflineCtx.attempts == 2
+
+
 def test_add_basemap_refetches_when_extent_changes(monkeypatch):
     """A zoom (new extent) must fetch fresh tiles — the cache is keyed on extent,
     so a changed view is never served stale tiles."""

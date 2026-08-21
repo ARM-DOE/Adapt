@@ -447,6 +447,8 @@ def add_basemap(ax, ds, x_km, y_km) -> None:
     cached = getattr(ax, "_adapt_basemap", None)
     if cached is not None and cached[0] == key:
         _, array, extent, origin = cached
+        if array is None:  # this extent already failed to fetch; don't re-hit the network
+            return
         # aspect=ax.get_aspect() mirrors contextily (GH251): a bare imshow would
         # force aspect='equal' and squash the radar panel on every redraw.
         ax.imshow(array, extent=extent, origin=origin, aspect=ax.get_aspect(), alpha=0.6, zorder=0)
@@ -466,6 +468,7 @@ def add_basemap(ax, ds, x_km, y_km) -> None:
         )
     except Exception as e:
         logger.warning("Basemap unavailable: %s", e)
+        ax._adapt_basemap = (key, None, None, None)  # negative cache: retry only on zoom
         return
 
     added = [im for im in ax.images if im not in before]

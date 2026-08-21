@@ -23,13 +23,13 @@ def test_priority_score_raises_on_nan_component():
     # NaN scores silently picks an arbitrary cell (silent wrong science).
     cell = make_cell(refl=float("nan"))
     weights = make_config().priority.weights
-    with pytest.raises(ValueError, match="reflectivity_max"):
+    with pytest.raises(ValueError, match="field_max"):
         priority_score(cell, weights)
 
 
 def test_priority_score_names_every_nan_component():
     cell = make_cell(refl=float("nan"), growth=float("nan"))
     weights = make_config().priority.weights
-    pattern = "reflectivity_max.*growth_rate|growth_rate.*reflectivity_max"
+    pattern = "field_max.*growth_rate|growth_rate.*field_max"
     with pytest.raises(ValueError, match=pattern):
         priority_score(cell, weights)

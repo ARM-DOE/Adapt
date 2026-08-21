@@ -34,7 +34,7 @@ class CellSnapshot:
     lat: float
     lon: float
     area_sqkm: float
-    reflectivity_max: float
+    field_max: float  # max of the run's tracking field (see StoreClient.run_config)
     age_seconds: float
     growth_rate_sqkm_per_min: float
     trajectory: tuple[TrajectoryPoint, ...]

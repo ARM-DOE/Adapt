@@ -60,13 +60,13 @@ def is_candidate(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
 
 
 def priority_score(cell: CellSnapshot, weights: PriorityWeights) -> float:
-    """Priority rule: weighted sum of reflectivity, area, growth rate.
+    """Priority rule: weighted sum of tracked-field max, area, growth rate.
 
     NaN components must never rank: 0 * NaN is still NaN, and a NaN score
     makes ``select_best`` pick an arbitrary cell silently.
     """
     components = {
-        "reflectivity_max": cell.reflectivity_max,
+        "field_max": cell.field_max,
         "area_sqkm": cell.area_sqkm,
         "growth_rate_sqkm_per_min": cell.growth_rate_sqkm_per_min,
     }
@@ -78,7 +78,7 @@ def priority_score(cell: CellSnapshot, weights: PriorityWeights) -> float:
             "produced these statistics)"
         )
     return (
-        weights.reflectivity * cell.reflectivity_max
+        weights.field * cell.field_max
         + weights.area * cell.area_sqkm
         + weights.growth_rate * cell.growth_rate_sqkm_per_min
     )

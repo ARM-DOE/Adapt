@@ -29,7 +29,7 @@ _NON_GATE_COLUMNS = frozenset({"run_id", "scan_time", "cell_uid", "cell_label", 
 # Default priority weights. Growth is kept small: on real data the area-slope
 # estimate spikes when cells merge or split, and a large weight lets that noise
 # dominate the score (see the KLOT replay notebook).
-_DEFAULT_WEIGHTS = {"reflectivity": 1.0, "area": 0.05, "growth_rate": 0.2}
+_DEFAULT_WEIGHTS = {"field": 1.0, "area": 0.05, "growth_rate": 0.2}
 _DEFAULT_PROJECTION_STEPS = 3
 
 # Semantic overlay colours — three distinct, colourblind-safe states.
@@ -258,7 +258,7 @@ def _score_terms(cell, cfg: TSEConfig) -> list[tuple[str, float, float]]:
     """The (name, value, weight) triples that sum to the priority score."""
     w = cfg.priority.weights
     return [
-        ("reflectivity_max", cell.reflectivity_max, w.reflectivity),
+        ("field_max", cell.field_max, w.field),
         ("area_sqkm", cell.area_sqkm, w.area),
         ("growth_km2/min", cell.growth_rate_sqkm_per_min, w.growth_rate),
     ]

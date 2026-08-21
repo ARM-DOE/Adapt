@@ -21,6 +21,7 @@ from adapt.consumers.target_selection.snapshot import (
     Snapshot,
     TrajectoryPoint,
 )
+from adapt.contracts import stat_column
 from adapt.utils.time import from_scan_iso, to_scan_iso
 
 # Per-track lifecycle columns merged into each cell's `values` mapping
@@ -35,12 +36,28 @@ def build_snapshot(
     *,
     growth_window_scans: int,
     at: datetime | None = None,
+    tracking_field: str | None = None,
 ) -> Snapshot:
     """Return the latest scan of a run as a frozen Snapshot.
 
     With ``at``, the run is replayed as of that instant: only scans at or
     before ``at`` are visible (growth rates and scan cadence included).
+
+    ``tracking_field`` names the canonical field whose per-cell max fills
+    ``CellSnapshot.field_max``. Default: resolved once from the run's
+    stored config provenance (``client.run_config``) — the store is the
+    truth for what the run tracked.
     """
+    if tracking_field is None:
+        provenance = client.run_config(run_id)
+        try:
+            tracking_field = provenance["global_"]["tracking_field"]
+        except KeyError as exc:
+            raise ValueError(
+                f"Run {run_id!r} config provenance carries no "
+                "global_.tracking_field — the run predates the field-generic "
+                "pipeline; pass tracking_field= explicitly."
+            ) from exc
     history = client.cells(run_id, collection)
     if history.empty:
         raise ValueError(f"No cells_by_scan rows for run {run_id!r} (collection {collection!r})")
@@ -63,7 +80,8 @@ def build_snapshot(
     ).sort_values("cell_uid")
 
     cells = tuple(
-        _to_cell(row, history, scan_interval, growth_window_scans) for _, row in merged.iterrows()
+        _to_cell(row, history, scan_interval, growth_window_scans, tracking_field)
+        for _, row in merged.iterrows()
     )
     return Snapshot(scan_time=from_scan_iso(latest_iso), cells=cells)
 
@@ -73,6 +91,7 @@ def _to_cell(
     history: pd.DataFrame,
     scan_interval: float | None,
     growth_window_scans: int,
+    tracking_field: str,
 ) -> CellSnapshot:
     uid = row["cell_uid"]
     cell_history = history[history["cell_uid"] == uid].sort_values("scan_time")
@@ -86,7 +105,7 @@ def _to_cell(
         lat=float(row["cell_centroid_mass_lat"]),
         lon=float(row["cell_centroid_mass_lon"]),
         area_sqkm=float(row["cell_area_sqkm"]),
-        reflectivity_max=float(row["radar_reflectivity_max"]),
+        field_max=float(row[stat_column(tracking_field, "max")]),
         age_seconds=float(row["age_seconds"]),
         growth_rate_sqkm_per_min=_growth_rate(cell_history, growth_window_scans),
         trajectory=_trajectory(row, scan_interval),

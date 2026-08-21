@@ -524,8 +524,7 @@ def test_create_table_statements_have_one_home() -> None:
 
 _REFL_LITERAL_ALLOWED = {
     "persistence/track_store.py",  # _CBS_FIXED_COLUMNS (fixed DDL)
-    "consumers/target_selection/repository_source.py",  # phase 3
-    "consumers/live/_scan_view.py",  # phase 3 (hover boxes)
+    "consumers/live/_scan_view.py",  # hover boxes (resolved in step 3.4)
 }
 
 

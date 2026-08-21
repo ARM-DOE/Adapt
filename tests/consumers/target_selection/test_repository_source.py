@@ -15,6 +15,7 @@ import pytest
 
 from adapt.api.store_client import StoreClient
 from adapt.consumers.target_selection.repository_source import build_snapshot
+from adapt.persistence.errors import StoreError
 from adapt.persistence.products import SchemaLedger
 from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
@@ -66,7 +67,7 @@ def _build_store(tmp_path):
             run_id=RUN_ID,
             collection_id=COLLECTION,
             config_hash="h",
-            config_json="{}",
+            config_json='{"global_": {"tracking_field": "reflectivity"}}',
             pipeline_version="0",
             environment_json="{}",
         )
@@ -163,7 +164,9 @@ def test_single_scan_growth_zero(snapshot):
 
 
 def test_no_rows_raises(client):
-    with pytest.raises(ValueError, match="bogus"):
+    # Unknown runs now fail at the provenance lookup (StoreError), before
+    # any cells read — still loud, still names the run.
+    with pytest.raises(StoreError, match="bogus"):
         build_snapshot(client, "bogus", COLLECTION, growth_window_scans=4)
 
 

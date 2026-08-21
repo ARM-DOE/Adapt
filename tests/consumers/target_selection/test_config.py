@@ -18,7 +18,7 @@ candidate:
   min_age_seconds: 600
 priority:
   weights:
-    reflectivity: 1.0
+    field: 1.0
     area: 0.05
     growth_rate: 2.0
 site_preference:

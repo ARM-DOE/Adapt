@@ -137,7 +137,7 @@ def _cell(uid, *, mass=(50, 50), proj=None, area=30.0, refl=50.0, growth=0.0):
         lat=41.0,
         lon=-88.0,
         area_sqkm=area,
-        reflectivity_max=refl,
+        field_max=refl,
         age_seconds=600.0,
         growth_rate_sqkm_per_min=growth,
         trajectory=(),
@@ -273,7 +273,7 @@ def test_rationale_selected_block_has_reason_score_and_terms():
     assert "CONTINUATION" in text
     assert "55" in text
     # score terms and the gate summary
-    assert "reflectivity_max" in text and "area_sqkm" in text and "growth" in text
+    assert "field_max" in text and "area_sqkm" in text and "growth" in text
     assert "cell_area_sqkm" in text  # gate summary field
 
 

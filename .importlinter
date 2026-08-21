@@ -8,9 +8,17 @@
 #   lint-imports
 #
 # Philosophy:
-# - Modules are scientific units and must remain independent.
-# - Shared behaviour belongs in contracts, runtime, or persistence.
-# - Prevent cross-layer imports early, before they calcify.
+# - The layer stack below is the architecture. A package may import only
+#   packages in layers BELOW its own; siblings on one layer (joined by |)
+#   are independent and never import each other.
+# - `exhaustive = true` means every top-level package under adapt MUST be
+#   placed in a layer. Adding a new package fails this check until it is
+#   deliberately assigned a home — that is the point.
+# - This file is mirrored in ARCHITECTURE.md; tests/test_architecture.py
+#   asserts the two stay identical and match the real source tree.
+# - Scientific-module independence (adapt.modules.X never imports
+#   adapt.modules.Y) is enforced by tests/test_architecture.py, which
+#   auto-discovers module subpackages at runtime.
 
 [importlinter]
 root_packages =
@@ -19,123 +27,72 @@ root_packages =
 include_external_packages = False
 
 # ==========================================================
-# 1. Scientific module independence — enforced by pytest
+# 1. The layer stack
 # ==========================================================
 #
-# Inter-module imports and upward imports from modules/ are
-# caught by tests/test_architecture.py, which auto-discovers
-# subpackages at runtime. No explicit module list needed there.
-# Run: pytest tests/test_architecture.py
+# cli            outermost shell; may import anything
+# consumers      dashboards/TSE — read ONLY via adapt.api (see contract 2)
+# visualization  plotting; core never imports it
+# runtime        composition root: orchestrates everything below
+# configuration  pydantic schemas + resolution; builds module configs
+# api            StoreClient read facade over the store
+# execution      graph + nodes: the one sanctioned wiring layer over modules
+# modules        science; deterministic; no I/O to the store
+# persistence    SQLite/NetCDF store; no science, no orchestration
+# contracts      types + check_* validators; zero adapt imports
+# downloaders    boto3/S3 isolation; zero adapt imports
+# utils          shared pure functions; zero adapt imports
+#
+# `data` and `extensions` are empty reserved packages, ignored here.
+# Delete them (and the exhaustive_ignores line) or give them a layer.
 
+[importlinter:contract:layers]
+name = Adapt layer stack
+type = layers
+containers =
+    adapt
+exhaustive = true
+exhaustive_ignores =
+    data
+    extensions
+layers =
+    cli
+    consumers | visualization
+    runtime
+    configuration
+    api | execution
+    modules | persistence
+    contracts | downloaders | utils
 
 # ==========================================================
-# 2. Modules do not depend on runtime orchestration
+# 2. Consumers speak only through the public API
 # ==========================================================
 #
-# Runtime coordinates modules; modules must not call back into it.
-# Science is stateless. Orchestration is runtime's job.
+# The layer stack alone would let consumers import any lower layer.
+# Consumers (dashboard, target selection) must not reach persistence,
+# runtime, or execution directly — reaching them THROUGH adapt.api is
+# the sanctioned path, hence allow_indirect_imports. StoreClient is the
+# only read surface (I/O side doors are closed by
+# tests/test_architecture.py::test_consumers_read_only_through_the_store_api).
 
-[importlinter:contract:modules_do_not_import_runtime]
-name = Modules do not depend on runtime
+[importlinter:contract:consumers_use_public_api_only]
+name = Consumers do not import persistence, runtime, or execution
 type = forbidden
 source_modules =
-    adapt.modules
+    adapt.consumers
 forbidden_modules =
+    adapt.persistence
     adapt.runtime
-
-# ==========================================================
-# 3. Modules do not reach into infrastructure layers
-# ==========================================================
-#
-# Modules produce data. Infrastructure stores and serves it.
-# A module that imports persistence or GUI has too many responsibilities.
-#
-# Includes configuration: modules must receive their settings
-# via dependency injection from the execution layer — not read
-# configuration themselves.
-
-[importlinter:contract:modules_do_not_import_infrastructure]
-name = Modules do not import infrastructure layers
-type = forbidden
-source_modules =
-    adapt.modules
-forbidden_modules =
     adapt.execution
-    adapt.persistence
-    adapt.api
-    adapt.gui
-    adapt.visualization
-    adapt.configuration
+allow_indirect_imports = True
 
 # ==========================================================
-# 3b. Utils package imports no adapt internals
+# 3. Core must not depend on optional extensions
 # ==========================================================
 #
-# adapt.utils contains pure stdlib functions shared across
-# the codebase. It must not depend on any adapt layer or
-# it creates import cycles and loses its zero-dependency value.
-
-[importlinter:contract:utils_are_pure]
-name = Utils package imports no adapt internals
-type = forbidden
-source_modules =
-    adapt.utils
-forbidden_modules =
-    adapt.modules
-    adapt.contracts
-    adapt.execution
-    adapt.runtime
-    adapt.persistence
-    adapt.configuration
-    adapt.api
-    adapt.gui
-    adapt.visualization
-    adapt.cli
-    adapt.extensions
-
-# ==========================================================
-# 4. Persistence is infrastructure — no science, no orchestration
-# ==========================================================
-#
-# Persistence reads and writes. It must not depend on modules
-# (would create a circular science ↔ storage loop) or runtime
-# (would couple storage to one execution strategy).
-
-[importlinter:contract:persistence_is_infra]
-name = Persistence does not depend on modules or runtime
-type = forbidden
-source_modules =
-    adapt.persistence
-forbidden_modules =
-    adapt.modules
-    adapt.runtime
-
-# ==========================================================
-# 5. Nothing inside core depends on the CLI
-# ==========================================================
-#
-# CLI is the outermost shell. It may import anything.
-# Core packages must not import it — that would make them
-# impossible to use as a library.
-
-[importlinter:contract:no_internal_cli_dependency]
-name = Internal packages do not depend on CLI
-type = forbidden
-source_modules =
-    adapt.modules
-    adapt.runtime
-    adapt.persistence
-    adapt.execution
-forbidden_modules =
-    adapt.cli
-
-# ==========================================================
-# 6. Core must not depend on optional extensions
-# ==========================================================
-#
-# Extensions add capability without modifying core.
-# If core imports extensions, extensions can no longer be
-# optional and the plug-in model breaks.
+# adapt.extensions is reserved for optional plug-ins and is excluded
+# from the layer stack, so this explicit ban keeps core independent
+# of it. If core imports extensions, they stop being optional.
 
 [importlinter:contract:core_not_depend_on_extensions]
 name = Core packages do not depend on extensions
@@ -148,76 +105,3 @@ source_modules =
     adapt.configuration
 forbidden_modules =
     adapt.extensions
-
-# ==========================================================
-# 7. Contracts package imports no adapt internals
-# ==========================================================
-#
-# adapt.contracts is the only layer both modules and execution
-# may share. It must depend on nothing inside adapt so it
-# never creates import cycles.
-
-[importlinter:contract:contracts_are_pure]
-name = Contracts package imports no adapt internals
-type = forbidden
-source_modules =
-    adapt.contracts
-forbidden_modules =
-    adapt.modules
-    adapt.runtime
-    adapt.persistence
-    adapt.configuration
-    adapt.execution
-    adapt.api
-    adapt.gui
-    adapt.visualization
-    adapt.cli
-    adapt.extensions
-
-# ==========================================================
-# 8. Downloaders are a self-contained third-party I/O leaf
-# ==========================================================
-#
-# adapt.downloaders isolates all boto3/S3 calls. It is a leaf:
-# it depends only on third-party libraries and stdlib, never on
-# any adapt internal, so it can be reused without dragging in
-# the rest of the package and never creates an import cycle.
-
-[importlinter:contract:downloaders_are_leaf]
-name = Downloaders package imports no adapt internals
-type = forbidden
-source_modules =
-    adapt.downloaders
-forbidden_modules =
-    adapt.modules
-    adapt.runtime
-    adapt.persistence
-    adapt.configuration
-    adapt.execution
-    adapt.api
-    adapt.gui
-    adapt.visualization
-    adapt.cli
-    adapt.extensions
-    adapt.contracts
-    adapt.utils
-
-# ==========================================================
-# 9. Consumers speak only through the public API
-# ==========================================================
-#
-# Consumers (Ring 2) sit above RepositoryClient. They must not
-# reach into persistence, runtime, or execution directly —
-# reaching them THROUGH adapt.api is the sanctioned path, hence
-# allow_indirect_imports.
-
-[importlinter:contract:consumers_use_public_api_only]
-name = Consumers do not import persistence, runtime, or execution
-type = forbidden
-source_modules =
-    adapt.consumers
-forbidden_modules =
-    adapt.persistence
-    adapt.runtime
-    adapt.execution
-allow_indirect_imports = True

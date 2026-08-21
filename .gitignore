@@ -88,6 +88,8 @@ scripts/user_config.py
 *.md
 !README.md
 !CLAUDE.md
+!AGENTS.md
+!ARCHITECTURE.md
 !.github/**/*.md
 !docs/**/*.md
 *.txt
@@ -109,5 +111,3 @@ data/
 .*
 !.gitignore
 !.importlinter
-__pycache__/
-*.md

@@ -375,7 +375,6 @@ def test_module_inputs_are_produced_or_seeded() -> None:
 # shrink: never add to it — write a check_* validator in adapt.contracts instead.
 _UNCONTRACTED_OUTPUTS = {
     ("ingest", "grid_ds"),
-    ("ingest", "grid_nc_path"),
     ("detection", "num_cells"),
 }
 
@@ -424,3 +423,66 @@ def test_obs_context_fields_never_in_module_io() -> None:
         "\nTelemetry correlation ids leaked into the science context dict — keep "
         "ObsContext fields out of module inputs/outputs:\n" + "\n".join(leaks)
     )
+
+
+# ── Consumer boundary: consumers read ONLY through the store API ───────────────
+# Consumers (dashboard, TSE) may import adapt.api + adapt.utils only; the store
+# fitness below closes the I/O side doors the import-linter cannot see: raw
+# sqlite, direct NetCDF/parquet opens, directory walks, and store-internal
+# path construction. Rasters arrive in-memory via the client; tables arrive as
+# DataFrames. The one sanctioned literal is the registry.db root marker used
+# for repo detection in _utils.
+_CONSUMER_FORBIDDEN_CALLS = {
+    "open_dataset",
+    "open_mfdataset",
+    "load_dataset",
+    "read_parquet",
+    "glob",
+    "rglob",
+    "iterdir",
+    "connect",  # sqlite3.connect / duckdb.connect
+}
+_CONSUMER_FORBIDDEN_LITERALS = ("catalog.db", "products.db", "adapt_registry.db")
+_CONSUMER_LITERAL_ALLOWLIST = {"_utils.py"}  # legacy-root detection marker only
+
+
+def _consumer_violations(py_file: Path) -> list[str]:
+    import ast
+
+    tree = ast.parse(py_file.read_text(encoding="utf-8"))
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in {"sqlite3", "duckdb"}:
+                    violations.append(f"{py_file.name}:{node.lineno} imports {alias.name}")
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split(".")[0] in {"sqlite3", "duckdb"}:
+                violations.append(f"{py_file.name}:{node.lineno} imports {node.module}")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name in _CONSUMER_FORBIDDEN_CALLS:
+                violations.append(f"{py_file.name}:{node.lineno} calls {name}()")
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and any(lit in node.value for lit in _CONSUMER_FORBIDDEN_LITERALS)
+            and py_file.name not in _CONSUMER_LITERAL_ALLOWLIST
+        ):
+            violations.append(f"{py_file.name}:{node.lineno} builds store path {node.value!r}")
+    return violations
+
+
+def test_consumers_read_only_through_the_store_api() -> None:
+    """No consumer touches storage directly — every read goes through StoreClient.
+
+    Guards the exact failure classes behind past dashboard bugs: raw sqlite
+    connections (fd leaks), per-frame NetCDF opens (too many open files),
+    directory globs (stale/foreign files), and hardcoded store paths.
+    """
+    consumers_dir = Path(__file__).parent.parent / "src" / "adapt" / "consumers"
+    violations: list[str] = []
+    for py_file in sorted(consumers_dir.rglob("*.py")):
+        violations.extend(_consumer_violations(py_file))
+    assert not violations, "consumers must read via the store API only:\n" + "\n".join(violations)

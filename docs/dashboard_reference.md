@@ -15,7 +15,7 @@ A welcome screen appears with two options.
 ### 2a. You already have data — open an existing repository
 
 Click **Open an existing repository**, browse to the folder that contains
-`adapt_registry.db` (the pipeline output directory), and click **Open Repository**.
+`registry.db` (a store created by `adapt init`), and click **Open Repository**.
 
 The radar map and scan dropdowns populate automatically. Use the scan selector or
 **Show Latest** to display a scan. Click any cell on the map to plot its track
@@ -92,21 +92,21 @@ dashboard and it will offer to reconnect to the running process.
 
 ```
 {repo}/
-├── adapt_registry.db          # SQLite: run registry (radars + run metadata)
-├── adapt_registry.db-shm      # SQLite WAL shared-memory file
-├── adapt_registry.db-wal      # SQLite WAL log
-└── {RADAR_ID}/
-    ├── catalog.db             # SQLite: per-radar item registry (WAL mode)
-    └── analysis/
-        ├── {date}/
-        │   └── *_analysis.nc  # NetCDF scan files (one per scan)
-        └── analysis2d_*.parquet  # Cell statistics (parquet, one per run)
+├── registry.db                # SQLite: runs (with config), collections, events
+├── logs/                      # run log files
+└── collections/
+    └── {RADAR_ID}/
+        ├── catalog.db         # SQLite: scans, artifacts, checksums, lineage
+        ├── products.db        # SQLite: cell stats, tracks, module tables
+        └── objects/           # immutable NetCDF artifacts (content-addressed)
 ```
 
-The dashboard treats this entire tree as read-only. It reads `adapt_registry.db`
-to populate the radar and run dropdowns, reads `catalog.db` via `TrackStore` to
-load track histories, and opens the `.nc` files directly with xarray for
-rendering.
+The dashboard treats this entire tree as read-only and touches none of it
+directly: every read goes through the `StoreClient` API — runs and collections
+from `registry.db`, the scan timeline from the catalog, track histories and
+statistics from `products.db`, and scan rasters loaded fully into memory (no
+file handle stays open between redraws). An architecture test enforces that no
+dashboard code opens files or databases itself.
 
 **The dashboard will not touch this directory unless a pipeline is launched from
 the wizard.** Even then, the pipeline process is responsible for all writes — the
@@ -312,16 +312,17 @@ slipped through mechanisms 1 or 2.
 
 The dashboard auto-refreshes every 10 s (`POLL_MS`). Each cycle:
 
-1. Calls `_get_nc_files(repo, radar)` — filesystem glob for `*_analysis.nc`
+1. Asks the store for the run's complete-scan timeline
+   (`client.scan_timeline`) — never a filesystem glob
 2. Updates the scan selector dropdown
-3. If a new NC file appeared since the last render → re-renders in place
+3. If a new complete scan appeared since the last render → re-renders in place
    (reuses the existing canvas, preserves zoom and cell selection)
 4. Updates the status bar: scan count, pipeline state
 5. Flushes the Log tab if it is visible
 
-Data is never pre-fetched. Each scan is opened with `xr.open_dataset()` on
-demand. Cell statistics are loaded once per run via `_load_cells_data()` and
-cached in `self._current_cell_df`.
+Data is never pre-fetched. Each scan raster is loaded fully into memory on
+demand through `client.open_scan_raster` and holds no file handle afterwards.
+Cell statistics are loaded once per run via `client.cells()` and cached.
 
 ---
 
@@ -329,12 +330,20 @@ cached in `self._current_cell_df`.
 
 ```
 src/adapt/consumers/live/
-├── dashboard.py                  # Main Tk window; all UI logic
-├── _config.py                    # ~/.adapt/user_dashboard.json I/O only
-├── _utils.py                     # Pure helpers; PID file logic; no Tk
-├── _widgets.py                   # Custom Tk widgets (_CompactToolbar, _RangeSlider)
+├── dashboard.py                  # Main Tk window (shell): tabs, toolbar, pickers
+├── _context.py                   # AppContext: one cached StoreClient per store
+├── _scan_view.py                 # Latest Scan tab (ScanRef timeline)
+├── _tse_view.py                  # Target Selection replay tab
+├── _pipeline.py                  # Pipeline tab: launch wizard (runs adapt init)
+├── _renderer.py                  # Pure matplotlib scan rendering; add_basemap()
+├── _movie.py / _movie_dialog.py  # Save Movie: frame writer + dialog
+├── _targeting.py                 # TSE map drawing (pure, in-memory dataset)
+├── _volume_stats.py              # Volume-stats reads via StoreClient
+├── _lightning.py                 # Lightning table reads via StoreClient
 ├── _timeseries.py                # matplotlib time-series helpers; no Tk
-├── _renderer.py                  # RenderConfig dataclass; add_basemap()
+├── _widgets.py                   # Custom Tk widgets (_CompactToolbar, _RangeSlider)
+├── _utils.py                     # Pure helpers; store-root detection; PID file logic
+├── _config.py                    # ~/.adapt/user_dashboard.json I/O only
 └── dashboard_default_config.json # Bundled default plot configuration
 ```
 

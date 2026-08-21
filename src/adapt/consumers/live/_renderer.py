@@ -160,7 +160,7 @@ def render_scan(
             "Selected variable %r not in scan (available: %s) — falling back "
             "to 'reflectivity'",
             view.var_name,
-            sorted(ds.data_vars),
+            sorted(str(v) for v in ds.data_vars),
         )
     var_name = view.var_name if view.var_name in ds.data_vars else "reflectivity"
     vdef = _VAR_DEFAULTS.get(var_name, (10, 60, "dBZ", "viridis"))

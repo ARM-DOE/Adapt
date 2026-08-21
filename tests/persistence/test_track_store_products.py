@@ -71,6 +71,15 @@ def _write(collection, ledger, scan_id, offset_s=0, stats=None, tracked=None, ev
         )
 
 
+def _table_rows(collection, table, where):
+    conn = sqlite3.connect(collection.products_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        return [dict(r) for r in conn.execute(f"SELECT * FROM {table} WHERE {where}").fetchall()]
+    finally:
+        conn.close()
+
+
 def _table_info(collection, table):
     conn = sqlite3.connect(collection.products_path)
     try:
@@ -192,3 +201,34 @@ class TestStrictTrackedColumns:
         )
         with pytest.raises(KeyError, match="area"):
             _write(collection, ledger, "s1", tracked=bad_tracked)
+
+    def test_cells_with_heterogeneous_stats_columns_all_persist(self, collection, ledger):
+        # First write freezes the schema including the extra column.
+        _write(collection, ledger, "s1", stats=_stats([1], {"custom_metric": [3.5]}))
+        # Second scan (5 min later): two cells, only cell 1 has a stats row
+        # (cell 2 is in tracked_cells but absent from cell_stats) -> rows
+        # have different key sets. Must not raise; missing values -> NULL.
+        stats = _stats([1], {"custom_metric": [4.5]})
+        tracked = _tracked([(1, "u1"), (2, "u2")])
+        _write(collection, ledger, "s2", offset_s=300, stats=stats, tracked=tracked)
+
+        rows = {
+            r["cell_uid"]: r for r in _table_rows(collection, "cells_by_scan", "scan_id = 's2'")
+        }
+        assert set(rows) == {"u1", "u2"}
+        assert rows["u1"]["custom_metric"] == 4.5
+        assert rows["u2"]["custom_metric"] is None
+
+    def test_reversed_order_second_cell_carries_extra_stats(self, collection, ledger):
+        # Mirror case: the FIRST row lacks the stats columns and a LATER row
+        # has them — previously those columns were silently dropped.
+        _write(collection, ledger, "s1", stats=_stats([1], {"custom_metric": [3.5]}))
+        stats = pd.DataFrame({"cell_label": [2], "cell_area_sqkm": [10.0], "custom_metric": [7.5]})
+        tracked = _tracked([(1, "u1"), (2, "u2")])
+        _write(collection, ledger, "s2", offset_s=300, stats=stats, tracked=tracked)
+
+        rows = {
+            r["cell_uid"]: r for r in _table_rows(collection, "cells_by_scan", "scan_id = 's2'")
+        }
+        assert rows["u2"]["custom_metric"] == 7.5
+        assert rows["u1"]["custom_metric"] is None

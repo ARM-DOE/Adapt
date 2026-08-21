@@ -622,7 +622,17 @@ class TrackStore:
     def _upsert_cells(self, conn: sqlite3.Connection, rows: list[dict]) -> None:
         if not rows:
             return
-        cols = list(rows[0].keys())
+        # Column set is the union over ALL rows (first-seen order): stats
+        # columns are merged per cell, so rows within one scan can carry
+        # different key sets — keying off rows[0] alone either KeyErrors
+        # (first row has stats, later one doesn't) or silently drops
+        # columns (the reverse). NULL for a column a row lacks is correct
+        # here: the frozen schema already validated the full column set.
+        cols: list[str] = []
+        for r in rows:
+            for k in r:
+                if k not in cols:
+                    cols.append(k)
         placeholders = ", ".join("?" * len(cols))
         col_list = ", ".join(cols)
         update_set = ", ".join(
@@ -632,7 +642,7 @@ class TrackStore:
             f"INSERT INTO cells_by_scan ({col_list}) VALUES ({placeholders}) "
             f"ON CONFLICT(run_id, scan_id, cell_uid) DO UPDATE SET {update_set}"
         )
-        conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
+        conn.executemany(sql, [tuple(r.get(c) for c in cols) for r in rows])
 
     def _prev_scan(
         self, conn: sqlite3.Connection, run_id: str, scan_iso: str

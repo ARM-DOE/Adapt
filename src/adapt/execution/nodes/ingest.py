@@ -1,12 +1,10 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from pathlib import Path
-
 import numpy as np
 import xarray as _xr
 
-from adapt.contracts import RegisterFileArtifact, check_grid_ds_2d
+from adapt.contracts import NetcdfArtifact, check_grid_ds_2d
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.ingest.config import IngestConfig
@@ -17,7 +15,9 @@ class LoadModule(BaseModule):
     """BaseModule wrapper for RadarDataLoader.
 
     Reads a NEXRAD Level-II file, regrids it to Cartesian coordinates,
-    and extracts a 2D horizontal slice at the configured z-level.
+    and extracts a 2D horizontal slice at the configured z-level. The node
+    builds no paths: the 3D grid is returned in-memory and persisted by the
+    router as a ``gridded3d`` object.
 
     Context inputs
     --------------
@@ -29,8 +29,6 @@ class LoadModule(BaseModule):
         here — a missing value raises instead of substituting a clock.
     config : InternalConfig
         Runtime configuration (lazy-initialises the loader on first call).
-    output_dirs : dict
-        Output directory mapping (used for saving intermediate NetCDF).
 
     Context outputs
     ---------------
@@ -45,11 +43,16 @@ class LoadModule(BaseModule):
     required_history = 1
     pipeline_phase = 0
     inputs = ["nexrad_file", "ingest_config", "scan_time"]
-    outputs = ["grid_ds", "grid_ds_2d", "grid_nc_path"]
+    outputs = ["grid_ds", "grid_ds_2d"]
     output_contracts = {"grid_ds_2d": check_grid_ds_2d}
     config_class = IngestConfig
     persistence = (
-        RegisterFileArtifact(key="grid_nc_path", product_type="gridded3d", producer="ingest"),
+        NetcdfArtifact(
+            key="grid_ds",
+            product_type="gridded3d",
+            producer="ingest",
+            description="Regridded 3D Cartesian radar volume",
+        ),
     )
 
     @classmethod
@@ -61,8 +64,6 @@ class LoadModule(BaseModule):
             roi_func=cfg.regridder.roi_func,
             min_radius=cfg.regridder.min_radius,
             weighting_function=cfg.regridder.weighting_function,
-            save_netcdf=cfg.regridder.save_netcdf,
-            netcdf_save_retries=cfg.regridder.netcdf_save_retries,
             radar=cfg.downloader.radar,
             z_level=cfg.global_.z_level,
             z_coord=cfg.global_.coord_names.z,
@@ -75,32 +76,18 @@ class LoadModule(BaseModule):
     def run(self, context: dict) -> dict:
         config = context["ingest_config"]
         filepath = context["nexrad_file"]
-        output_dirs = context.get("output_dirs", {})
 
         if self._loader is None:
             self._loader = RadarDataLoader(config)
 
-        radar = config.radar
-        nc_filename = Path(filepath).stem
-        scan_time = context.get("scan_time")
-        if scan_time is None:
+        if context.get("scan_time") is None:
             raise ValueError(
-                f"Ingest requires a scan_time for {nc_filename!r} and the source "
+                f"Ingest requires a scan_time for {filepath!r} and the source "
                 "supplied none — refusing to substitute a clock or re-parse the "
                 "filename (wall-clock substitution is forbidden)"
             )
 
-        date_str = scan_time.strftime("%Y%m%d")
-        base = output_dirs.get("base")
-        nc_path = base / radar / "gridnc" / date_str / nc_filename if base else None
-        output_dir = str(nc_path.parent) if nc_path else None
-
-        ds = self._loader.load_and_regrid(
-            filepath,
-            save_netcdf=config.save_netcdf,
-            output_dir=output_dir,
-        )
-
+        ds = self._loader.load_and_regrid(filepath)
         if ds is None:
             raise RuntimeError(f"Ingest failed: load_and_regrid returned None for {filepath}")
 
@@ -121,16 +108,7 @@ class LoadModule(BaseModule):
                 ds_2d = ds_2d.assign_coords({coord: ds[coord]})
         ds_2d.attrs.update(ds.attrs)
 
-        result: dict = {
-            "grid_ds": ds,
-            "grid_ds_2d": ds_2d,
-        }
-        # The loader wrote the 3D grid to `{output_dir}/{stem}.nc` when save_netcdf.
-        # The key is OMITTED when no file was written: absent key = "not produced"
-        # (the router skips it); a present key asserts the file exists.
-        if config.save_netcdf and nc_path:
-            result["grid_nc_path"] = f"{nc_path}.nc"
-        return result
+        return {"grid_ds": ds, "grid_ds_2d": ds_2d}
 
 
 registry.register(LoadModule)

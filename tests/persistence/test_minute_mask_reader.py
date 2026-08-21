@@ -9,16 +9,12 @@ scan time falls exactly on the minute grid, the real segmentation (fraction 0,
 the scan's own LUT) replacing the advected frame.
 """
 
-import shutil
-import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from adapt.persistence import DataRepository, ProductType
 from adapt.persistence.scan_mask_reader import read_minute_masks
 from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 
@@ -26,29 +22,38 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def repo():
-    d = Path(tempfile.mkdtemp())
-    r = DataRepository(run_id="MINMASK1", base_dir=d, radar="TEST_RADAR")
-    yield r
-    r.close()
-    r.registry.close()
-    shutil.rmtree(d, ignore_errors=True)
+def store_coll(tmp_path):
+    from adapt.persistence.store import Store, init_store
+
+    root = init_store(tmp_path / "store")
+    store = Store.open(root)
+    yield store.collection("TEST_RADAR")
+    store.close()
 
 
-def _write(repo, ds, scan_time: str):
-    repo.write_netcdf(
-        ds=ds,
-        product_type=ProductType.ANALYSIS_NC,
-        scan_time=datetime.fromisoformat(scan_time).replace(tzinfo=UTC),
-        producer="test",
+def _write(coll, ds, scan_time: str):
+    from adapt.persistence.objects import ArtifactMeta, ObjectStore
+
+    objects = ObjectStore(coll.objects_dir, coll.catalog)
+    handle = objects.begin(suffix=".nc")
+    ds.to_netcdf(handle.staging_path)
+    objects.commit(
+        handle,
+        ArtifactMeta(
+            artifact_type="segmentation2d",
+            producer="test",
+            run_id="MASKRUN1",
+            scan_id=f"sid-{scan_time[-8:]}",
+            observation_time=datetime.fromisoformat(scan_time).replace(tzinfo=UTC),
+        ),
     )
 
 
-def _two_pair_repo(repo):
+def _two_pair_repo(store_coll):
     """Scans 19:00, 19:03, 19:06; pair NCs at 19:03 and 19:06."""
     # NC for pair (19:00 -> 19:03): first pair, prev scan untracked -> no reg LUT
     _write(
-        repo,
+        store_coll,
         make_analysis_ds(
             "2024-05-18T19:03:00",
             "2024-05-18T19:00:00",
@@ -65,7 +70,7 @@ def _two_pair_repo(repo):
     )
     # NC for pair (19:03 -> 19:06): prev scan tracked -> reg LUT present
     _write(
-        repo,
+        store_coll,
         make_analysis_ds(
             "2024-05-18T19:06:00",
             "2024-05-18T19:03:00",
@@ -82,10 +87,12 @@ def _two_pair_repo(repo):
     )
 
 
-def test_advected_minutes_carry_registration_lut(repo):
-    _two_pair_repo(repo)
+def test_advected_minutes_carry_registration_lut(store_coll):
+    _two_pair_repo(store_coll)
 
-    records = {pd.Timestamp(r["minute_time"]): r for r in read_minute_masks(repo)}
+    rows = read_minute_masks(store_coll, "MASKRUN1")
+
+    records = {pd.Timestamp(r["minute_time"]): r for r in rows}
 
     r = records[pd.Timestamp("2024-05-18T19:04:00")]
     assert list(r["cell_uid_lut"].astype(str)) == ["NONE", "uid-A"]
@@ -95,11 +102,13 @@ def test_advected_minutes_carry_registration_lut(repo):
     np.testing.assert_array_equal(r["cell_labels"], cell_block(col=7))
 
 
-def test_scan_minute_uses_real_segmentation(repo):
+def test_scan_minute_uses_real_segmentation(store_coll):
     """At 19:03 the real mask (fraction 0, scan's own LUT) wins over fraction 1.0."""
-    _two_pair_repo(repo)
+    _two_pair_repo(store_coll)
 
-    records = {pd.Timestamp(r["minute_time"]): r for r in read_minute_masks(repo)}
+    rows = read_minute_masks(store_coll, "MASKRUN1")
+
+    records = {pd.Timestamp(r["minute_time"]): r for r in rows}
 
     r = records[pd.Timestamp("2024-05-18T19:03:00")]
     assert r["interpolation_fraction"] == 0.0
@@ -107,11 +116,13 @@ def test_scan_minute_uses_real_segmentation(repo):
     assert pd.Timestamp(r["source_scan_time"]) == pd.Timestamp("2024-05-18T19:03:00")
 
 
-def test_minutes_without_registration_lut_are_skipped(repo):
+def test_minutes_without_registration_lut_are_skipped(store_coll):
     """The first pair has no prev-scan tracking: its advected minutes are absent."""
-    _two_pair_repo(repo)
+    _two_pair_repo(store_coll)
 
-    minutes = sorted(pd.Timestamp(r["minute_time"]) for r in read_minute_masks(repo))
+    records = read_minute_masks(store_coll, "MASKRUN1")
+
+    minutes = sorted(pd.Timestamp(r["minute_time"]) for r in records)
 
     assert pd.Timestamp("2024-05-18T19:01:00") not in minutes
     assert pd.Timestamp("2024-05-18T19:02:00") not in minutes
@@ -119,9 +130,9 @@ def test_minutes_without_registration_lut_are_skipped(repo):
     assert minutes == list(pd.date_range("2024-05-18T19:03:00", periods=4, freq="1min"))
 
 
-def test_records_sorted_by_minute(repo):
-    _two_pair_repo(repo)
+def test_records_sorted_by_minute(store_coll):
+    _two_pair_repo(store_coll)
 
-    minutes = [pd.Timestamp(r["minute_time"]) for r in read_minute_masks(repo)]
+    minutes = [pd.Timestamp(r["minute_time"]) for r in read_minute_masks(store_coll, "MASKRUN1")]
 
     assert minutes == sorted(minutes)

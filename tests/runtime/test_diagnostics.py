@@ -41,9 +41,7 @@ def _obs():
     )
 
 
-def test_processor_silences_hdf5_at_worker_thread_entry(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
-):
+def test_processor_silences_hdf5_at_worker_thread_entry(monkeypatch, pipeline_config, store_env):
     import adapt.runtime.processor as processor_module
 
     called = []
@@ -52,8 +50,10 @@ def test_processor_silences_hdf5_at_worker_thread_entry(
     proc = RadarProcessor(
         queue.Queue(),
         pipeline_config,
-        pipeline_output_dirs,
-        repository=test_repository,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
         observability=_obs(),
     )
     proc.stop()  # so _run_loop exits immediately; run() still hits the thread-entry call

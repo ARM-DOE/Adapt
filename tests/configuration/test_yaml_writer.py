@@ -23,7 +23,6 @@ class TestRoundTrip:
             "mode": "realtime",
             "threshold": 30.0,
             "max_cellsize_gridpoint": None,
-            "save_netcdf": True,
             "grid_shape": (41, 301, 301),
             "grid_limits": ((0.0, 20000.0), (-150000.0, 150000.0)),
             "radar_variables": ["reflectivity", "velocity"],

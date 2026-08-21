@@ -4,13 +4,12 @@
 """Multi-threaded pipeline orchestration.
 
 Coordinates downloader and processor threads with queue-based inter-thread
-communication. Manages lifecycle, monitoring, and graceful shutdown.
-
-Note: Plotting is handled by a separate PlotConsumer thread that polls
-the DataRepository independently. This decoupling ensures processing
-is not blocked by visualization and validates repository API integrity.
+communication. Manages lifecycle, monitoring, and graceful shutdown. Owns the
+single run lifecycle in the store registry and refuses to run against an
+uninitialized root.
 """
 
+import json
 import logging
 import queue
 import random
@@ -18,13 +17,16 @@ import sys
 import time
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from adapt.contracts.execution_history import RunStart, RunSummary
-from adapt.persistence import DataRepository
+from adapt.persistence.errors import StoreError
+from adapt.persistence.execution_history import StoreExecutionHistory
+from adapt.persistence.store import Collection, Store
+from adapt.persistence.store_registry import RunStart as StoreRunStart
+from adapt.persistence.store_registry import StoreRegistry
+from adapt.runtime.acquire import StoreAcquirer
 from adapt.runtime.console_status import ConsoleStatus
-from adapt.runtime.file_tracker import FileProcessingTracker
 from adapt.runtime.history_handler import HistoryLogHandler
 from adapt.runtime.logging_setup import configure_logging, shutdown_logging
 from adapt.runtime.observability import ObsSettings, build_observability
@@ -78,7 +80,7 @@ class PipelineOrchestrator:
        - Compute motion projections (frame 2 and beyond)
        - Extract cell-level statistics
        - Persist segmentation to NetCDF and statistics to SQLite
-       - Register all artifacts in DataRepository
+       - Commit every artifact and table into the store
 
 
     **Modes:**
@@ -95,13 +97,10 @@ class PipelineOrchestrator:
     Larger queues enable higher throughput but use more memory. Smaller
     queues provide backpressure (slow down downloader if processor falls behind).
 
-    **File Tracking:**
+    **Resumability:**
 
-    The FileProcessingTracker SQLite database records the state of each file
-    (downloaded, regridded, analyzed, plotted, or failed). This enables:
-    - Resumable processing (restart without reprocessing completed files)
-    - Progress tracking
-    - Failure recovery and debugging
+    Completed scans are skipped through the collection catalog
+    (``scan_is_complete``), so a restarted run resumes without reprocessing.
 
     **Logging:**
 
@@ -146,20 +145,18 @@ class PipelineOrchestrator:
         # Queue for downloader -> processor communication
         self.downloader_queue: queue.Queue[object] = queue.Queue(maxsize=max_queue_size)
 
-        # Extract output_dirs from validated config
-        assert config.output_dirs is not None
-        self.output_dirs = {k: Path(v) for k, v in config.output_dirs.items()}
+        # Fail fast: the pipeline never runs against an uninitialized root.
+        self.store = Store.open(config.base_dir)
 
         # Threads (created in start())
         self.downloader: ScanSource | None = None
         self.processor: RadarProcessor | None = None
 
-        # File tracking (initialized in _setup_tracker)
-        self.tracker: FileProcessingTracker | None = None
-
-        # DataRepository (initialized in start()) - use run_id from config or generate
+        # Store composition (built in start())
         self.run_id = config.run_id
-        self.repository: DataRepository | None = None
+        self.registry: StoreRegistry | None = None
+        self.collection: Collection | None = None
+        self.history: StoreExecutionHistory | None = None
 
         # Lifecycle state
         self._stop_event = False
@@ -216,10 +213,40 @@ class PipelineOrchestrator:
         return tuple(m.name for m in mods)
 
     def _record_run_start(self, radar: str) -> None:
-        """Open the execution-history run record and print the console run header."""
+        """Begin the ONE run lifecycle in the registry and print the console header."""
+        assert self.registry is not None
+        assert self._reporter is not None
         prov = capture_provenance()
         modules = self._enabled_module_names()
-        start = RunStart(
+        config_json = self.config.model_dump_json()
+        try:
+            self.registry.get_run(self.run_id or "")
+        except StoreError:
+            self.registry.begin_run(
+                StoreRunStart(
+                    run_id=self.run_id or "",
+                    collection_id=radar,
+                    config_hash=config_hash(config_json),
+                    config_json=config_json,
+                    pipeline_version=prov.software_version,
+                    environment_json=json.dumps(
+                        {
+                            "git_commit": prov.git_commit,
+                            "hostname": prov.hostname,
+                            "username": prov.username,
+                            "python_version": prov.python_version,
+                            "platform": prov.platform,
+                            "enabled_modules": list(modules),
+                            "mode": self.config.mode,
+                            "source": self.config.source,
+                        }
+                    ),
+                )
+            )
+        else:
+            # --run-id continuation: reopen the ONE run record.
+            self.registry.resume_run(self.run_id or "")
+        header = RunStart(
             run_id=self.run_id or "",
             pipeline=self.config.source,
             pipeline_version=prov.software_version,
@@ -228,19 +255,12 @@ class PipelineOrchestrator:
             instrument="NEXRAD",
             mode=self.config.mode,
             start_time=datetime.now(UTC),
-            configuration_hash=config_hash(self.config.model_dump_json()),
-            configuration_file=str(
-                self.repository.catalog.radar_dir / f"config_run_{self.run_id}.json"
-            )
-            if self.repository
-            else "",
+            configuration_hash=config_hash(config_json),
+            configuration_file="",
             provenance=prov,
             enabled_modules=modules,
         )
-        assert self.repository is not None
-        assert self._reporter is not None
-        self.repository.history.start_run(start)
-        self._reporter.header(start)
+        self._reporter.header(header)
         self._reporter.methods(self.config, modules)
 
     def _finalize_history(self) -> None:
@@ -250,7 +270,7 @@ class PipelineOrchestrator:
         counts and printed FIRST, so it never depends on a database write succeeding
         (a DB failure during shutdown is logged loudly but cannot hide the summary).
         """
-        if self._obs is None or self.repository is None:
+        if self._obs is None or self.history is None:
             return
         warnings: list = []
         errors: list = []
@@ -270,10 +290,10 @@ class PipelineOrchestrator:
         run_id = self.run_id or ""
         try:
             if warnings:
-                self.repository.history.record_warnings(run_id, warnings)
+                self.history.record_warnings(run_id, warnings)
             if errors:
-                self.repository.history.record_errors(run_id, errors)
-            self.repository.history.finalize_run(summary)
+                self.history.record_errors(run_id, errors)
+            self.history.finalize_run(summary)
         except Exception:
             logger.exception("Failed to persist execution history on shutdown")
 
@@ -314,33 +334,19 @@ class PipelineOrchestrator:
             failures=int(m.counter_total("errors_total")),
         )
 
-    def _setup_tracker(self):
-        """Create the FileProcessingTracker that records per-file pipeline state.
-
-        Logging is not configured here — ``configure_logging`` is the single site
-        where handlers are constructed, and ``start`` calls it before this.
-        """
-        radar = self.config.downloader.radar
-
-        # Initialize file tracker (stored in RADAR_ID/analysis/) - renamed to processing_tracker
-        tracker_dir = Path(self.output_dirs["base"]) / radar / "analysis"
-        tracker_dir.mkdir(parents=True, exist_ok=True)
-        tracker_path = tracker_dir / f"{radar}_processing_tracker.db"
-        self.tracker = FileProcessingTracker(tracker_path)
-        logger.debug("Processing tracker: %s", tracker_path)
-
     def _create_source(self):
         """Resolve and construct the ingress source named by ``config.source``.
 
         Sources are swappable plugins (download, local directory, …) registered in
-        adapt.runtime.sources. All are constructed with the same signature.
+        adapt.runtime.sources. All are constructed with the same signature and
+        acquire raw scans through the injected store gateway.
         """
+        assert self.collection is not None
         source_cls = source_registry.get(self.config.source)
         return source_cls(
             config=self.config,
-            output_dirs=self.output_dirs,
             result_queue=self.downloader_queue,
-            file_tracker=self.tracker,
+            acquire=StoreAcquirer(self.collection, self.run_id or ""),
         )
 
     def start(self, max_runtime: int | None = None):
@@ -399,22 +405,18 @@ class PipelineOrchestrator:
             enabled=settings.console_logs and sys.stderr.isatty(),
             clock=time.monotonic,
         )
-        log_path = Path(self.output_dirs["logs"]) / f"pipeline_{radar}.log"
+        log_path = self.store.root / "logs" / f"pipeline_{radar}.log"
         configure_logging(settings, log_path, console_status=self._status)
         self._history_handler = HistoryLogHandler()
         logging.getLogger().addHandler(self._history_handler)
         self._reporter = RunReporter()
 
-        self._setup_tracker()
-
-        # Initialize DataRepository
+        # Store composition: collection domain, registry, run lifecycle.
         assert self.run_id is not None
-        self.repository = DataRepository(
-            run_id=self.run_id,
-            base_dir=self.output_dirs["base"],
-            radar=radar,
-            config=self.config,
-        )
+        self.collection = self.store.collection(radar)
+        self.registry = StoreRegistry.get_instance(self.store.root)
+        self.registry.register_collection(radar, source_kind=self.config.source)
+        self.history = StoreExecutionHistory(self.registry)
 
         # Build telemetry and open the root pipeline span. The root trace id is handed
         # to the processor thread (contextvars do not cross threads) so the whole run
@@ -436,25 +438,26 @@ class PipelineOrchestrator:
             self.config.mode.upper(),
         )
 
-        # Start the ingress source (resolved by name from config)
+        # Open the ONE run record and print the console header, then start ingress.
+        self._record_run_start(radar)
         self.downloader = self._create_source()
         self.downloader.start()
 
         # Start Processor thread
+        assert self.collection is not None
+        assert self.registry is not None and self.history is not None
         self.processor = RadarProcessor(
             input_queue=self.downloader_queue,
             config=self.config,
-            output_dirs=self.output_dirs,
-            file_tracker=self.tracker,
-            repository=self.repository,
+            collection=self.collection,
+            registry=self.registry,
+            run_id=self.run_id,
+            history=self.history,
             observability=self._obs,
             root_trace_id=self._root_trace_id,
             reporter=self._reporter,
         )
         self.processor.start()
-
-        # Open the execution-history run record and print the one-shot console header.
-        self._record_run_start(radar)
 
         mode = self.config.mode
         logger.debug("Pipeline running in %s mode. Press Ctrl+C to stop.", mode.upper())
@@ -607,11 +610,9 @@ class PipelineOrchestrator:
         **Operations:**
 
         1. Signals all worker threads to stop
-        2. Waits up to 5 seconds for each thread to finish
-        3. Saves accumulated cell statistics to SQLite database
-        4. Generates final summary statistics (total cells, completion times)
-        5. Closes database connections
-        6. Logs pipeline runtime and file processing statistics
+        2. Waits for each thread to finish (bounded grace periods)
+        3. Finalizes the run record in the store registry
+        4. Closes store connections and logs the runtime
 
         Notes
         -----
@@ -647,37 +648,19 @@ class PipelineOrchestrator:
                 )
         self._stop_processor()
 
-        # Save results
-        if self.processor:
-            self.processor.save_results()
-            self.processor.close_database()
-
-        # Execution history: flush captured warnings/errors, finalize the run record,
-        # and print the one-shot console summary (before the repository closes).
+        # Execution history: flush captured warnings/errors, finalize the ONE run
+        # record in the registry, and print the console summary.
         self._finalize_history()
 
-        # Finalize repository
-        if self.repository:
-            final_status = "cancelled" if self._interrupted else "completed"
-            self.repository.finalize_run(final_status)
-            if self._close_repository_on_stop:
-                self.repository.close()
+        # Release store handles (collections + registry). SqliteStore.close() is
+        # reopen-safe, so cached registry instances survive a later start().
+        if self._close_repository_on_stop:
+            self.store.close()
+            if self.registry is not None:
+                self.registry.close()
 
-        # Summary
         elapsed = time.time() - self._start_time if self._start_time else 0
-        if self.tracker:
-            stats = self.tracker.get_statistics()
-            total_cells = stats.get("total_cells", 0) or 0
-            logger.info(
-                "Pipeline stopped. Runtime: %.1fs | files=%d completed=%d cells=%d",
-                elapsed,
-                stats.get("total", 0),
-                stats.get("completed", 0),
-                total_cells,
-            )
-            self.tracker.close()
-        else:
-            logger.info("Pipeline stopped. Runtime: %.1fs", elapsed)
+        logger.info("Pipeline stopped. Runtime: %.1fs", elapsed)
 
         # Last: the run owns its log file, so releasing it is part of stopping.
         # Nothing may log after this — a later start() reconfigures from scratch.
@@ -733,7 +716,6 @@ class PipelineOrchestrator:
             hist_status,
         )
 
-    def close_repository(self) -> None:
-        """Close repository connection if present."""
-        if self.repository:
-            self.repository.close()
+    def close_store(self) -> None:
+        """Close the store's collection handles if open."""
+        self.store.close()

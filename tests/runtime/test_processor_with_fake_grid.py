@@ -35,12 +35,17 @@ def _fake_ds():
     )
 
 
-def test_processor_accepts_fake_grid(
-    tmp_path, monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
-):
+def test_processor_accepts_fake_grid(tmp_path, monkeypatch, pipeline_config, store_env):
     """Processor handles a successful 2-frame pipeline result correctly."""
     in_q = queue.Queue()
-    proc = RadarProcessor(in_q, pipeline_config, pipeline_output_dirs, repository=test_repository)
+    proc = RadarProcessor(
+        in_q,
+        pipeline_config,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
+    )
 
     scan_times = [
         datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC),
@@ -66,7 +71,7 @@ def test_processor_accepts_fake_grid(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi_result)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    ok1 = proc.process_file(_msg("/fake/file_1", scan_time=_MT1))
-    ok2 = proc.process_file(_msg("/fake/file_2", scan_time=_MT2))
+    ok1 = proc.process_file(_msg(store_env, tmp_path, "file_1", scan_time=_MT1))
+    ok2 = proc.process_file(_msg(store_env, tmp_path, "file_2", scan_time=_MT2))
     assert ok1 is True
     assert ok2 is True

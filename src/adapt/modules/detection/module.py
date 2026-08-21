@@ -80,6 +80,22 @@ def _label_maxtree(binary: np.ndarray, field: np.ndarray, h: float = 5.0) -> np.
 # ---------------------------------------------------------------------------
 
 
+def _with_cf_time(grid_ds: xr.Dataset) -> xr.Dataset:
+    """Return the grid with CF-encoded (numeric + units) time for ``Xgrid``.
+
+    ``pyart.xradar.Xgrid`` requires the un-decoded representation (numeric
+    values with a ``units`` attr); the in-memory grid from ``Grid.to_xarray``
+    carries decoded datetimes, so re-encode exactly what an un-decoded file
+    open would present.
+    """
+    if "units" in grid_ds["time"].attrs:
+        return grid_ds
+    encoded = xr.conventions.encode_cf_variable(grid_ds["time"].variable)
+    out = grid_ds.copy()
+    out["time"] = xr.DataArray(encoded.data, dims=encoded.dims, attrs=dict(encoded.attrs))
+    return out
+
+
 def _grid_spacing(xgrid) -> tuple[float, float]:
     """Horizontal grid spacing (dx, dy) in metres from an Xgrid's x/y axes."""
     x = np.asarray(xgrid.x["data"])
@@ -159,7 +175,7 @@ class RadarCellSegmenter:
     - `method` : str
         ``threshold`` (default), ``conv_strat_raut``, ``conv_strat_yuter``,
         ``feature_detection`` or ``steiner_conv_strat``.
-        The pyart methods require the 3D gridded NetCDF (``grid_nc_path``).
+        The pyart methods require the 3D grid dataset (``grid_ds``).
     - `method_params` : dict
         Resolved parameters for the selected method. For ``threshold`` this is
         ``{"threshold": <dBZ>}``; for the pyart methods it is the algorithm's
@@ -211,7 +227,7 @@ class RadarCellSegmenter:
             self.method_params,
         )
 
-    def segment(self, ds: xr.Dataset, grid_nc_path: str | None = None) -> xr.Dataset:
+    def segment(self, ds: xr.Dataset, grid_ds: xr.Dataset | None = None) -> xr.Dataset:
         """Segment 2D reflectivity and return dataset with cell labels.
 
         The configured ``method`` determines how the convective mask is built;
@@ -225,10 +241,10 @@ class RadarCellSegmenter:
             2D dataset (dims y, x) with the reflectivity field, sliced at the
             analysis z-level. Supplies the reflectivity, coordinates, and attrs
             for the output.
-        grid_nc_path : str | None
-            Path to the full 3D gridded NetCDF. Required by the pyart
-            convective/stratiform methods (they classify the 3D grid via
-            ``pyart.xradar.Xgrid``); unused by ``threshold``.
+        grid_ds : xr.Dataset | None
+            Full 3D gridded dataset (ingest's in-memory output). Required by
+            the pyart convective/stratiform methods (they classify the 3D grid
+            via ``pyart.xradar.Xgrid``); unused by ``threshold``.
 
         Returns
         -------
@@ -238,7 +254,7 @@ class RadarCellSegmenter:
             record method, threshold, z-level, and size-filter settings.
         """
         refl = ds[self.refl_name].values
-        binary_mask = self._convective_mask(refl, grid_nc_path)
+        binary_mask = self._convective_mask(refl, grid_ds)
 
         labels = self._binary_to_labels(
             binary_mask,
@@ -278,7 +294,7 @@ class RadarCellSegmenter:
         )
         return ds_out
 
-    def _convective_mask(self, refl: np.ndarray, grid_nc_path: str | None) -> np.ndarray:
+    def _convective_mask(self, refl: np.ndarray, grid_ds: xr.Dataset | None) -> np.ndarray:
         """Build the 2D boolean convective mask for the configured method.
 
         ``threshold`` masks the 2D reflectivity directly; every other method
@@ -287,25 +303,24 @@ class RadarCellSegmenter:
         """
         if self.method == "threshold":
             return refl > self.method_params["threshold"]
-        return self._pyart_conv_strat_mask(grid_nc_path)
+        return self._pyart_conv_strat_mask(grid_ds)
 
-    def _pyart_conv_strat_mask(self, grid_nc_path: str | None) -> np.ndarray:
+    def _pyart_conv_strat_mask(self, grid_ds: xr.Dataset | None) -> np.ndarray:
         """Classify the 3D grid with the configured pyart method; return convective mask.
 
-        Opens the gridded NetCDF as a fresh dataset and wraps it in
-        ``pyart.xradar.Xgrid`` (the grid representation the pyart retrievals
-        consume). The returned mask is 2D (y, x) at the analysis z-level,
-        aligned with the 2D reflectivity used for labeling.
+        Wraps ingest's in-memory 3D grid in ``pyart.xradar.Xgrid`` (the grid
+        representation the pyart retrievals consume). The returned mask is 2D
+        (y, x) at the analysis z-level, aligned with the 2D reflectivity used
+        for labeling.
         """
-        if grid_nc_path is None:
+        if grid_ds is None:
             raise RuntimeError(
-                f"Segmentation method '{self.method}' requires the gridded 3D NetCDF "
-                "(grid_nc_path), but none was produced. Enable regridder.save_netcdf."
+                f"Segmentation method '{self.method}' requires the 3D grid dataset "
+                "(grid_ds), but none was provided."
             )
         masker = _CONV_STRAT_MASKERS[self.method]
-        with xr.open_dataset(grid_nc_path, decode_times=False) as grid_ds:
-            xgrid = pyart.xradar.Xgrid(grid_ds)
-            return masker(xgrid, self.refl_name, self.z_level, self.method_params)
+        xgrid = pyart.xradar.Xgrid(_with_cf_time(grid_ds))
+        return masker(xgrid, self.refl_name, self.z_level, self.method_params)
 
     def _binary_to_labels(
         self,

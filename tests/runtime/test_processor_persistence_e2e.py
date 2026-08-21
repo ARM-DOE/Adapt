@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from adapt.api.client import RepositoryClient
+from adapt.persistence.products import SchemaLedger
 from adapt.persistence.track_store import TrackStore
 from adapt.runtime.processor import RadarProcessor
 from tests.helpers.queue_msg import msg as _msg
@@ -42,10 +42,15 @@ def _fake_ds():
 
 
 def test_process_file_persists_all_declared_outputs(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+    monkeypatch, pipeline_config, store_env, tmp_path
 ):
     proc = RadarProcessor(
-        queue.Queue(), pipeline_config, pipeline_output_dirs, repository=test_repository
+        queue.Queue(),
+        pipeline_config,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
     )
 
     scan_times = [_T1, _T2]
@@ -85,31 +90,36 @@ def test_process_file_persists_all_declared_outputs(
     # executors don't carry the module configs it needs.
     monkeypatch.setattr(proc, "_post_executor", None)
 
-    assert proc.process_file(_msg("/fake/TEST_20240518_120000", scan_time=_T1)) is True
-    assert proc.process_file(_msg("/fake/TEST_20240518_120500", scan_time=_T2)) is True
+    first = _msg(store_env, tmp_path, "TEST_20240518_120000", scan_time=_T1)
+    second = _msg(store_env, tmp_path, "TEST_20240518_120500", scan_time=_T2)
+    assert proc.process_file(first) is True
+    assert proc.process_file(second) is True
 
     # Analysis NetCDF artifact written from tracking's declared analysis_ds spec.
-    nc_items = test_repository.query(product_type="segmentation2d")
+    catalog = store_env.collection.catalog
+    nc_items = catalog.list_artifacts(run_id=store_env.run_id, artifact_type="segmentation2d")
     assert len(nc_items) == 1
-    ds = test_repository.open_dataset(nc_items[0]["artifact_id"])
+    ds = xr.open_dataset(store_env.collection.objects_dir / nc_items[0]["object_name"])
     assert ds.attrs["radar"] == "TEST_RADAR"
+    assert ds.attrs["scan_id"] == second["scan_id"]
     ds.close()
+    assert catalog.parents_of(nc_items[0]["artifact_id"]) == [second["artifact_id"]]
 
-    # Parquet rows from analysis's declared specs.
-    pq_items = test_repository.query(product_type="analysis2d")
-    assert len(pq_items) >= 1
+    # Table rows from analysis's declared ProductTableWrite specs.
+    import sqlite3
+
+    conn = sqlite3.connect(store_env.collection.products_path)
+    try:
+        stats_rows = conn.execute("SELECT COUNT(*) FROM cell_stats").fetchone()[0]
+    finally:
+        conn.close()
+    assert stats_rows >= 1
 
     # Tracking tables from the declared TrackTablesWrite spec.
-    with TrackStore(test_repository.catalog.db_path) as store:
-        rows = store.get_cells_by_scan(test_repository.run_id, "sid-TEST_20240518_120500")
+    ledger = SchemaLedger(store_env.collection.products_path, store_env.collection.catalog)
+    with TrackStore(store_env.collection.products_path, ledger=ledger) as store:
+        rows = store.get_cells_by_scan(store_env.run_id, second["scan_id"])
     assert rows["cell_uid"].tolist() == ["uid-1"]
 
-    # Generic read API discovers the core tables in the same repository.
-    client = RepositoryClient(test_repository.base_dir)
-    try:
-        tables = set(client.tables("TEST_RADAR")["table_name"])
-        assert {"cells_by_scan", "cell_events", "cell_tracks"} <= tables
-        tracked = client.table("cells_by_scan", radar="TEST_RADAR", run_id=test_repository.run_id)
-        assert tracked["cell_uid"].tolist() == ["uid-1"]
-    finally:
-        client.close()
+    # The second scan is complete: all required products were linked.
+    assert catalog.scan_is_complete(store_env.run_id, second["scan_id"])

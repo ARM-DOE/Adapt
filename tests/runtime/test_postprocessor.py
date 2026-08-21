@@ -1,10 +1,11 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""PostProcessor enriches an existing repository by composing the shared infra.
+"""PostProcessor enriches an existing stored run by composing the shared infra.
 
 It reuses the registry, GraphBuilder/GraphExecutor (the real resolution path),
-and ModuleOutputWriter — writing only extension tables, never core tables.
+and the store's frozen-schema writer — module-owned extension tables only,
+never tracking core tables.
 """
 
 import sqlite3
@@ -14,10 +15,9 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
-from adapt.contracts import SqliteTable
+from adapt.contracts import ProductTableWrite
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
-from adapt.persistence import ProductType
 from adapt.runtime.postprocessor import PostProcessor
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -42,7 +42,7 @@ class _FakePostModule(BaseModule):
     inputs = ["run_id"]
     outputs = ["fake_rows"]
     persistence = (
-        SqliteTable(key="fake_rows", table="fake_ext", primary_key=("run_id", "cell_uid")),
+        ProductTableWrite(key="fake_rows", table="fake_ext", primary_key=("run_id", "cell_uid")),
     )
 
     def run(self, context: dict) -> dict:
@@ -59,7 +59,9 @@ class _CoreWritingModule(BaseModule):
     inputs = ["run_id"]
     outputs = ["rogue_rows"]
     persistence = (
-        SqliteTable(key="rogue_rows", table="cells_by_scan", primary_key=("run_id", "cell_uid")),
+        ProductTableWrite(
+            key="rogue_rows", table="cells_by_scan", primary_key=("run_id", "cell_uid")
+        ),
     )
 
     def run(self, context: dict) -> dict:
@@ -72,8 +74,8 @@ class _TwoTableModule(BaseModule):
     inputs = ["run_id"]
     outputs = ["rows_a", "rows_b"]
     persistence = (
-        SqliteTable(key="rows_a", table="ext_a", primary_key=("cell_uid",)),
-        SqliteTable(key="rows_b", table="ext_b", primary_key=("flash_id",)),
+        ProductTableWrite(key="rows_a", table="ext_a", primary_key=("cell_uid",)),
+        ProductTableWrite(key="rows_b", table="ext_b", primary_key=("flash_id",)),
     )
 
     def run(self, context: dict) -> dict:
@@ -88,11 +90,13 @@ def _register(module_cls):
     return module_cls.name
 
 
-def test_module_can_write_multiple_extension_tables(pipeline_config, test_repository):
+def test_module_can_write_multiple_extension_tables(pipeline_config, store_env):
     _register(_TwoTableModule)
     try:
-        PostProcessor(test_repository, pipeline_config).run(modules=["two_table_post"])
-        conn = sqlite3.connect(test_repository.catalog.db_path)
+        PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        ).run(modules=["two_table_post"])
+        conn = sqlite3.connect(store_env.collection.products_path)
         try:
             a = conn.execute("SELECT cell_uid, v FROM ext_a").fetchall()
             b = conn.execute("SELECT flash_id, w FROM ext_b").fetchall()
@@ -104,16 +108,18 @@ def test_module_can_write_multiple_extension_tables(pipeline_config, test_reposi
         registry.unregister("two_table_post")
 
 
-def test_runs_single_module_and_writes_extension_table(pipeline_config, test_repository):
+def test_runs_single_module_and_writes_extension_table(pipeline_config, store_env):
     _register(_FakePostModule)
     try:
-        pp = PostProcessor(test_repository, pipeline_config)
+        pp = PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        )
         result = pp.run(modules=["fake_post"])
 
         # DAG resolution path produced the module's output into the context.
         assert "fake_rows" in result
 
-        conn = sqlite3.connect(test_repository.catalog.db_path)
+        conn = sqlite3.connect(store_env.collection.products_path)
         try:
             rows = conn.execute("SELECT cell_uid, value FROM fake_ext").fetchall()
         finally:
@@ -123,11 +129,15 @@ def test_runs_single_module_and_writes_extension_table(pipeline_config, test_rep
         registry.unregister("fake_post")
 
 
-def test_cannot_write_core_table(pipeline_config, test_repository):
+def test_cannot_write_core_table(pipeline_config, store_env):
+    from adapt.persistence.errors import StoreError
+
     _register(_CoreWritingModule)
     try:
-        pp = PostProcessor(test_repository, pipeline_config)
-        with pytest.raises(ValueError, match="core table"):
+        pp = PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        )
+        with pytest.raises(StoreError, match="tracking core table"):
             pp.run(modules=["rogue_post"])
     finally:
         registry.unregister("rogue_post")
@@ -138,7 +148,7 @@ class _NeedsMasksModule(BaseModule):
     pipeline_phase = POSTPROCESS_PHASE
     inputs = ["minute_masks", "radar_origin"]
     outputs = ["probe_rows"]
-    persistence = (SqliteTable(key="probe_rows", table="probe_ext", primary_key=("n",)),)
+    persistence = (ProductTableWrite(key="probe_rows", table="probe_ext", primary_key=("n",)),)
     captured: dict = {}
 
     def run(self, context: dict) -> dict:
@@ -149,7 +159,8 @@ class _NeedsMasksModule(BaseModule):
         return {"probe_rows": pd.DataFrame([{"n": len(context["minute_masks"]), "ok": 1}])}
 
 
-def test_injects_minute_masks_and_radar_origin(pipeline_config, test_repository):
+def test_injects_minute_masks_and_radar_origin(pipeline_config, store_env):
+    from adapt.persistence.objects import ArtifactMeta, ObjectStore
     from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 
     ds = make_analysis_ds(
@@ -164,17 +175,26 @@ def test_injects_minute_masks_and_radar_origin(pipeline_config, test_repository)
         },
         registration_uids=["uid-A"],
     )
-    test_repository.write_netcdf(
-        ds=ds,
-        product_type=ProductType.ANALYSIS_NC,
-        scan_time=datetime(2024, 5, 18, 12, 3, 0, tzinfo=UTC),
-        producer="test",
+    objects = ObjectStore(store_env.collection.objects_dir, store_env.collection.catalog)
+    handle = objects.begin(suffix=".nc")
+    ds.to_netcdf(handle.staging_path)
+    objects.commit(
+        handle,
+        ArtifactMeta(
+            artifact_type="segmentation2d",
+            producer="test",
+            run_id=store_env.run_id,
+            scan_id="sid-mask",
+            observation_time=datetime(2024, 5, 18, 12, 3, 0, tzinfo=UTC),
+        ),
     )
-    test_repository.registry.ensure_radar_location("TEST_RADAR", 40.0, -88.0)
+    store_env.registry.ensure_collection_location("TEST_RADAR", lat=40.0, lon=-88.0)
 
     _register(_NeedsMasksModule)
     try:
-        PostProcessor(test_repository, pipeline_config).run(modules=["needs_masks_post"])
+        PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        ).run(modules=["needs_masks_post"])
         # 12:01, 12:02 advected + 12:03 real segmentation (replaces fraction-1 frame)
         assert _NeedsMasksModule.captured["n_masks"] == 3
         assert _NeedsMasksModule.captured["radar_origin"] == (40.0, -88.0)
@@ -182,10 +202,12 @@ def test_injects_minute_masks_and_radar_origin(pipeline_config, test_repository)
         registry.unregister("needs_masks_post")
 
 
-def test_unknown_module_name_raises(pipeline_config, test_repository):
+def test_unknown_module_name_raises(pipeline_config, store_env):
     _register(_FakePostModule)
     try:
-        pp = PostProcessor(test_repository, pipeline_config)
+        pp = PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        )
         with pytest.raises(ValueError, match="Unknown module"):
             pp.run(modules=["does_not_exist"])
     finally:

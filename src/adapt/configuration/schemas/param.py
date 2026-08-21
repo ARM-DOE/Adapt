@@ -64,10 +64,6 @@ class RegridderConfig(AdaptBaseModel):
     roi_func: Literal["dist_beam", "dist"] = "dist_beam"
     min_radius: float = Field(1750.0, gt=0)
     weighting_function: Literal["cressman", "barnes", "nearest"] = "cressman"
-    save_netcdf: bool = True
-    netcdf_save_retries: int = Field(
-        3, ge=1, description="NetCDF write attempts before raising (when save_netcdf is set)"
-    )
 
 
 class SegmenterConfig(AdaptBaseModel):

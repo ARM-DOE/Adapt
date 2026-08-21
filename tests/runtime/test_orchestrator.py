@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import pytest
 
@@ -7,13 +8,10 @@ from adapt.runtime.orchestrator import PipelineOrchestrator
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 
-def test_orchestrator_build_run_summary_aggregates_metrics_and_history(
-    pipeline_config, test_repository
-):
+def test_orchestrator_build_run_summary_aggregates_metrics_and_history(pipeline_config):
     orch = PipelineOrchestrator(pipeline_config)
     orch._obs = orch._build_observability()
-    orch.repository = test_repository
-    orch.run_id = test_repository.run_id
+    orch.run_id = "test-run"
     orch._start_time = time.time() - 10
 
     m = orch._obs.metrics
@@ -47,15 +45,15 @@ def test_orchestrator_build_run_summary_aggregates_metrics_and_history(
 
 
 def test_finalize_history_prints_summary_even_when_db_write_fails(
-    pipeline_config, test_repository, monkeypatch
+    pipeline_config, store_env, monkeypatch
 ):
     """The console summary must be emitted on shutdown even if the history DB write
     raises — it is printed before persistence and must not depend on it.
     """
     orch = PipelineOrchestrator(pipeline_config)
     orch._obs = orch._build_observability()
-    orch.repository = test_repository
-    orch.run_id = test_repository.run_id
+    orch.history = store_env.history
+    orch.run_id = store_env.run_id
     orch._start_time = time.time() - 5
     orch._history_handler = None  # no buffered warnings/errors
 
@@ -70,7 +68,7 @@ def test_finalize_history_prints_summary_even_when_db_write_fails(
     def _boom(_summary):
         raise RuntimeError("db locked")
 
-    monkeypatch.setattr(test_repository.history, "finalize_run", _boom)
+    monkeypatch.setattr(orch.history, "finalize_run", _boom)
 
     orch._finalize_history()  # must not raise
 
@@ -81,16 +79,6 @@ def test_orchestrator_initialization(pipeline_config):
     """Orchestrator initializes with config."""
     orch = PipelineOrchestrator(pipeline_config)
     assert orch.downloader_queue is not None
-
-
-def test_orchestrator_logging_and_tracker(pipeline_config):
-    """Orchestrator sets up the file tracker."""
-    orch = PipelineOrchestrator(pipeline_config)
-    orch._setup_tracker()
-    try:
-        assert orch.tracker is not None
-    finally:
-        orch.tracker.close()
 
 
 def test_orchestrator_builds_working_observability_from_config(pipeline_config):
@@ -134,7 +122,7 @@ def test_orchestrator_config_storage(pipeline_config):
     orch = PipelineOrchestrator(pipeline_config)
 
     assert orch.config == pipeline_config
-    assert orch.output_dirs is not None  # Should be extracted from config
+    assert orch.store.root == Path(pipeline_config.base_dir)
 
 
 def test_orchestrator_queue_types(pipeline_config):
@@ -146,20 +134,13 @@ def test_orchestrator_queue_types(pipeline_config):
     assert isinstance(orch.downloader_queue, queue.Queue)
 
 
-def test_orchestrator_tracker_database_path(pipeline_config):
-    """Test orchestrator creates tracker with correct database path (after setup)."""
-    orch = PipelineOrchestrator(pipeline_config)
-    orch._setup_tracker()
-    try:
-        assert orch.tracker is not None
-        # Database should be in RADAR_ID/analysis/ directory
-        radar_id = pipeline_config.downloader.radar
-        expected_db = (
-            orch.output_dirs["base"] / radar_id / "analysis" / f"{radar_id}_processing_tracker.db"
-        )
-        assert expected_db.exists()
-    finally:
-        orch.tracker.close()
+def test_orchestrator_uninitialized_root_raises_naming_adapt_init(temp_dir, pipeline_config):
+    """The pipeline never runs against an uninitialized root."""
+    from adapt.persistence.errors import StoreError
+
+    bare = pipeline_config.model_copy(update={"base_dir": str(temp_dir / "not_a_store")})
+    with pytest.raises(StoreError, match="adapt init"):
+        PipelineOrchestrator(bare)
 
 
 def test_orchestrator_mode_from_config(pipeline_config):

@@ -18,12 +18,9 @@ class DetectModule(BaseModule):
     --------------
     grid_ds_2d : xr.Dataset
         2D Cartesian dataset (output of LoadModule).
-    grid_nc_path : str, optional
-        Path to the full 3D gridded NetCDF (also an ingest output). Read
-        opportunistically from the shared context — the pyart convective/
-        stratiform methods require it; ``threshold`` does not. Not declared as a
-        formal input so the graph is not gated on it (ingest omits it when
-        ``regridder.save_netcdf`` is off).
+    grid_ds : xr.Dataset
+        Full 3D Cartesian dataset (also an ingest output). The pyart
+        convective/stratiform methods classify it; ``threshold`` ignores it.
     config : InternalConfig
         Runtime configuration.
 
@@ -39,7 +36,7 @@ class DetectModule(BaseModule):
     summary = "segment cells from the grid"
     required_history = 1
     pipeline_phase = 0
-    inputs = ["grid_ds_2d", "detection_config"]
+    inputs = ["grid_ds_2d", "grid_ds", "detection_config"]
     outputs = ["segmented_ds", "num_cells"]
     input_contracts = {"grid_ds_2d": check_grid_ds_2d}
     output_contracts = {"segmented_ds": check_segmented_ds}
@@ -68,14 +65,11 @@ class DetectModule(BaseModule):
     def run(self, context: dict) -> dict:
         config = context["detection_config"]
         ds_2d = context["grid_ds_2d"]
-        # Present only when ingest wrote the 3D grid (save_netcdf); the pyart
-        # methods require it and raise loudly if it is absent.
-        grid_nc_path = context.get("grid_nc_path")
 
         if self._segmenter is None:
             self._segmenter = RadarCellSegmenter(config)
 
-        segmented = self._segmenter.segment(ds_2d, grid_nc_path)
+        segmented = self._segmenter.segment(ds_2d, context["grid_ds"])
         num_cells = int(segmented[config.labels_var].max().item())
 
         return {"segmented_ds": segmented, "num_cells": num_cells}

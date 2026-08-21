@@ -32,9 +32,7 @@ def _grid(dims, data, coords):
 
 def _run(grid):
     cfg = CellVolumeStatsConfig()
-    return CellVolumeStatsAlgorithm(cfg).compute_cell(
-        grid, LABELS, 1, "R1", "2024-01-01T00:00:00Z", "uid-1"
-    )
+    return CellVolumeStatsAlgorithm(cfg).compute_cell(grid, LABELS, 1, "uid-1")
 
 
 class TestDimRobustness:

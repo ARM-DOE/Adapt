@@ -51,14 +51,16 @@ def _obs():
 
 
 def test_processor_emits_scan_metrics_and_binds_scan_id(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+    monkeypatch, pipeline_config, store_env, tmp_path
 ):
     obs = _obs()
     proc = RadarProcessor(
         queue.Queue(),
         pipeline_config,
-        pipeline_output_dirs,
-        repository=test_repository,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
         observability=obs,
     )
 
@@ -87,17 +89,19 @@ def test_processor_emits_scan_metrics_and_binds_scan_id(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    assert proc.process_file(_msg("/fake/file_1", scan_time=_MT1)) is True
-    assert proc.process_file(_msg("/fake/file_2", scan_time=_MT2)) is True
+    first = _msg(store_env, tmp_path, "file_1", scan_time=_MT1)
+    second = _msg(store_env, tmp_path, "file_2", scan_time=_MT2)
+    assert proc.process_file(first) is True
+    assert proc.process_file(second) is True
 
     assert obs.metrics.counter_total("files_processed_total") == 2.0
     assert len(obs.metrics.histogram_values("scan_processing_time")) == 2
-    assert seen_scan_ids == ["sid-file_1", "sid-file_2"]  # minted scan_id bound while executors ran
+    assert seen_scan_ids == [first["scan_id"], second["scan_id"]]  # bound while executors ran
     assert obs.drain_spans() == []  # processor drained each scan's spans for history
 
 
 def test_processor_logs_single_enriched_traceback_on_scan_failure(
-    monkeypatch, caplog, pipeline_config, pipeline_output_dirs, test_repository
+    monkeypatch, caplog, pipeline_config, store_env, tmp_path
 ):
     """A failing scan must log exactly one stack trace, carrying scan/elapsed/type.
 
@@ -109,8 +113,10 @@ def test_processor_logs_single_enriched_traceback_on_scan_failure(
     proc = RadarProcessor(
         queue.Queue(),
         pipeline_config,
-        pipeline_output_dirs,
-        repository=test_repository,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
         observability=obs,
     )
 
@@ -120,7 +126,7 @@ def test_processor_logs_single_enriched_traceback_on_scan_failure(
     monkeypatch.setattr(proc._executors[1], "run", _boom)
 
     with caplog.at_level(logging.ERROR):
-        result = proc.process_file(_msg("/fake/file_9"))
+        result = proc.process_file(_msg(store_env, tmp_path, "file_9"))
 
     assert result is False
     traced = [r for r in caplog.records if r.exc_info]
@@ -133,7 +139,7 @@ def test_processor_logs_single_enriched_traceback_on_scan_failure(
 
 
 def test_processor_emits_per_scan_progress_from_spans(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+    monkeypatch, pipeline_config, store_env, tmp_path
 ):
     """After each scan the processor hands the captured module spans to the reporter,
     so the console progress line is driven by telemetry, not module-level prints.
@@ -149,8 +155,10 @@ def test_processor_emits_per_scan_progress_from_spans(
     proc = RadarProcessor(
         queue.Queue(),
         pipeline_config,
-        pipeline_output_dirs,
-        repository=test_repository,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
         observability=obs,
         reporter=_Reporter(),
     )
@@ -178,7 +186,7 @@ def test_processor_emits_per_scan_progress_from_spans(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    assert proc.process_file(_msg("/fake/file_7")) is True
+    assert proc.process_file(_msg(store_env, tmp_path, "file_7")) is True
 
     assert len(calls) == 1
     scan_id, stage_names, _ = calls[0]
@@ -186,9 +194,7 @@ def test_processor_emits_per_scan_progress_from_spans(
     assert stage_names  # the per-scan line carries the executed stages
 
 
-def test_processor_publishes_current_activity(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
-):
+def test_processor_publishes_current_activity(monkeypatch, pipeline_config, store_env, tmp_path):
     """The processor exposes a short 'what am I doing' string for the status line:
     'processing <scan_id>' while a scan runs, None when idle.
     """
@@ -196,8 +202,10 @@ def test_processor_publishes_current_activity(
     proc = RadarProcessor(
         queue.Queue(),
         pipeline_config,
-        pipeline_output_dirs,
-        repository=test_repository,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
         observability=obs,
     )
 
@@ -224,7 +232,8 @@ def test_processor_publishes_current_activity(
     monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
-    proc.process_file(_msg("/fake/file_3"))
+    message = _msg(store_env, tmp_path, "file_3")
+    proc.process_file(message)
 
-    assert seen_during == ["processing sid-file_3"]  # set while the scan ran
+    assert seen_during == [f"processing {message['scan_id']}"]  # set while the scan ran
     assert proc.current_activity() is None  # cleared afterwards

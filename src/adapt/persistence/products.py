@@ -276,7 +276,10 @@ class TableWriter:
                 )
             actual = _sqlite_type(df[col])
             expected = frozen_types[col]
-            if actual != expected and not (actual == "INTEGER" and expected == "REAL"):
+            # INTEGER and REAL interchange losslessly under SQLite affinity;
+            # pandas promotes int columns to float64 whenever a NaN appears,
+            # so a first-frame INTEGER freeze must keep accepting those frames.
+            if actual != expected and not ({actual, expected} == {"INTEGER", "REAL"}):
                 raise StoreError(
                     f"{self._spec.table}: column '{col}' has incompatible dtype "
                     f"{actual}; frozen as {expected}"

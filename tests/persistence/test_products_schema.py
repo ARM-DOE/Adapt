@@ -173,6 +173,18 @@ class TestEnforcement:
         rows = _rows(collection, "SELECT area FROM cell_stats WHERE scan_id = 'def456'")
         assert sorted(r["area"] for r in rows) == [1, 2]
 
+    def test_nan_promoted_float_into_int_column_allowed(self, writer, collection):
+        # A cell with no match promotes an int column to float64 (NaN). The
+        # values are still integers; freezing must not make later scans fail.
+        writer.write(_frame(pixel_count=[40, 50]), _scan_meta())
+
+        writer.write(_frame(pixel_count=[60.0, float("nan")]), _scan_meta("def456"))
+
+        rows = _rows(collection, "SELECT pixel_count FROM cell_stats WHERE scan_id = 'def456'")
+        values = sorted(r["pixel_count"] for r in rows if r["pixel_count"] is not None)
+        assert values == [60]
+        assert sum(r["pixel_count"] is None for r in rows) == 1
+
     def test_duplicate_primary_key_within_frame_rejected(self, writer):
         with pytest.raises(StoreError, match="duplicate"):
             writer.write(_frame(cell_label=[7, 7]), _scan_meta())

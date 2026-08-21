@@ -28,6 +28,8 @@ class FilterSpec:
     n_scans_min: int | None = None
     max_area_min_km2: float | None = None
     max_area_max_km2: float | None = None
+    # Filters the cell_tracks.max_reflectivity column: max of the run's
+    # TRACKED field (dBZ only for reflectivity-tracked runs).
     max_refl_min_dbz: float | None = None
     max_refl_max_dbz: float | None = None
     origin_types: frozenset[str] | None = None

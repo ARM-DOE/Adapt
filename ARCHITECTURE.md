@@ -114,6 +114,12 @@ See `docs/design/` for the full decision records.
 - Contracts are validators and frozen dataclasses, not ABCs.
 - The store is SQLite catalogs + NetCDF objects; conversion happens once at
   the boundary.
+- Two name bindings, each in one place: source→canonical names via
+  `reader.field_map` (applied inside ingest); role→field via
+  `global_.tracking_field` (which canonical field the core runs on).
+  Stat columns are minted only by `adapt.contracts.stat_column`.
+- `cell_uid` v2 = hash(scan_id, cell_label): deterministic, collision-free,
+  field-free. Stored runs keep their minted uids; nothing recomputes them.
 
 ## Evidence required with any change
 

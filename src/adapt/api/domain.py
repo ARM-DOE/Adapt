@@ -50,6 +50,9 @@ class Track:
     origin_type: str  # INITIATION | SPLIT | MERGE | UNKNOWN
     termination_type: str  # TERMINATION | MERGED | ACTIVE_AT_END | UNKNOWN
     max_area_km2: float
+    # Max of the run's TRACKED field over the cell's life (see
+    # StoreClient.run_tracking_field) — dBZ only when that field is
+    # reflectivity. Column name kept for store compatibility.
     max_reflectivity_dbz: float
 
 

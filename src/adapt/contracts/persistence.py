@@ -9,15 +9,6 @@ from datetime import datetime
 
 
 @dataclass(frozen=True)
-class RegisterFileArtifact:
-    """Register an already-written file (context key holds its path) in the catalog."""
-
-    key: str
-    product_type: str  # catalog vocabulary, e.g. "gridded3d"
-    producer: str
-
-
-@dataclass(frozen=True)
 class NetcdfArtifact:
     """Write an xarray.Dataset (context key) as a NetCDF artifact."""
 
@@ -28,21 +19,12 @@ class NetcdfArtifact:
 
 
 @dataclass(frozen=True)
-class ParquetArtifact:
-    """Append a DataFrame (context key) to the run's Parquet store for this product type."""
-
-    key: str
-    product_type: str  # e.g. "analysis2d"
-    producer: str
-
-
-@dataclass(frozen=True)
 class TrackTablesWrite:
     """Joint write of the core tracking tables; consumes four context keys.
 
     DEBT: encodes tracking science that lives in TrackStore.write_scan.
     Follow-up ticket: tracking emits final row DataFrames so this decomposes
-    into plain SqliteTable specs.
+    into plain ProductTableWrite specs.
     """
 
     tracked_key: str
@@ -69,8 +51,14 @@ class ScanRecord:
 
 
 @dataclass(frozen=True)
-class SqliteTable:
-    """Upsert a DataFrame (context key) into an extension table in catalog.db."""
+class ProductTableWrite:
+    """Upsert a DataFrame (context key) into a module-owned products.db table.
+
+    The schema freezes on the first non-empty frame (SchemaLedger); the table's
+    granularity derives from the primary key: ``valid_time`` in the key marks a
+    time-granular product, otherwise ``scan_id`` marks scan granularity,
+    otherwise the table is run-granular.
+    """
 
     key: str
     table: str
@@ -78,9 +66,7 @@ class SqliteTable:
     index_columns: tuple[str, ...] = ()
 
 
-PersistenceSpec = (
-    RegisterFileArtifact | NetcdfArtifact | ParquetArtifact | TrackTablesWrite | SqliteTable
-)
+PersistenceSpec = NetcdfArtifact | TrackTablesWrite | ProductTableWrite
 
 
 @dataclass(frozen=True)
@@ -101,4 +87,4 @@ class PersistenceMeta:
     scan_id: str | None  # content-derived scan identity (join key)
     run_id: str
     source_file: str  # source scan path -> filename_stem, ds.attrs["source"]
-    dataset_id: str  # domain-neutral dataset identity; value = radar ID today
+    collection_id: str  # collection (radar/site data domain) identity; value = radar ID today

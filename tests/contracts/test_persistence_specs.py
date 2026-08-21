@@ -11,24 +11,24 @@ pytestmark = pytest.mark.unit
 
 
 def test_specs_are_frozen_value_types():
-    from adapt.contracts import RegisterFileArtifact, SqliteTable
+    from adapt.contracts import NetcdfArtifact, ProductTableWrite
 
-    spec = RegisterFileArtifact(key="grid_nc_path", product_type="gridded3d", producer="ingest")
+    spec = ProductTableWrite(key="cell_stats", table="cell_stats", primary_key=("run_id",))
     with pytest.raises(dataclasses.FrozenInstanceError):
         spec.key = "other"
-    table = SqliteTable(key="rows", table="t", primary_key=("run_id",))
-    assert table.index_columns == ()
+    nc = NetcdfArtifact(key="ds", product_type="gridded3d", producer="ingest", description="d")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        nc.key = "other"
+    assert ProductTableWrite(key="r", table="t", primary_key=("run_id",)).index_columns == ()
 
 
 def test_all_spec_types_exported():
     from adapt import contracts
 
     for name in (
-        "RegisterFileArtifact",
+        "ProductTableWrite",
         "NetcdfArtifact",
-        "ParquetArtifact",
         "TrackTablesWrite",
-        "SqliteTable",
         "PersistenceSpec",
         "PersistenceMeta",
     ):

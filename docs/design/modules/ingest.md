@@ -39,11 +39,12 @@ A `Path` object pointing to a downloaded NEXRAD Level-II file (`.gz` or uncompre
 
 The resolved `InternalConfig`. Ingest reads:
 - `config.regridder.*` — grid shape, spatial extent, interpolation parameters
-- `config.global_.var_names` — canonical field name mappings
+- `config.reader.field_map` — source-to-canonical variable renames applied once here
+- `config.reader.fields` — explicit canonical keep-list (empty = keep all)
 
 ### Output: `grid_ds`
 
-A 3-dimensional `xarray.Dataset` on a regular Cartesian grid `(z, y, x)`. All coordinates are in metres from the radar origin. Reflectivity and velocity fields are renamed to canonical names defined in `config.global_.var_names`.
+A 3-dimensional `xarray.Dataset` on a regular Cartesian grid `(z, y, x)`. All coordinates are in metres from the radar origin. Source variable names are renamed to canonical names via `config.reader.field_map`, and only `config.reader.fields` are kept (empty list = keep all) — inside `RadarDataLoader`, the single canonicalization point. The applied mapping is recorded in `attrs["source_fields_json"]`.
 
 ```
 grid_ds
@@ -83,7 +84,7 @@ Polar Radar object
     ▼ Cressman regridder (via adapters/)
 3D Cartesian grid
     │
-    ▼ Field renaming (via config.global_.var_names)
+    ▼ Field renaming + selection (via config.reader.field_map / fields)
 Canonical grid_ds
     │
     ▼ z-slice at config.regridder.analysis_level

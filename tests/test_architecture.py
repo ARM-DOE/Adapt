@@ -516,6 +516,42 @@ def test_create_table_statements_have_one_home() -> None:
     )
 
 
+# ── Field-generic core: reflectivity stat-column literals are quarantined ─────
+# After the tracking_field refactor, stat columns are minted via
+# adapt.contracts.stat_column and read via the configured field. The literal
+# "radar_reflectivity_max" may appear only in files still awaiting phase-3
+# consumer role resolution, plus the fixed cells_by_scan DDL. Shrink-only.
+
+_REFL_LITERAL_ALLOWED = {
+    "persistence/track_store.py",  # _CBS_FIXED_COLUMNS (fixed DDL)
+    "consumers/target_selection/repository_source.py",  # phase 3
+    "consumers/live/_scan_view.py",  # phase 3 (hover boxes)
+}
+
+
+def test_reflectivity_stat_literal_is_quarantined() -> None:
+    offenders = [
+        rel
+        for py_file in _SRC_ADAPT.rglob("*.py")
+        if "radar_reflectivity_max" in py_file.read_text(encoding="utf-8")
+        and (rel := _rel(py_file, _SRC_ADAPT)) not in _REFL_LITERAL_ALLOWED
+    ]
+    assert not offenders, (
+        f"\n'radar_reflectivity_max' literal outside the quarantine: {offenders}. "
+        "Mint stat columns via adapt.contracts.stat_column and resolve the "
+        "field from config/provenance."
+    )
+    stale = {
+        rel
+        for rel in _REFL_LITERAL_ALLOWED
+        if "radar_reflectivity_max" not in (_SRC_ADAPT / rel).read_text(encoding="utf-8")
+    }
+    assert not stale, (
+        f"\n_REFL_LITERAL_ALLOWED has stale entries: {sorted(stale)} — "
+        "remove them so the ratchet only tightens."
+    )
+
+
 # ── Telemetry ids stay out of the science context dict ────────────────────────
 # Observability correlation ids (trace/span/scan/pipeline/...) travel out-of-band
 # in contextvars. If one ever appeared as a module input/output key it would couple

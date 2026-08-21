@@ -43,22 +43,37 @@ def _emit(data: dict, desc: Descriptions, indent: int, lines: list[str]) -> None
     pad = "  " * indent
     for key, value in data.items():
         d = desc.get(key) if isinstance(desc, dict) else None
+        # Keys pass through _scalar too: an unquoted key containing ': ' or
+        # '#' (possible in user field_map source names) emits unparseable
+        # YAML — the same defect class as the double-quoted-path incident.
+        k = _scalar(key)
         if isinstance(value, dict):
-            lines.append(f"{pad}{key}:")
+            if not value:
+                # A bare 'key:' reloads as None, not {} — round-trip breaks.
+                lines.append(f"{pad}{k}: {{}}")
+                continue
+            lines.append(f"{pad}{k}:")
             _emit(value, d if isinstance(d, dict) else {}, indent + 1, lines)
         elif isinstance(value, list | tuple) and isinstance(d, dict):
             # A flat list with a dict description → block style with a leading
             # header comment and per-item inline comments (e.g. the modules list).
-            _emit_commented_sequence(key, value, d, pad, indent, lines)
+            _emit_commented_sequence(k, value, d, pad, indent, lines)
         elif isinstance(value, list | tuple):
-            _emit_sequence(key, value, pad, indent, lines)
+            _emit_sequence(k, value, pad, indent, lines)
         else:
             comment = f"  # {d}" if isinstance(d, str) and d else ""
-            lines.append(f"{pad}{key}: {_scalar(value)}{comment}")
+            lines.append(f"{pad}{k}: {_scalar(value)}{comment}")
 
 
 def _emit_sequence(key: str, value, pad: str, indent: int, lines: list[str]) -> None:
     items = list(value)
+    if any(isinstance(i, dict) for i in items):
+        # Emitting only the dict keys (what the naive path would do) is
+        # silent corruption — refuse loudly instead.
+        raise ValueError(
+            f"yaml_writer: cannot serialize a list of dicts at key {key!r} — "
+            "flatten the schema or extend the writer first"
+        )
     if all(not isinstance(i, list | tuple | dict) for i in items):
         # Flat sequence → inline flow style.
         inline = ", ".join(_scalar(i) for i in items)

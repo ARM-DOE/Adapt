@@ -153,6 +153,15 @@ def render_scan(
     )
 
     # ── Selected variable overlay (cells only) ────────────────────────────
+    if view.var_name not in ds.data_vars:
+        # Visible fallback until the role binding reaches renderers
+        # (phase 3 of the field-generic plan): never substitute silently.
+        logger.warning(
+            "Selected variable %r not in scan (available: %s) — falling back "
+            "to 'reflectivity'",
+            view.var_name,
+            sorted(ds.data_vars),
+        )
     var_name = view.var_name if view.var_name in ds.data_vars else "reflectivity"
     vdef = _VAR_DEFAULTS.get(var_name, (10, 60, "dBZ", "viridis"))
     unit = vdef[2]

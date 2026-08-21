@@ -24,6 +24,7 @@ from adapt.contracts.cell_volume_stats import (
     assert_cell_volume_stats,
     check_cell_volume_stats,
 )
+from adapt.contracts.columns import CELL_LABELS_VAR, stat_column
 from adapt.contracts.grid import assert_gridded, check_grid_ds_2d
 from adapt.contracts.history import check_scan_history
 from adapt.contracts.persistence import (
@@ -55,6 +56,9 @@ __all__ = [
     # primitives
     "ContractViolation",
     "require",
+    # canonical naming
+    "CELL_LABELS_VAR",
+    "stat_column",
     # persistence specs — modules declare these in their ``persistence`` ClassVar
     "ProductTableWrite",
     "NetcdfArtifact",

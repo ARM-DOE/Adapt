@@ -36,6 +36,7 @@ class AppContext:
         self.report_scan_time = report_scan_time
         self._client: StoreClient | None = None
         self._client_repo: str | None = None
+        self._tracking_fields: dict[str, str] = {}
 
     def repo(self) -> str:
         return self._get_repo().strip()
@@ -61,7 +62,21 @@ class AppContext:
                     self._client.close()
             self._client = StoreClient(repo)
             self._client_repo = repo
+            self._tracking_fields.clear()  # run ids are only unique per store
         return self._client
+
+    def tracking_field(self, run_id: str | None = None) -> str:
+        """The canonical field the given (or active) run tracked on.
+
+        Resolved once per run from stored config provenance — the store is
+        the truth for what a run tracked; never silently assumed.
+        """
+        rid = run_id or self.active_run_id()
+        if not rid:
+            raise ValueError("tracking_field: no run selected")
+        if rid not in self._tracking_fields:
+            self._tracking_fields[rid] = self.client().run_tracking_field(rid)
+        return self._tracking_fields[rid]
 
     def active_run_id(self) -> str | None:
         """The selected run, else the collection's latest run, else None."""

@@ -55,6 +55,7 @@ class ViewState:
     """Frozen snapshot of every control shaping the Latest Scan map."""
 
     var_name: str
+    backdrop_var: str  # the run's tracking field (from run provenance)
     vmin: float
     vmax: float
     bg_alpha: float
@@ -136,8 +137,8 @@ def render_scan(
     y_grid, x_grid = np.meshgrid(y_km, x_km, indexing="ij")
     labels_data = ds["cell_labels"].values
 
-    # ── Grayscale reflectivity background ────────────────────────────────
-    refl = ds["reflectivity"].values.astype(float)
+    # ── Grayscale tracked-field background ───────────────────────────────
+    refl = ds[view.backdrop_var].values.astype(float)
     refl_bg = np.ma.masked_where(np.isnan(refl) | (refl < 10), refl)
     # vmin=10 → light gray (~0.35 on gray_r), vmax=40 → black
     ax.pcolormesh(
@@ -153,39 +154,43 @@ def render_scan(
     )
 
     # ── Selected variable overlay (cells only) ────────────────────────────
-    if view.var_name not in ds.data_vars:
-        # Visible fallback until the role binding reaches renderers
-        # (phase 3 of the field-generic plan): never substitute silently.
+    var_name = view.var_name
+    overlay_drawn = var_name in ds.data_vars
+    if not overlay_drawn:
+        # Never substitute another variable silently: draw the backdrop
+        # only and say so in the title (set again, with context, below).
         logger.warning(
-            "Selected variable %r not in scan (available: %s) — falling back to 'reflectivity'",
-            view.var_name,
+            "Selected variable %r not in scan (available: %s) — overlay skipped",
+            var_name,
             sorted(str(v) for v in ds.data_vars),
         )
-    var_name = view.var_name if view.var_name in ds.data_vars else "reflectivity"
     vdef = _VAR_DEFAULTS.get(var_name, (10, 60, "dBZ", "viridis"))
     unit = vdef[2]
     var_lbl = _VAR_LABELS.get(var_name, var_name)
 
-    raw = ds[var_name].values.astype(float)
-    masked = np.ma.masked_where(np.isnan(raw) | (labels_data <= 0), raw)
-    im_ov = ax.pcolormesh(
-        x_km,
-        y_km,
-        masked,
-        cmap=_masked_cmap(vdef[3]),
-        vmin=view.vmin,
-        vmax=view.vmax,
-        shading="auto",
-        alpha=0.90,
-        zorder=3,
-    )
+    if overlay_drawn:
+        raw = ds[var_name].values.astype(float)
+        masked = np.ma.masked_where(np.isnan(raw) | (labels_data <= 0), raw)
+        im_ov = ax.pcolormesh(
+            x_km,
+            y_km,
+            masked,
+            cmap=_masked_cmap(vdef[3]),
+            vmin=view.vmin,
+            vmax=view.vmax,
+            shading="auto",
+            alpha=0.90,
+            zorder=3,
+        )
 
-    # Reset the axes locator before each colorbar creation. cla() leaves
-    # _axes_locator intact; each new colorbar wraps the previous locator in
-    # _ColorbarAxesLocator, building a chain that causes RecursionError
-    # after ~1000 redraws.
-    cbar_ax.set_axes_locator(None)
-    ax.figure.colorbar(im_ov, cax=cbar_ax, label=unit)
+        # Reset the axes locator before each colorbar creation. cla() leaves
+        # _axes_locator intact; each new colorbar wraps the previous locator
+        # in _ColorbarAxesLocator, building a chain that causes
+        # RecursionError after ~1000 redraws.
+        cbar_ax.set_axes_locator(None)
+        ax.figure.colorbar(im_ov, cax=cbar_ax, label=unit)
+    else:
+        cbar_ax.clear()
 
     # ── Cell contours ─────────────────────────────────────────────────────
     cell_contours: dict[int, Any] = {}
@@ -256,7 +261,14 @@ def render_scan(
     ax.set_ylabel("Y (km)")
     ax.tick_params(reset=True)
     ax.grid(True, alpha=0.3, zorder=3)
-    ax.set_title(f"{radar_id}  {var_lbl} [{tstr}]", fontsize=11, fontweight="bold")
+    if overlay_drawn:
+        ax.set_title(f"{radar_id}  {var_lbl} [{tstr}]", fontsize=11, fontweight="bold")
+    else:
+        ax.set_title(
+            f"{radar_id}  {var_lbl}: not present in this scan [{tstr}]",
+            fontsize=11,
+            fontweight="bold",
+        )
 
     legend_handles = [
         mpatches.Patch(facecolor="gray", alpha=0.6, label="Stratiform"),

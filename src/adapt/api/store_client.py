@@ -197,6 +197,28 @@ class StoreClient:
             raise StoreError(f"Run '{run_id}' carries no config provenance")
         return json.loads(raw)
 
+    def run_tracking_field(self, run_id: str) -> str:
+        """The canonical field this run detected/projected/tracked on.
+
+        Interprets both provenance formats — the single home for this
+        schema knowledge:
+        - current runs record ``global_.tracking_field``;
+        - legacy runs recorded ``global_.var_names.reflectivity`` (a name
+          knob whose value WAS the field the run tracked).
+        """
+        cfg = self.run_config(run_id)
+        global_cfg = cfg.get("global_", {})
+        field = global_cfg.get("tracking_field")
+        if field:
+            return str(field)
+        legacy = global_cfg.get("var_names", {}).get("reflectivity")
+        if legacy:
+            return str(legacy)
+        raise StoreError(
+            f"Run '{run_id}' provenance records no tracking field "
+            "(neither global_.tracking_field nor legacy var_names)"
+        )
+
     @staticmethod
     def _run_from_row(row: sqlite3.Row) -> Run:
         started = _parse_iso(row["started_at"])

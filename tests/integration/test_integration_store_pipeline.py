@@ -292,6 +292,7 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
                 None,
                 [c.uid for c in snap.cells],
                 raise_errors=True,
+                backdrop_var="reflectivity",
             )
 
         # ── lightning postprocess over the finished run (after-the-fact) ──────

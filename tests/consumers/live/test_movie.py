@@ -114,6 +114,7 @@ def _write_nc(path, hour):
 def _view(zoom=None):
     return ViewState(
         var_name="reflectivity",
+        backdrop_var="reflectivity",
         vmin=10.0,
         vmax=60.0,
         bg_alpha=0.35,

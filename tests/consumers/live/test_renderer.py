@@ -66,6 +66,7 @@ def _make_ds(*, with_projections=False, with_flow=False):
 def _view(**overrides):
     base = {
         "var_name": "reflectivity",
+        "backdrop_var": "reflectivity",
         "vmin": 10.0,
         "vmax": 60.0,
         "bg_alpha": 0.35,
@@ -393,3 +394,46 @@ def test_no_star_when_rows_belong_to_another_scan():
     overlays = OverlayData(cell_df=df, track_histories={})
     result = draw_overlays_fn(ax, _make_ds(), _view(selected_cells={"u1": 0}), overlays)
     assert len(result["u1"]) == 2  # track line + dots only
+
+
+class TestFieldGenericRendering:
+    def test_renders_a_pressure_only_scan(self):
+        # A non-reflectivity run: backdrop and overlay both come from the
+        # run's tracking field — no reflectivity variable anywhere.
+        ds = _make_ds().rename({"reflectivity": "pressure"})
+        fig, ax, cbar_ax = _fig_axes()
+        res = render_scan(
+            ax,
+            cbar_ax,
+            ds,
+            _view(var_name="pressure", backdrop_var="pressure"),
+            OverlayData(cell_df=None, track_histories={}),
+        )
+        assert res.scan_id == _SID
+        assert len(res.cell_contours) == 1
+
+    def test_absent_overlay_variable_is_not_silently_substituted(self):
+        ds = _make_ds()  # has reflectivity + cell_labels only
+        fig, ax, cbar_ax = _fig_axes()
+        render_scan(
+            ax,
+            cbar_ax,
+            ds,
+            _view(var_name="differential_reflectivity"),
+            OverlayData(cell_df=None, track_histories={}),
+        )
+        assert "not present in this scan" in ax.get_title()
+
+    def test_missing_backdrop_variable_raises(self):
+        # The backdrop var comes from run provenance; if the scan lacks it,
+        # something is deeply wrong — never substitute.
+        ds = _make_ds()
+        fig, ax, cbar_ax = _fig_axes()
+        with pytest.raises(KeyError):
+            render_scan(
+                ax,
+                cbar_ax,
+                ds,
+                _view(backdrop_var="pressure"),
+                OverlayData(cell_df=None, track_histories={}),
+            )

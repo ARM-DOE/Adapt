@@ -160,3 +160,53 @@ class TestRunConfig:
     def test_run_config_unknown_run_raises(self, client):
         with pytest.raises(StoreError, match="no-such-run"):
             client.run_config("no-such-run")
+
+
+class TestRunTrackingField:
+    def test_new_format_provenance(self, client):
+        assert client.run_tracking_field(RUN_1) == "reflectivity"
+
+    def test_legacy_var_names_provenance(self, built):
+        # Runs from before the field-generic pipeline recorded the field as
+        # global_.var_names.reflectivity — old stores must stay readable.
+        from adapt.persistence.store_registry import RunStart, StoreRegistry
+
+        registry = StoreRegistry.get_instance(built.root)
+        registry.begin_run(
+            RunStart(
+                run_id="legacy-run",
+                collection_id=COLLECTION,
+                config_hash="hash-legacy",
+                config_json='{"global_": {"var_names": {"reflectivity": "dbz"}}}',
+                pipeline_version="0.9",
+                environment_json="{}",
+            )
+        )
+        c = StoreClient(built.root)
+        try:
+            # The LEGACY knob was a NAME mapping: the field the run tracked
+            # was whatever var_names.reflectivity pointed at.
+            assert c.run_tracking_field("legacy-run") == "dbz"
+        finally:
+            c.close()
+
+    def test_unresolvable_provenance_raises(self, built):
+        from adapt.persistence.store_registry import RunStart, StoreRegistry
+
+        registry = StoreRegistry.get_instance(built.root)
+        registry.begin_run(
+            RunStart(
+                run_id="blank-run",
+                collection_id=COLLECTION,
+                config_hash="hash-blank",
+                config_json='{"note": "no global section"}',
+                pipeline_version="0.9",
+                environment_json="{}",
+            )
+        )
+        c = StoreClient(built.root)
+        try:
+            with pytest.raises(StoreError, match="tracking field"):
+                c.run_tracking_field("blank-run")
+        finally:
+            c.close()

@@ -67,6 +67,7 @@ from adapt.consumers.live._volume_stats import (
     merge_volume_stats as _merge_volume_stats_fn,
 )
 from adapt.consumers.live._widgets import _CompactToolbar
+from adapt.contracts import stat_column
 
 logger = logging.getLogger(__name__)
 
@@ -730,6 +731,7 @@ class ScanViewTab:
             vmax = float(vdef[1])
         return ViewState(
             var_name=var_name,
+            backdrop_var=self.ctx.tracking_field(),
             vmin=vmin,
             vmax=vmax,
             bg_alpha=self._bg_alpha_var.get() if self._bg_alpha_var else 0.35,
@@ -1160,8 +1162,9 @@ class ScanViewTab:
 
                     self._hv["lat_mass"].set(_f("cell_centroid_mass_lat", ".4f", "\u00b0"))
                     self._hv["lon_mass"].set(_f("cell_centroid_mass_lon", ".4f", "\u00b0"))
-                    self._hv["dbz_mean"].set(_f("radar_reflectivity_mean"))
-                    self._hv["dbz_max"].set(_f("radar_reflectivity_max"))
+                    field = self.ctx.tracking_field()
+                    self._hv["dbz_mean"].set(_f(stat_column(field, "mean")))
+                    self._hv["dbz_max"].set(_f(stat_column(field, "max")))
                     self._hv["zdr_mean"].set(_f("radar_differential_reflectivity_mean", ".2f"))
                     self._hv["zdr_max"].set(_f("radar_differential_reflectivity_max", ".2f"))
                     self._hv["vel_mean"].set(_f("radar_velocity_mean"))

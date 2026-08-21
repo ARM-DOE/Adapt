@@ -32,15 +32,19 @@ from adapt.consumers.target_selection import (
     build_snapshot,
     is_candidate,
 )
+from adapt.contracts import stat_column
 from adapt.utils.time import from_scan_iso
 
 logger = logging.getLogger(__name__)
 
-# Rules pre-loaded into the tab: (field, min, max); "" = unbounded on that side.
+# Rules pre-loaded into the tab at construction: universal columns only —
+# field-specific rows (tracked-field mean, ZDR if present) are filled in
+# once a run is selected and its columns are discovered, so a gate is never
+# pre-loaded on a column the run does not have.
 _DEFAULT_RULES = (
     ("cell_area_sqkm", "20", "200"),
-    ("radar_reflectivity_mean", "40", ""),
-    ("radar_differential_reflectivity_mean", "2", ""),
+    ("", "", ""),
+    ("", "", ""),
     ("age_seconds", "300", ""),
     ("", "", ""),
     ("", "", ""),
@@ -91,6 +95,7 @@ class TargetSelectionTab:
         ttk.Label(hdr, text="Min", width=8, anchor="w", font=("", 8)).pack(side="left", padx=2)
         ttk.Label(hdr, text="Max", width=8, anchor="w", font=("", 8)).pack(side="left")
 
+        self._dynamic_defaults_done = False
         self._rule_rows = []  # (field_var, min_var, max_var)
         self._field_cbs = []
         for field, lo, hi in _DEFAULT_RULES:
@@ -216,6 +221,37 @@ class TargetSelectionTab:
         for cb in self._field_cbs:
             cb["values"] = ["", *columns]
         self._columns_run = run_id
+        self._apply_dynamic_default_rules(run_id, columns)
+
+    def _apply_dynamic_default_rules(self, run_id, columns):
+        """Fill the field-specific default gate rows once a run is known.
+
+        The tracked-field row comes from run provenance; the ZDR row is
+        added only when the run actually has that column — a gate on an
+        absent column would raise in is_candidate.
+        """
+        if self._dynamic_defaults_done:
+            return
+        try:
+            field_mean = stat_column(self.ctx.tracking_field(run_id), "mean")
+        except Exception:
+            logger.exception("Could not resolve tracking field for run %s", run_id)
+            return
+        dynamic = []
+        if field_mean in columns:
+            dynamic.append((field_mean, "40", ""))
+        zdr_mean = "radar_differential_reflectivity_mean"
+        if zdr_mean in columns:
+            dynamic.append((zdr_mean, "2", ""))
+        for field_var, min_var, max_var in self._rule_rows:
+            if not dynamic:
+                break
+            if not field_var.get():
+                field, lo, hi = dynamic.pop(0)
+                field_var.set(field)
+                min_var.set(lo)
+                max_var.set(hi)
+        self._dynamic_defaults_done = True
 
     def _rules(self):
         """Current rule rows as (field, min, max) tuples; blank bound → None,
@@ -442,7 +478,15 @@ class TargetSelectionTab:
         raster = self.ctx.open_raster(ref) if ref is not None else None
         try:
             ds = raster.dataset if raster else None
-            draw_tse_map(ax, scan_ts, ds, snap, selection, candidates)
+            draw_tse_map(
+                ax,
+                scan_ts,
+                ds,
+                snap,
+                selection,
+                candidates,
+                backdrop_var=self.ctx.tracking_field(self._run_id),
+            )
         finally:
             if raster is not None:
                 raster.close()
@@ -553,6 +597,7 @@ class TargetSelectionTab:
                         snap,
                         selection,
                         cands,
+                        backdrop_var=self.ctx.tracking_field(run_id),
                         raise_errors=True,
                     )
                 finally:

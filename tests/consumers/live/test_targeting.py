@@ -18,7 +18,7 @@ import xarray as xr
 from adapt.consumers.live._targeting import (
     build_tse_config,
     discover_numeric_columns,
-    draw_reflectivity_backdrop,
+    draw_field_backdrop,
     draw_target_overlay,
     draw_tse_map,
     format_rationale,
@@ -159,7 +159,7 @@ def _selection(uid, reason=SelectionReason.NEW_TARGET, score=100.0):
 
 def test_backdrop_adds_a_mesh():
     fig, ax = plt.subplots()
-    draw_reflectivity_backdrop(ax, _ds(), "reflectivity", alpha=0.8)
+    draw_field_backdrop(ax, _ds(), "reflectivity", alpha=0.8)
     assert len(ax.collections) >= 1
     plt.close(fig)
 
@@ -227,7 +227,7 @@ def test_draw_tse_map_draws_backdrop_overlay_and_title(tmp_path):
     ds = _ds()
     snap = Snapshot(scan_time=_T26, cells=(_cell("sel", mass=(50, 50)),))
     fig, ax = plt.subplots()
-    draw_tse_map(ax, _T26, ds, snap, _selection("sel"), {"sel"})
+    draw_tse_map(ax, _T26, ds, snap, _selection("sel"), {"sel"}, backdrop_var="reflectivity")
     meshes = [c for c in ax.collections if type(c).__name__ == "QuadMesh"]
     assert meshes  # reflectivity backdrop
     assert ax.get_legend() is not None
@@ -238,7 +238,7 @@ def test_draw_tse_map_draws_backdrop_overlay_and_title(tmp_path):
 def test_draw_tse_map_without_raster_shows_placeholder():
     snap = Snapshot(scan_time=_T26, cells=())
     fig, ax = plt.subplots()
-    draw_tse_map(ax, _T26, None, snap, None, set())
+    draw_tse_map(ax, _T26, None, snap, None, set(), backdrop_var="reflectivity")
     assert ax.get_title().endswith("(no scan raster)")
     assert any("no scan raster" in t.get_text() for t in ax.texts)
     meshes = [c for c in ax.collections if type(c).__name__ == "QuadMesh"]

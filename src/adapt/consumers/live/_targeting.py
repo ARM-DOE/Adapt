@@ -91,8 +91,8 @@ def build_tse_config(
     )
 
 
-def draw_reflectivity_backdrop(ax, ds, var: str = "reflectivity", *, alpha: float = 0.35) -> None:
-    """Grayscale reflectivity backdrop in km, mirroring the Latest Scan map."""
+def draw_field_backdrop(ax, ds, var: str, *, alpha: float = 0.35) -> None:
+    """Grayscale tracked-field backdrop in km, mirroring the Latest Scan map."""
     x_km = ds["x"].values / 1000.0
     y_km = ds["y"].values / 1000.0
     refl = ds[var].values.astype(float)
@@ -213,7 +213,7 @@ def draw_target_overlay(ax, ds, snapshot, selection, candidate_uids: Sequence[st
 
 
 def draw_tse_map(
-    ax, scan_ts, ds, snapshot, selection, candidate_uids, *, raise_errors=False
+    ax, scan_ts, ds, snapshot, selection, candidate_uids, *, backdrop_var, raise_errors=False
 ) -> None:
     """Draw one Target Selection replay frame onto *ax* (clears it first).
 
@@ -228,7 +228,7 @@ def draw_tse_map(
     title = pd.Timestamp(scan_ts).strftime("%Y-%m-%d %H:%M:%S UTC")
     if ds is not None:
         try:
-            draw_reflectivity_backdrop(ax, ds)
+            draw_field_backdrop(ax, ds, backdrop_var)
             draw_target_overlay(ax, ds, snapshot, selection, candidate_uids)
         except Exception:
             if raise_errors:

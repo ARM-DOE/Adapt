@@ -49,15 +49,7 @@ def build_snapshot(
     truth for what the run tracked.
     """
     if tracking_field is None:
-        provenance = client.run_config(run_id)
-        try:
-            tracking_field = provenance["global_"]["tracking_field"]
-        except KeyError as exc:
-            raise ValueError(
-                f"Run {run_id!r} config provenance carries no "
-                "global_.tracking_field — the run predates the field-generic "
-                "pipeline; pass tracking_field= explicitly."
-            ) from exc
+        tracking_field = client.run_tracking_field(run_id)
     history = client.cells(run_id, collection)
     if history.empty:
         raise ValueError(f"No cells_by_scan rows for run {run_id!r} (collection {collection!r})")

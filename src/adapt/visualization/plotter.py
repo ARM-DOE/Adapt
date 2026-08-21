@@ -8,7 +8,6 @@ Supports threaded queue-based processing for pipeline integration.
 """
 
 import logging
-import queue
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,9 +32,8 @@ except ImportError:
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
-    from adapt.persistence import DataRepository
 
-__all__ = ["RadarPlotter", "PlotterThread", "PlotConsumer"]
+__all__ = ["RadarPlotter", "PlotConsumer"]
 
 logger = logging.getLogger(__name__)
 
@@ -664,220 +662,24 @@ class RadarPlotter:
         return plot_file
 
 
-class PlotterThread(threading.Thread):
-    """Worker thread for generating radar visualizations in the pipeline.
-
-    Monitors a queue of analysis files and generates PNG visualizations
-    asynchronously. Decouples visualization (slow) from processor (critical path).
-    Enables real-time monitoring of segmentation and projection quality.
-
-    **Input Queue Format:**
-
-    Each item is a dict with:
-    - `segmentation_nc`: Path to analysis NetCDF (from processor)
-    - `radar`: Radar identifier for output naming
-    - `timestamp`: Scan datetime for plot annotation
-
-    **Output:**
-
-    Generates PNG files in output_dirs['plots']:
-    `{radar}_{YYYYMMDD_HHMMSS}.png`
-
-    **File Tracking:**
-
-    Updates FileProcessingTracker with plot path and status on completion
-    or error. Enables resumable plotting if pipeline restarts.
-
-    **Threading:**
-
-    Runs as daemon thread. Graceful shutdown via stop() signal. Waits for
-    file writes to complete before acknowledging (handles slow disks).
-
-    Example usage (typically called by orchestrator)::
-
-        plotter = PlotterThread(
-            input_queue=processor_output_queue,
-            output_dirs=output_dirs,
-            config=config,
-            show_plots=False  # Headless mode
-        )
-        plotter.start()
-        ...
-        plotter.stop()
-        plotter.join(timeout=5)
-    """
-
-    def __init__(
-        self,
-        input_queue: queue.Queue,
-        output_dirs: dict,
-        config: "InternalConfig | None" = None,
-        file_tracker=None,
-        show_plots: bool = False,
-        name: str = "RadarPlotter",
-    ):
-        """Initialize plotter thread.
-
-        Parameters
-        ----------
-        input_queue : queue.Queue
-            Queue of analysis file paths from processor.
-        output_dirs : dict
-            Output directory paths for saving plots.
-        config : InternalConfig, optional
-            Fully validated runtime configuration.
-        file_tracker : FileProcessingTracker, optional
-            Optional file processing tracker to record plot completion.
-        show_plots : bool, optional
-            Display plots (default False for headless mode).
-        name : str
-            Thread name (default: 'RadarPlotter').
-        """
-        super().__init__(name=name, daemon=True)
-
-        self.input_queue = input_queue
-        self.output_dirs = output_dirs
-        self.config = config
-        self.file_tracker = file_tracker
-        self.show_plots = show_plots
-
-        self.plotter = RadarPlotter(config=config, show_plots=show_plots)
-        self.running = True
-
-        logger.info(f"{name} initialized")
-
-    def run(self):
-        """Process files from queue until shutdown signal received.
-
-        Monitors input queue for analysis file paths and generates visualizations.
-        Logs errors but continues processing on per-file failures.
-        """
-        logger.info(f"{self.name} started")
-
-        while self.running:
-            try:
-                item = self.input_queue.get(timeout=1.0)
-
-                if item is None:
-                    logger.info(f"{self.name} received shutdown signal")
-                    break
-
-                self._process_item(item)
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"Error in {self.name}: {e}", exc_info=True)
-
-        logger.info(f"{self.name} stopped")
-
-    def _process_item(self, item: dict):
-        """Process plot item from queue."""
-        try:
-            seg_nc = item.get("segmentation_nc")
-            radar = item.get("radar", "RADAR")
-            timestamp = item.get("timestamp", datetime.now(UTC))
-
-            if not seg_nc or not Path(seg_nc).exists():
-                logger.warning(f"Segmentation file not found: {seg_nc}")
-                return
-
-            # Get file_id for tracker
-            file_id = Path(seg_nc).stem.replace("_analysis", "").replace("_segmentation", "")
-
-            # Use helper for consistent paths
-            from adapt.configuration.schemas.directories import get_plot_path
-
-            output_path = get_plot_path(
-                output_dirs=self.output_dirs,
-                radar=radar,
-                plot_type="reflectivity",
-                scan_time=timestamp,
-            )
-
-            plot_file = self.plotter.plot_from_netcdf(
-                segmentation_nc=seg_nc,
-                output_path=output_path,
-            )
-
-            logger.info(f"{radar} plot saved: {plot_file}")
-
-            # Update tracker
-            tracker = self.file_tracker
-            if tracker and plot_file:
-                tracker.mark_stage_complete(file_id, "plotted", path=Path(plot_file))
-
-        except Exception as e:
-            logger.exception(f"Error processing plot item: {e}")
-
-            tracker = self.file_tracker
-            if tracker:
-                file_id = (
-                    Path(item.get("segmentation_nc", ""))
-                    .stem.replace("_analysis", "")
-                    .replace("_segmentation", "")
-                )
-                if file_id:
-                    tracker.mark_stage_complete(file_id, "plotted", error=str(e))
-
-    def stop(self):
-        """Signal thread to stop and join gracefully."""
-        self.running = False
-        self.input_queue.put(None)
-
-
 class PlotConsumer(threading.Thread):
-    """Repository-driven plot consumer thread.
+    """Store-driven plot consumer thread.
 
-    Polls the DataRepository for new analysis artifacts and generates
+    Polls the collection catalog for new analysis artifacts and generates
     visualizations. This consumer is completely decoupled from the processing
-    pipeline - it only reads from the repository.
-
-    **Architecture:**
-
-    The PlotConsumer runs as an independent thread that:
-    1. Polls repository.get_latest(ANALYSIS_NC) every poll_interval seconds
-    2. When a new artifact is detected, loads the dataset via repository.open_dataset()
-    3. Generates visualization using RadarPlotter
-    4. Saves figure to disk and optionally displays live
-    5. Prints table statistics from cells database
-
-    **Thread Safety:**
-
-    - Repository uses WAL mode SQLite for concurrent read/write
-    - PlotConsumer only reads, never writes to repository
-    - No shared state with processing threads
+    pipeline — it only reads from the store, and plots are written to a
+    user-directed directory OUTSIDE the store root.
 
     **Graceful Shutdown:**
 
     Call stop() to signal shutdown. The thread will complete any in-progress
     plot and exit cleanly within one poll_interval.
-
-    Example usage::
-
-        from adapt.visualization.plotter import PlotConsumer
-        from adapt.persistence import DataRepository
-
-        repo = DataRepository(run_id="abc123", base_dir="/data", radar="KDIX")
-        stop_event = threading.Event()
-
-        consumer = PlotConsumer(
-            repository=repo,
-            stop_event=stop_event,
-            output_dir=Path("/data/KDIX/plots"),
-            poll_interval=2.0
-        )
-        consumer.start()
-
-        # ... pipeline runs ...
-
-        stop_event.set()
-        consumer.join(timeout=10)
     """
 
     def __init__(
         self,
-        repository: "DataRepository",
+        collection,
+        run_id: str,
         stop_event: threading.Event,
         output_dir: Path,
         config: "InternalConfig | None" = None,
@@ -889,17 +691,19 @@ class PlotConsumer(threading.Thread):
 
         Parameters
         ----------
-        repository : DataRepository
-            Repository to poll for new artifacts. Must be initialized
-            and connected to the same catalog as the processor.
+        collection : adapt.persistence.store.Collection
+            The collection domain to poll for new analysis artifacts.
+        run_id : str
+            Run whose artifacts are plotted.
         stop_event : threading.Event
             Shared event to signal shutdown. Set this to stop the consumer.
         output_dir : Path
-            Directory to save generated plots.
+            User-directed directory to save generated plots (never inside the
+            store root).
         config : InternalConfig, optional
             Configuration for plot styling and parameters.
         poll_interval : float
-            Seconds between repository polls (default: 2.0).
+            Seconds between catalog polls (default: 2.0).
         show_live : bool
             If True, display plots in a matplotlib window (default: False).
         name : str
@@ -907,7 +711,8 @@ class PlotConsumer(threading.Thread):
         """
         super().__init__(name=name, daemon=True)
 
-        self.repository = repository
+        self.collection = collection
+        self.run_id = run_id
         self.stop_event = stop_event
         self.output_dir = Path(output_dir)
         self.config = config
@@ -920,11 +725,6 @@ class PlotConsumer(threading.Thread):
         # Track last processed artifact to detect new ones
         self._last_seen_id: str | None = None
         self._processed_count = 0
-
-        # Import ProductType here to avoid circular imports
-        from adapt.persistence import ProductType
-
-        self._product_type = ProductType.ANALYSIS_NC
 
         logger.info(f"{name} initialized (poll_interval={poll_interval}s, output_dir={output_dir})")
 
@@ -954,8 +754,10 @@ class PlotConsumer(threading.Thread):
     def _poll_and_process(self):
         """Check for new artifacts and process them."""
         try:
-            # Get latest analysis artifact
-            latest = self.repository.get_latest(self._product_type)
+            artifacts = self.collection.catalog.list_artifacts(
+                run_id=self.run_id, artifact_type="segmentation2d"
+            )
+            latest = artifacts[-1] if artifacts else None
 
             if latest is None:
                 # No artifacts yet
@@ -973,27 +775,25 @@ class PlotConsumer(threading.Thread):
             self._last_seen_id = artifact_id
 
         except Exception as e:
-            logger.error(f"Error polling repository: {e}", exc_info=True)
+            logger.error(f"Error polling catalog: {e}", exc_info=True)
 
     def _process_artifact(self, artifact: dict):
         """Generate plot from artifact."""
         artifact_id = artifact["artifact_id"]
-        Path(artifact["file_path"])
-        scan_time_str = artifact.get("scan_time")
+        scan_time_str = artifact.get("observation_time")
 
         try:
-            # Parse scan time
-            if scan_time_str:
-                scan_time = datetime.fromisoformat(scan_time_str)
-            else:
-                scan_time = datetime.now(UTC)
+            if not scan_time_str:
+                logger.error("Artifact %s has no observation_time; skipping plot", artifact_id)
+                return
+            scan_time = datetime.fromisoformat(scan_time_str.replace("Z", "+00:00"))
 
-            # Load dataset from repository
-            ds = self.repository.open_dataset(artifact_id)
+            # Load dataset from the store object
+            ds = xr.open_dataset(self.collection.objects_dir / artifact["object_name"])
 
             try:
                 # Generate output path
-                radar = artifact.get("radar", self.repository.radar)
+                radar = self.collection.collection_id
                 date_str = scan_time.strftime("%Y%m%d")
                 time_str = scan_time.strftime("%H%M%S")
 
@@ -1015,9 +815,6 @@ class PlotConsumer(threading.Thread):
                     with contextlib.suppress(Exception):
                         plt.pause(0.1)
 
-                # Print table statistics
-                self._print_table_stats()
-
             finally:
                 ds.close()
 
@@ -1025,82 +822,6 @@ class PlotConsumer(threading.Thread):
             logger.warning(f"Artifact file not found: {e}")
         except Exception as e:
             logger.error(f"Error processing artifact {artifact_id}: {e}", exc_info=True)
-
-    def _print_table_stats(self):
-        """Print latest cell statistics from repository."""
-        try:
-            from adapt.persistence import ProductType
-
-            # Get latest cells database
-            cells_db = self.repository.get_latest(ProductType.CELLS_DB)
-            if cells_db is None:
-                return
-
-            # Load table
-            df = self.repository.open_table(cells_db["artifact_id"], table_name="cells")
-
-            if df.empty:
-                return
-
-            # Get most recent cells (last scan)
-            if "time" in df.columns:
-                df["time"] = pd.to_datetime(df["time"])
-                latest_time = df["time"].max()
-                recent = df[df["time"] == latest_time]
-            else:
-                recent = df.tail(10)
-
-            # Print summary statistics
-            num_cells = len(recent)
-            if num_cells == 0:
-                return
-
-            # Build stats summary
-            stats_parts = [f"Cells: {num_cells}"]
-
-            if "cell_area_sqkm" in recent.columns:
-                area = recent["cell_area_sqkm"].dropna()
-                if len(area) > 0:
-                    stats_parts.append(f"Area: {area.mean():.1f} km2 (mean)")
-
-            if "radar_reflectivity_mean" in recent.columns:
-                refl_mean = recent["radar_reflectivity_mean"].dropna()
-                if len(refl_mean) > 0:
-                    stats_parts.append(f"Refl: {refl_mean.mean():.1f} dBZ (mean)")
-
-            if "radar_reflectivity_max" in recent.columns:
-                refl_max = recent["radar_reflectivity_max"].dropna()
-                if len(refl_max) > 0:
-                    stats_parts.append(f"Max: {refl_max.max():.1f} dBZ")
-
-            summary = " | ".join(stats_parts)
-            logger.info(f"Cell Stats: {summary}")
-
-            # Print detailed table for small number of cells
-            if num_cells <= 5:
-                print("\n" + "=" * 60)
-                print("Latest Cell Statistics:")
-                print("-" * 60)
-
-                cols_to_show = [
-                    "cell_label",
-                    "cell_area_sqkm",
-                    "radar_reflectivity_mean",
-                    "radar_reflectivity_max",
-                ]
-                cols_available = [c for c in cols_to_show if c in recent.columns]
-
-                if cols_available:
-                    display_df = recent[cols_available].copy()
-                    display_df.columns = ["Label", "Area (km2)", "Mean dBZ", "Max dBZ"][
-                        : len(cols_available)
-                    ]
-                    print(display_df.to_string(index=False))
-
-                print("=" * 60 + "\n")
-
-        except Exception as e:
-            logger.debug(f"Could not print table stats: {e}")
 
     def stop(self):
         """Signal consumer to stop."""

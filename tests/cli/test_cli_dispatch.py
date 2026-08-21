@@ -142,12 +142,9 @@ class TestPostprocessCommand:
         with pytest.raises(ValueError, match="module"):
             cli._postprocess_cmd(args)
 
-    def test_open_repository_without_runs_raises(self, tmp_path):
-        from adapt.persistence.registry import RepositoryRegistry
+    def test_open_store_without_runs_raises(self, tmp_path):
+        from adapt.persistence.store import init_store
 
-        RepositoryRegistry._instance = None
-        try:
-            with pytest.raises(ValueError, match="No runs found"):
-                cli._open_repository(str(tmp_path), None)
-        finally:
-            RepositoryRegistry._instance = None
+        root = init_store(tmp_path / "store")
+        with pytest.raises(ValueError, match="No runs found"):
+            cli._open_store(str(root), None)

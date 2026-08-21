@@ -5,7 +5,10 @@
 
 ``SchemaLedger`` freezes a table's schema on its first non-empty frame —
 declared primary key + payload columns — and writes identical snapshots to
-products.db and catalog.db. ``TableWriter`` stamps scan identity from
+products.db and catalog.db. Frozen types are deterministic: core identity
+columns are contracted by name (``_CORE_COLUMN_TYPES``), every other numeric
+column freezes as REAL, so the schema depends on the column set — never on
+the values in whichever scan arrived first. ``TableWriter`` stamps scan identity from
 ``PersistenceMeta``, enforces the frozen schema (no new columns, no
 incompatible dtypes, no duplicate keys, no cross-module writes), and upserts
 on the declared key. There is no ALTER TABLE on the new path — ever.
@@ -39,6 +42,21 @@ _RESERVED_TABLES = frozenset({"table_schemas", "annotations"})
 # TrackStore owns these via bespoke DDL; no module may claim them through the
 # generic writer even before the first tracking write freezes them.
 _TRACKSTORE_TABLES = frozenset({"cells_by_scan", "cell_events", "cell_tracks"})
+
+# Core identity columns carry contracted types, fixed by NAME — never inferred
+# from a frame's dtype. Everything else is a source-dependent extra whose type
+# follows the deterministic rule in _canonical_sqlite_type, so the frozen
+# schema is a pure function of the column set: a NaN in whichever scan happens
+# to arrive first must never decide the schema.
+_CORE_COLUMN_TYPES: dict[str, str] = {
+    "run_id": "TEXT",
+    "scan_id": "TEXT",
+    "scan_time": "TEXT",
+    "scan_time_unix": "INTEGER",  # to_scan_unix returns whole epoch seconds
+    "valid_time": "TEXT",
+    "cell_uid": "TEXT",
+    "cell_label": "INTEGER",
+}
 
 
 def table_granularity(primary_key: Sequence[str]) -> str:
@@ -196,7 +214,7 @@ class TableWriter:
                 granularity=self._granularity,
                 primary_key=tuple(self._spec.primary_key),
                 index_columns=tuple(self._spec.index_columns),
-                columns=tuple((c, _sqlite_type(df[c])) for c in df.columns),
+                columns=tuple((c, _canonical_sqlite_type(c, df[c])) for c in df.columns),
             )
             self._ledger.freeze(frozen)
         else:
@@ -276,9 +294,12 @@ class TableWriter:
                 )
             actual = _sqlite_type(df[col])
             expected = frozen_types[col]
-            # INTEGER and REAL interchange losslessly under SQLite affinity;
-            # pandas promotes int columns to float64 whenever a NaN appears,
-            # so a first-frame INTEGER freeze must keep accepting those frames.
+            # INTEGER and REAL interchange losslessly under SQLite affinity.
+            # New freezes canonicalize measures to REAL, but pandas promotes
+            # int columns to float64 whenever a NaN appears, so int frames must
+            # keep writing into REAL columns, NaN-promoted frames into the
+            # INTEGER core columns (cell_label), and legacy stores frozen
+            # before canonicalization keep accepting both directions.
             if actual != expected and not ({actual, expected} == {"INTEGER", "REAL"}):
                 raise StoreError(
                     f"{self._spec.table}: column '{col}' has incompatible dtype "
@@ -331,10 +352,28 @@ def _with_scan_time_unix(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _sqlite_type(series: pd.Series) -> str:
-    """Map a pandas Series dtype to a SQLite column type."""
+    """Map a pandas Series dtype to a SQLite column type (frame validation)."""
     if pdt.is_bool_dtype(series) or pdt.is_integer_dtype(series):
         return "INTEGER"
     if pdt.is_float_dtype(series):
+        return "REAL"
+    return "TEXT"
+
+
+def _canonical_sqlite_type(name: str, series: pd.Series) -> str:
+    """The FROZEN type of a column: contracted by name for core identity
+    columns, deterministic by kind for everything else.
+
+    Numeric measures always freeze as REAL — never as the first frame's luck
+    of INTEGER-vs-NaN-promoted-float. Bools stay INTEGER: they never
+    NaN-promote (a missing bool becomes object dtype, a genuine data bug that
+    must fail validation loudly).
+    """
+    if name in _CORE_COLUMN_TYPES:
+        return _CORE_COLUMN_TYPES[name]
+    if pdt.is_bool_dtype(series):
+        return "INTEGER"
+    if pdt.is_integer_dtype(series) or pdt.is_float_dtype(series):
         return "REAL"
     return "TEXT"
 

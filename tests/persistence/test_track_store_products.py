@@ -93,6 +93,15 @@ class TestFreezeOnFirstWrite:
         assert "custom_metric" in cbs_cols
         assert {"run_id", "scan_id", "scan_time", "cell_uid", "cell_label"} <= cbs_cols
 
+    def test_extra_numeric_columns_freeze_as_real(self, collection, ledger):
+        # Source-dependent stats columns follow the deterministic rule: the
+        # frozen type is a function of the column name, never of whether the
+        # first scan's values happened to be ints or NaN-promoted floats.
+        _write(collection, ledger, "s1", stats=_stats([1], {"echo_top_count": [3]}))
+
+        types = dict(ledger.frozen("cells_by_scan").columns)
+        assert types["echo_top_count"] == "REAL"
+
     def test_duplicate_label_within_scan_raises(self, collection, ledger):
         _write(collection, ledger, "s1")
 

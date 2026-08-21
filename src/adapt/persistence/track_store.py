@@ -31,7 +31,7 @@ import pandas as pd
 from adapt.persistence.errors import StoreError
 from adapt.persistence.products import (
     TableDeclaration,
-    _sqlite_type,
+    _canonical_sqlite_type,
 )
 from adapt.utils.time import from_scan_iso, to_scan_iso
 
@@ -492,7 +492,7 @@ class TrackStore:
             return
 
         extra = tuple(
-            (c, _sqlite_type(cell_stats_df[c]))
+            (c, _canonical_sqlite_type(c, cell_stats_df[c]))
             for c in cell_stats_df.columns
             if c not in _SKIP_FROM_CELL_STATS and c not in {name for name, _ in _CBS_FIXED_COLUMNS}
         )

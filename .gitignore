@@ -84,6 +84,9 @@ results/
 # Ignore user config overrides
 scripts/user_config.py
 
+# local planning folder — never committed
+plan/
+
 # ignore scratch notes but keep docs and repo-standard markdown/text
 *.md
 !README.md

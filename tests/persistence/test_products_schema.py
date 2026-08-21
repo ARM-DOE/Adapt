@@ -12,7 +12,7 @@ import pytest
 
 from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite
 from adapt.persistence.errors import StoreError
-from adapt.persistence.products import SchemaLedger, TableWriter
+from adapt.persistence.products import SchemaLedger, TableDeclaration, TableWriter
 from adapt.persistence.store import Store, init_store
 
 pytestmark = pytest.mark.unit
@@ -260,3 +260,77 @@ class TestIdentityStamping:
             _run_meta(),
         )
         assert _snapshot(collection.products_path, "xlma_stat_minutes")["granularity"] == "time"
+
+
+def _frozen_types(collection, table):
+    snap = _snapshot(collection.products_path, table)
+    return {c["name"]: c["type"] for c in json.loads(snap["columns_json"])}
+
+
+def _freeze_with_first_frame(tmp_path, name, frame):
+    """Freeze cell_stats in a fresh store from *frame* and return its frozen types."""
+    root = init_store(tmp_path / name)
+    store = Store.open(root)
+    try:
+        collection = store.collection("KILX")
+        ledger = SchemaLedger(collection.products_path, collection.catalog)
+        TableWriter(ledger, SPEC, owner_module="analysis").write(frame, _scan_meta())
+        return _frozen_types(collection, "cell_stats")
+    finally:
+        store.close()
+
+
+class TestDeterministicFreeze:
+    """The frozen schema is a function of the column NAMES, never of the
+    values in whichever scan happened to arrive first."""
+
+    def test_integer_measure_freezes_as_real(self, writer, collection):
+        writer.write(_frame(pixel_count=[40, 50]), _scan_meta())
+
+        assert _frozen_types(collection, "cell_stats")["pixel_count"] == "REAL"
+
+    def test_frozen_schema_is_independent_of_first_frame_values(self, tmp_path):
+        # Same column set; one first frame is all-int, the other NaN-promoted
+        # float64. Both stores must freeze the identical schema.
+        int_first = _freeze_with_first_frame(tmp_path, "a", _frame(pixel_count=[40, 50]))
+        nan_first = _freeze_with_first_frame(
+            tmp_path, "b", _frame(pixel_count=[60.0, float("nan")])
+        )
+
+        assert int_first == nan_first
+
+    def test_core_identity_columns_freeze_to_contracted_types(self, writer, collection):
+        writer.write(_frame(is_edge=[True, False], note=["a", "b"]), _scan_meta())
+
+        types = _frozen_types(collection, "cell_stats")
+        assert types["run_id"] == "TEXT"
+        assert types["scan_id"] == "TEXT"
+        assert types["scan_time"] == "TEXT"
+        assert types["scan_time_unix"] == "INTEGER"
+        assert types["cell_label"] == "INTEGER"  # core: typed by name, not by dtype
+        assert types["is_edge"] == "INTEGER"  # bools never NaN-promote
+        assert types["note"] == "TEXT"
+
+    def test_legacy_integer_freeze_still_accepts_nan_promoted_floats(self, ledger, writer):
+        # Stores frozen before the deterministic rule carry INTEGER measure
+        # columns; frames NaN-promoted to float64 must keep writing into them.
+        ledger.freeze(
+            TableDeclaration(
+                table="cell_stats",
+                owner_module="analysis",
+                granularity="scan",
+                primary_key=("run_id", "scan_id", "cell_label"),
+                index_columns=(),
+                columns=(
+                    ("run_id", "TEXT"),
+                    ("scan_id", "TEXT"),
+                    ("scan_time", "TEXT"),
+                    ("scan_time_unix", "INTEGER"),
+                    ("cell_label", "INTEGER"),
+                    ("area", "REAL"),
+                    ("pixel_count", "INTEGER"),
+                ),
+            )
+        )
+
+        writer.write(_frame(pixel_count=[60.0, float("nan")]), _scan_meta())

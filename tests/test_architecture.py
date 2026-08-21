@@ -471,6 +471,51 @@ def test_layer_stack_covers_the_real_source_tree() -> None:
     )
 
 
+# ── DDL single home: static CREATE TABLE lives in configuration/schemas/*.sql ──
+# The store's bookkeeping tables are defined once, in the .sql schema files.
+# api/store_client.py queries these tables by name, so every extra place that
+# defines them is another chance for silent reader/writer drift. The allowlist
+# below pins today's exceptions and may only SHRINK — move DDL into the .sql
+# files (or through SchemaLedger.freeze), never into a new Python file.
+
+_DDL_ALLOWED_PY = {
+    # The sanctioned dynamic creator: frozen first-frame product tables.
+    "persistence/products.py",
+    # Legacy bespoke DDL — shrink-only; consolidate into schemas/*.sql.
+    "persistence/track_store.py",
+    "persistence/execution_history.py",
+}
+
+# Case-sensitive: SQL here is uppercase by convention; lowercase "Create
+# tables" in docstring prose must not count.
+_CREATE_TABLE = re.compile(r"CREATE\s+TABLE")
+
+
+def test_create_table_statements_have_one_home() -> None:
+    """CREATE TABLE may appear only in configuration/schemas/*.sql or the pinned files."""
+    offenders = [
+        rel
+        for py_file in _SRC_ADAPT.rglob("*.py")
+        if _CREATE_TABLE.search(py_file.read_text(encoding="utf-8"))
+        and (rel := _rel(py_file, _SRC_ADAPT)) not in _DDL_ALLOWED_PY
+    ]
+    assert not offenders, (
+        f"\nCREATE TABLE outside its home: {offenders}. Table definitions live in "
+        "configuration/schemas/*.sql (static tables) or go through "
+        "SchemaLedger.freeze (dynamic product tables) — do not extend _DDL_ALLOWED_PY."
+    )
+
+    stale = {
+        rel
+        for rel in _DDL_ALLOWED_PY
+        if not _CREATE_TABLE.search((_SRC_ADAPT / rel).read_text(encoding="utf-8"))
+    }
+    assert not stale, (
+        f"\n_DDL_ALLOWED_PY contains files with no CREATE TABLE left: {sorted(stale)}. "
+        "Remove them so the ratchet only tightens."
+    )
+
+
 # ── Telemetry ids stay out of the science context dict ────────────────────────
 # Observability correlation ids (trace/span/scan/pipeline/...) travel out-of-band
 # in contextvars. If one ever appeared as a module input/output key it would couple

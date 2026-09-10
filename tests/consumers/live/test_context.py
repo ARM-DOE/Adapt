@@ -3,18 +3,21 @@
 
 """AppContext — the session facts the dashboard shell shares with its tabs."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 import adapt.consumers.live._context as context_mod
+from adapt.api.domain import ScanRef
 from adapt.consumers.live._context import AppContext
 
 pytestmark = pytest.mark.unit
 
 
-def _ctx(repo="/repo", radar="klot", run_sel="", **overrides):
+def _ctx(repo="/repo", collection="klot", run_sel="", **overrides):
     kwargs = {
         "get_repo": lambda: repo,
-        "get_radar": lambda: radar,
+        "get_collection": lambda: collection,
         "get_run_sel": lambda: run_sel,
         "get_cfg": dict,
         "report_scan_time": lambda dt: None,
@@ -23,10 +26,10 @@ def _ctx(repo="/repo", radar="klot", run_sel="", **overrides):
     return AppContext(**kwargs)
 
 
-def test_repo_and_radar_normalized():
-    ctx = _ctx(repo="  /repo ", radar=" klot ")
+def test_repo_and_collection_normalized():
+    ctx = _ctx(repo="  /repo ", collection=" klot ")
     assert ctx.repo() == "/repo"
-    assert ctx.radar() == "KLOT"
+    assert ctx.collection() == "KLOT"
 
 
 def test_run_id_parses_run_selector_label():
@@ -38,30 +41,83 @@ def test_run_id_none_when_blank():
     assert _ctx(run_sel="  ").run_id() is None
 
 
-def test_nc_files_sorted_and_run_filtered_with_legacy_fallthrough(tmp_path):
-    analysis = tmp_path / "KLOT" / "analysis"
-    d1, d2 = analysis / "20260704", analysis / "20260705"
-    d1.mkdir(parents=True)
-    d2.mkdir()
+class _FakeRun:
+    def __init__(self, run_id):
+        self.run_id = run_id
+
+
+def test_timeline_uses_selected_run():
+    """The timeline goes through the client's complete-only scan timeline —
+    no directory walk, no filename parsing."""
+    calls = []
+    refs = [
+        ScanRef("2026JUL04-1454-KLOT", "sid-a", datetime(2026, 7, 4, 23, tzinfo=UTC)),
+        ScanRef("2026JUL04-1454-KLOT", "sid-b", datetime(2026, 7, 5, 1, tzinfo=UTC)),
+    ]
+
+    class FakeClient:
+        def scan_timeline(self, collection, run_id):
+            calls.append({"collection": collection, "run_id": run_id})
+            return refs
+
     run = "2026JUL04-1454-KLOT"
-    other = "2026JUL02-2319-KLOT"
-    b = d2 / f"KLOT20260705_010000_V06_{run}_analysis.nc"
-    a = d1 / f"KLOT20260704_230000_V06_{run}_analysis.nc"
-    c = d1 / f"KLOT20260704_235500_V06_{other}_analysis.nc"
-    for p in (a, b, c):
-        p.touch()
+    ctx = _ctx(collection="KLOT", run_sel=f"{run} …")
+    ctx._client = FakeClient()
+    ctx._client_repo = ctx.repo()
 
-    ctx = _ctx(repo=str(tmp_path), radar="KLOT", run_sel=f"{run} …")
-    assert ctx.nc_files() == [a, b]  # chronological, other run excluded
-
-    # No filename matches the selected run → legacy fallback to the full list
-    ctx_legacy = _ctx(repo=str(tmp_path), radar="KLOT", run_sel="UNKNOWN-RUN …")
-    assert ctx_legacy.nc_files() == [a, c, b]
+    assert ctx.timeline() == refs
+    assert calls == [{"collection": "KLOT", "run_id": run}]
 
 
-def test_nc_files_empty_when_analysis_dir_missing(tmp_path):
-    ctx = _ctx(repo=str(tmp_path), radar="KLOT")
-    assert ctx.nc_files() == []
+def test_timeline_defaults_to_latest_run():
+    """Without a Run selection the collection's newest run is used — the
+    registry's documented ordering, not a data fallback."""
+    calls = []
+
+    class FakeClient:
+        def latest_run(self, collection):
+            calls.append(("latest_run", collection))
+            return _FakeRun("run-new")
+
+        def scan_timeline(self, collection, run_id):
+            calls.append(("timeline", collection, run_id))
+            return []
+
+    ctx = _ctx(collection="KLOT", run_sel="")
+    ctx._client = FakeClient()
+    ctx._client_repo = ctx.repo()
+
+    assert ctx.timeline() == []
+    assert calls == [("latest_run", "KLOT"), ("timeline", "KLOT", "run-new")]
+
+
+def test_timeline_empty_when_no_runs():
+    class FakeClient:
+        def latest_run(self, collection):
+            return None
+
+    ctx = _ctx(collection="KLOT")
+    ctx._client = FakeClient()
+    ctx._client_repo = ctx.repo()
+
+    assert ctx.timeline() == []
+
+
+def test_open_raster_delegates_with_ref_identity():
+    calls = []
+    ref = ScanRef("run-1", "sid-a", datetime(2026, 7, 4, 23, tzinfo=UTC))
+
+    class FakeClient:
+        def open_scan_raster(self, collection, run_id, scan_id, product="segmentation2d"):
+            calls.append((collection, run_id, scan_id, product))
+            return "raster"
+
+    ctx = _ctx(collection="KLOT")
+    ctx._client = FakeClient()
+    ctx._client_repo = ctx.repo()
+
+    assert ctx.open_raster(ref) == "raster"
+    assert calls == [("KLOT", "run-1", "sid-a", "segmentation2d")]
 
 
 def test_client_cached_per_repo_path(monkeypatch):
@@ -74,7 +130,7 @@ def test_client_cached_per_repo_path(monkeypatch):
         def close(self):
             closed.append(True)
 
-    monkeypatch.setattr(context_mod, "RepositoryClient", FakeClient)
+    monkeypatch.setattr(context_mod, "StoreClient", FakeClient)
     repo_holder = ["/repo1"]
     ctx = _ctx(get_repo=lambda: repo_holder[0])
 

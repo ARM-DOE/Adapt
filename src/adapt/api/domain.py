@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""First-class domain objects for the Adapt repository API."""
+"""First-class domain objects for the Adapt store API."""
 
 from __future__ import annotations
 
@@ -11,19 +11,30 @@ from datetime import datetime
 import pandas as pd
 import xarray as xr
 
-__all__ = ["Run", "Track", "Scan", "ScanBundle"]
+__all__ = ["Collection", "Run", "Scan", "ScanBundle", "ScanRaster", "ScanRef", "Track"]
+
+
+@dataclass(frozen=True)
+class Collection:
+    """A radar/site data domain; many runs, one catalog + products + objects."""
+
+    collection_id: str
+    source_kind: str
+    location_lat: float | None
+    location_lon: float | None
 
 
 @dataclass(frozen=True)
 class Run:
-    """A single pipeline execution."""
+    """A single pipeline execution (the ONE run lifecycle, from the registry)."""
 
     run_id: str
-    radar_id: str
-    start_time: datetime
-    end_time: datetime | None
-    status: str  # 'running' | 'complete' | 'failed'
-    mode: str  # 'realtime' | 'historical'
+    collection_id: str
+    status: str  # 'running' | 'completed' | 'cancelled' | 'failed'
+    started_at: datetime
+    ended_at: datetime | None
+    config_hash: str
+    pipeline_version: str
 
 
 @dataclass(frozen=True)
@@ -44,14 +55,52 @@ class Track:
 
 @dataclass(frozen=True)
 class Scan:
-    """Metadata for one processed scan."""
+    """Metadata for one processed scan.
 
-    scan_time: datetime
-    radar_id: str
+    ``scan_id`` is the identity (join key); times are ordering/display metadata.
+    Coverage times are per-source and may be absent.
+    """
+
+    scan_id: str
     run_id: str
-    n_cells: int
-    max_reflectivity: float
-    has_tracks: bool
+    collection_id: str
+    scan_time: datetime
+    source_file_name: str
+    status: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ScanRef:
+    """One position on a run's scan timeline — identity plus display time."""
+
+    run_id: str
+    scan_id: str
+    scan_time: datetime
+
+
+class ScanRaster:
+    """A scan's raster product, fully loaded in memory — no file handle retained.
+
+    Closeable context manager: ``close()`` releases the dataset reference; the
+    underlying NetCDF file was already closed before construction, so a leaked
+    ScanRaster costs memory, never file descriptors.
+    """
+
+    def __init__(self, dataset: xr.Dataset, ref: ScanRef, product: str) -> None:
+        self.dataset = dataset
+        self.ref = ref
+        self.product = product
+
+    def __enter__(self) -> ScanRaster:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self.dataset.close()
 
 
 @dataclass

@@ -3,7 +3,7 @@
 
 """Frozen input data model for the engine.
 
-The engine sees only these types — never pandas or RepositoryClient.
+The engine sees only these types — never pandas or the StoreClient.
 Conversion from repository tables happens once, in repository_source.
 """
 

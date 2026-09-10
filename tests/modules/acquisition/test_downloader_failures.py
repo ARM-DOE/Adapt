@@ -1,5 +1,6 @@
 # tests/test_downloader_failures.py
 from datetime import UTC, datetime
+from queue import Queue
 
 import pytest
 
@@ -8,7 +9,7 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_download_failure_does_not_queue(tmp_path, fake_scan, make_config):
+def test_download_failure_does_not_queue(fake_scan, fake_gateway, make_config):
     class FailingConn:
         def get_avail_scans_in_range(self, *a):
             return [fake_scan("bad", datetime.now(UTC))]
@@ -20,14 +21,18 @@ def test_download_failure_does_not_queue(tmp_path, fake_scan, make_config):
 
             return R()
 
+    q = Queue()
     config = make_config()
-    d = AwsNexradDownloader(config, output_dir=tmp_path, conn=FailingConn())
+    d = AwsNexradDownloader(config, result_queue=q, acquire=fake_gateway, conn=FailingConn())
 
     downloads = d._download_realtime()
+
     assert downloads == []
+    assert q.qsize() == 0
+    assert fake_gateway.acquire_file_calls == []
 
 
-def test_fetch_scans_retries_then_returns_empty(tmp_path, make_config):
+def test_fetch_scans_retries_then_returns_empty(fake_gateway, make_config):
     """Persistent fetch failure is retried max_fetch_retries times, then [] (no crash)."""
     calls = {"fetch": 0}
 
@@ -39,7 +44,7 @@ def test_fetch_scans_retries_then_returns_empty(tmp_path, make_config):
     sleeps: list = []
     config = make_config(max_fetch_retries=4)
     d = AwsNexradDownloader(
-        config, output_dir=tmp_path, conn=ExplodingConn(), sleeper=sleeps.append
+        config, acquire=fake_gateway, conn=ExplodingConn(), sleeper=sleeps.append
     )
 
     scans = d._fetch_scans(datetime.now(UTC), datetime.now(UTC))
@@ -49,7 +54,7 @@ def test_fetch_scans_retries_then_returns_empty(tmp_path, make_config):
     assert sleeps == [1, 2, 3]  # backoff between attempts, none after the last
 
 
-def test_fetch_scans_recovers_on_retry(tmp_path, fake_scan, make_config):
+def test_fetch_scans_recovers_on_retry(fake_scan, fake_gateway, make_config):
     """A transient failure followed by success returns the scans."""
     calls = {"fetch": 0}
     good = [fake_scan("KLOT20250305_120000", datetime.now(UTC))]
@@ -62,7 +67,7 @@ def test_fetch_scans_recovers_on_retry(tmp_path, fake_scan, make_config):
             return good
 
     config = make_config(max_fetch_retries=3)
-    d = AwsNexradDownloader(config, output_dir=tmp_path, conn=FlakyConn(), sleeper=lambda _: None)
+    d = AwsNexradDownloader(config, acquire=fake_gateway, conn=FlakyConn(), sleeper=lambda _: None)
 
     scans = d._fetch_scans(datetime.now(UTC), datetime.now(UTC))
 

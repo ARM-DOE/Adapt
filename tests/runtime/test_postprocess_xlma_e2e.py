@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""End-to-end: `adapt postprocess --module xlma_stat` over a small repository.
+"""End-to-end: `adapt postprocess --module xlma_stat` over a small stored run.
 
 Exercises the whole chain — PostProcessor discovery/resolution, minute-mask
 injection (read_minute_masks over the analysis NetCDFs), flash-sorted NetCDF
@@ -11,16 +11,12 @@ projected mid-gap position, where both real scan masks are out of attribution
 range — only the minute-resolution geometry attributes it.
 """
 
-import shutil
 import sqlite3
-import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 
-from adapt.persistence import DataRepository, ProductType
-from adapt.persistence.tables import CORE_TABLES
+from adapt.persistence.objects import ArtifactMeta, ObjectStore
 from adapt.runtime.postprocessor import PostProcessor
 from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 from tests.helpers.lma import write_flash_sorted_nc
@@ -32,33 +28,30 @@ pytest.importorskip("pyproj")
 LAT0, LON0 = 40.0, -88.0
 
 
-@pytest.fixture
-def repo():
-    d = Path(tempfile.mkdtemp())
-    r = DataRepository(run_id="XLMAE2E1", base_dir=d, radar="TEST_RADAR")
-    yield r
-    r.close()
-    r.registry.close()
-    shutil.rmtree(d, ignore_errors=True)
-
-
-def _write(repo, ds, scan_time: str):
-    repo.write_netcdf(
-        ds=ds,
-        product_type=ProductType.ANALYSIS_NC,
-        scan_time=datetime.fromisoformat(scan_time).replace(tzinfo=UTC),
-        producer="test",
+def _write(store_env, ds, scan_time: str):
+    objects = ObjectStore(store_env.collection.objects_dir, store_env.collection.catalog)
+    handle = objects.begin(suffix=".nc")
+    ds.to_netcdf(handle.staging_path)
+    objects.commit(
+        handle,
+        ArtifactMeta(
+            artifact_type="segmentation2d",
+            producer="test",
+            run_id=store_env.run_id,
+            scan_id=f"sid-{scan_time[-8:]}",
+            observation_time=datetime.fromisoformat(scan_time).replace(tzinfo=UTC),
+        ),
     )
 
 
-def _build_moving_cell_repo(repo):
+def _build_moving_cell_repo(store_env):
     """Scans 19:00/19:03/19:06; the cell crosses the grid centre at minute 19:05.
 
     At 19:03 the cell is far west (cols 5-7), at 19:06 far east (cols 11-13);
     only the advected 19:05 mask (cols 9-11) covers the radar origin.
     """
     _write(
-        repo,
+        store_env,
         make_analysis_ds(
             "2024-05-18T19:03:00",
             "2024-05-18T19:00:00",
@@ -74,7 +67,7 @@ def _build_moving_cell_repo(repo):
         "2024-05-18T19:03:00",
     )
     _write(
-        repo,
+        store_env,
         make_analysis_ds(
             "2024-05-18T19:06:00",
             "2024-05-18T19:03:00",
@@ -91,22 +84,24 @@ def _build_moving_cell_repo(repo):
     )
 
 
-def _run_postprocess(repo, make_config, tmp_path) -> None:
-    repo.registry.ensure_radar_location("TEST_RADAR", LAT0, LON0)
+def _run_postprocess(store_env, make_config, tmp_path) -> None:
+    store_env.registry.ensure_collection_location("TEST_RADAR", lat=LAT0, lon=LON0)
     lma_dir = tmp_path / "lma"
     lma_dir.mkdir(exist_ok=True)
     # two flashes in minute 19:05 at the radar origin — the cell's mid-gap position
     write_flash_sorted_nc(lma_dir / "LYLOUT_240518_190000_3600_map.nc", "2024-05-18T19:05:10", 2)
     (lma_dir / "LYLOUT_240518_190000.dat").write_text("raw ascii — ignored", encoding="utf-8")
     config = make_config(module_params={"xlma_stat": {"input_dir": str(lma_dir)}})
-    PostProcessor(repo, config).run(modules=["xlma_stat"])
+    PostProcessor(store_env.collection, store_env.registry, store_env.run_id, config).run(
+        modules=["xlma_stat"]
+    )
 
 
-def test_postprocess_xlma_writes_both_extension_tables(repo, make_config, tmp_path):
-    _build_moving_cell_repo(repo)
-    _run_postprocess(repo, make_config, tmp_path)
+def test_postprocess_xlma_writes_both_extension_tables(store_env, make_config, tmp_path):
+    _build_moving_cell_repo(store_env)
+    _run_postprocess(store_env, make_config, tmp_path)
 
-    conn = sqlite3.connect(repo.catalog.db_path)
+    conn = sqlite3.connect(store_env.collection.products_path)
     conn.row_factory = sqlite3.Row
     try:
         minutes = conn.execute(
@@ -124,9 +119,8 @@ def test_postprocess_xlma_writes_both_extension_tables(repo, make_config, tmp_pa
         scan_pk = [
             r["name"] for r in conn.execute("PRAGMA table_info('xlma_stat_scan')") if r["pk"] > 0
         ]
-        science_tables = {"cells_by_scan", "cell_events", "cell_tracks"} & CORE_TABLES
-        core_counts = {
-            t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in science_tables
+        existing_tables = {
+            r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     finally:
         conn.close()
@@ -153,17 +147,17 @@ def test_postprocess_xlma_writes_both_extension_tables(repo, make_config, tmp_pa
 
     assert set(minutes_pk) == {"run_id", "time", "cell_uid"}
     assert set(scan_pk) == {"run_id", "scan_time", "cell_uid"}
-    assert all(r["run_id"] == "XLMAE2E1" for r in [*minutes, *scans])
-    # post-processing only adds extension tables; science core tables untouched
-    assert all(count == 0 for count in core_counts.values())
+    assert all(r["run_id"] == store_env.run_id for r in [*minutes, *scans])
+    # post-processing only adds extension tables; tracking core tables untouched
+    assert not ({"cells_by_scan", "cell_events", "cell_tracks"} & existing_tables)
 
 
-def test_postprocess_xlma_rerun_is_idempotent(repo, make_config, tmp_path):
-    _build_moving_cell_repo(repo)
-    _run_postprocess(repo, make_config, tmp_path)
-    _run_postprocess(repo, make_config, tmp_path)
+def test_postprocess_xlma_rerun_is_idempotent(store_env, make_config, tmp_path):
+    _build_moving_cell_repo(store_env)
+    _run_postprocess(store_env, make_config, tmp_path)
+    _run_postprocess(store_env, make_config, tmp_path)
 
-    conn = sqlite3.connect(repo.catalog.db_path)
+    conn = sqlite3.connect(store_env.collection.products_path)
     try:
         n_minutes = conn.execute("SELECT COUNT(*) FROM xlma_stat_minutes").fetchone()[0]
         n_scans = conn.execute("SELECT COUNT(*) FROM xlma_stat_scan").fetchone()[0]

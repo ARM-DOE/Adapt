@@ -12,8 +12,6 @@ import pandas as pd
 from adapt.contracts.pipeline import require
 
 _REQUIRED_COLS = (
-    "run_id",
-    "scan_time",
     "cell_uid",
     "cell_label",
     "cell_area_km2",

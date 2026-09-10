@@ -5,19 +5,19 @@
 
 This module handles ALL initialization responsibilities:
 - Configuration resolution (CLI > User > Param)
-- Output directory setup
-- Cleanup handling (--rerun)
-- Configuration persistence with run ID
+- Run-id continuation (config reloaded from the store registry)
 - Returns fully ready InternalConfig for orchestrator
+
+The store layout is created only by ``adapt init``; nothing here scaffolds
+directories, cleans outputs, or persists config files — the resolved config
+travels in the registry's run record.
 
 Author: Bhupendra Raut
 """
 
 import importlib.util
-import json
 import re
-import shutil
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from adapt.configuration.schemas.cli import CLIConfig
@@ -26,8 +26,8 @@ from adapt.configuration.schemas.internal import InternalConfig
 from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.resolve import resolve_config
 from adapt.configuration.schemas.user import UserConfig
-from adapt.persistence import DataRepository
-from adapt.persistence.registry import RepositoryRegistry
+from adapt.persistence.errors import StoreError
+from adapt.persistence.store_registry import StoreRegistry
 
 _RUN_ID_PATTERN = re.compile(
     r"^\d{4}(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}-\d{4}-[A-Z0-9]{4}$"
@@ -120,129 +120,21 @@ def _load_user_config_dict(config_path: str) -> dict:
     raise ValueError(f"No CONFIG dict found in {path}")
 
 
-def _setup_output_directories(base_dir: str) -> dict[str, Path]:
-    """Setup output directory structure.
-
-    Creates the standard Adapt directory layout under base_dir.
-    Uses the local directories module for path management.
-    """
-    from adapt.configuration.schemas.directories import setup_output_directories
-
-    return setup_output_directories(base_dir)
+def _generate_run_id(radar: str) -> str:
+    """Generate a run ID in YYYYMONDD-HHMM-RADAR format (e.g. 2026MAR23-0206-KBOX)."""
+    now_local = datetime.now()
+    month = now_local.strftime("%b").upper()
+    return f"{now_local:%Y}{month}{now_local:%d}-{now_local:%H%M}-{radar.upper()}"
 
 
-def _handle_rerun_cleanup(base_dir: str, radar: str, rerun: bool) -> None:
-    """Handle --rerun cleanup if requested.
-
-    Deletes only Adapt-created artifacts for the requested radar under base_dir.
-    Never deletes user-owned files like config.yaml.
-    """
-    if not rerun:
-        return
-
-    base_dir_path = Path(base_dir)
-    if not base_dir_path.exists():
-        return
-
-    radar = str(radar).upper()
-    radar_dir = base_dir_path / radar
-
-    print(f"Cleaning radar output directory: {radar_dir}")
-    if radar_dir.exists():
-        shutil.rmtree(radar_dir)
-
-    # Remove run-specific legacy pipeline catalogs and runtime configs for this radar.
-    catalog_dir = base_dir_path / "catalog"
-    if catalog_dir.exists():
-        for p in catalog_dir.glob(f"*-{radar}_pipeline_catalog.db*"):
-            try:
-                p.unlink()
-            except IsADirectoryError:
-                shutil.rmtree(p)
-    for p in base_dir_path.glob(f"runtime_config_*-{radar}.json"):
-        try:
-            p.unlink()
-        except IsADirectoryError:
-            shutil.rmtree(p)
-
-    print("Radar output cleaned")
-
-
-def _persist_runtime_config(
-    config: InternalConfig, run_id: str, output_dirs: dict[str, Path]
-) -> None:
-    """Persist final runtime configuration to output directory with run ID.
-
-    Saves the complete resolved configuration for reproducibility and debugging.
-    """
-    config_output_dir = Path(output_dirs["base"])
-    config_output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save config with run ID in filename
-    config_file = config_output_dir / f"runtime_config_{run_id}.json"
-
-    # Add run_id to config dict for persistence
-    config_dict = config.model_dump()
-    config_dict["run_id"] = run_id
-    config_dict["created_at"] = datetime.now(UTC).isoformat()
-
-    with open(config_file, "w", encoding="utf-8") as f:
-        json.dump(config_dict, f, indent=2, default=str)
-
-
-_CONFIG_SKIP_KEYS = frozenset({"run_id", "created_at", "output_dirs"})
-
-
-def _config_fingerprint(d: dict) -> dict:
-    """Return a copy of config dict with transient keys removed for comparison."""
-    return {k: v for k, v in d.items() if k not in _CONFIG_SKIP_KEYS}
-
-
-def _find_matching_run_id(new_config_dict: dict) -> str | None:
-    """Check existing runtime_config_*.json files; return run_id if config matches.
-
-    Compares the resolved config (minus run_id, created_at, output_dirs) against
-    every saved runtime_config in the output directory.  Returns the run_id of the
-    most-recently-saved matching config, or None if no match is found.
-    """
-    base_dir = Path(new_config_dict.get("base_dir", ""))
-    if not base_dir.exists():
+def _load_run_config(base_dir: str, run_id: str) -> InternalConfig | None:
+    """Reload the exact config of an existing run from the store registry."""
+    registry = StoreRegistry.get_instance(base_dir)
+    try:
+        run = registry.get_run(run_id)
+    except StoreError:
         return None
-
-    candidates = sorted(base_dir.glob("runtime_config_*.json"), reverse=True)
-    target = _config_fingerprint(new_config_dict)
-
-    for cfg_file in candidates:
-        try:
-            with open(cfg_file, encoding="utf-8") as f:
-                saved = json.load(f)
-            if _config_fingerprint(saved) == target:
-                return saved.get("run_id")
-        except Exception:
-            continue
-    return None
-
-
-def _run_id_exists(base_dir: str, run_id: str) -> bool:
-    """Check if run_id exists in repository registry."""
-    runs = RepositoryRegistry.get_instance(base_dir).list_runs()
-    if runs.empty:
-        return False
-    return bool((runs["run_id"] == run_id).any())
-
-
-def _load_saved_runtime_config(base_dir: str, run_id: str) -> InternalConfig:
-    """Load saved runtime config JSON for an existing run."""
-    cfg_path = Path(base_dir) / f"runtime_config_{run_id}.json"
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"Saved runtime config not found for run_id '{run_id}': {cfg_path}")
-
-    with open(cfg_path, encoding="utf-8") as f:
-        cfg_dict = json.load(f)
-
-    # Non-schema metadata persisted for audit only.
-    cfg_dict.pop("created_at", None)
-    return InternalConfig.model_validate(cfg_dict)
+    return InternalConfig.model_validate_json(run["config_json"])
 
 
 def init_runtime_config(args) -> InternalConfig:
@@ -250,10 +142,8 @@ def init_runtime_config(args) -> InternalConfig:
 
     Handles ALL initialization responsibilities:
     1. Configuration resolution (CLI > User > Param)
-    2. Cleanup handling (--rerun)
-    3. Output directory setup
-    4. Configuration persistence with run ID
-    5. Returns fully ready InternalConfig for orchestrator
+    2. Run-id continuation (config reloaded from the store registry)
+    3. Returns fully ready InternalConfig for orchestrator
 
     This is the ONLY function user scripts should call from schemas.
     Everything else is internal implementation.
@@ -266,11 +156,9 @@ def init_runtime_config(args) -> InternalConfig:
     Returns
     -------
     InternalConfig
-        Fully validated, ready-to-use runtime configuration with:
-        - All directories created and paths set
-        - All CLI overrides applied
-        - Run ID generated and included
-        - Configuration persisted to output directory
+        Fully validated, ready-to-use runtime configuration with all CLI
+        overrides applied and the run ID included. The orchestrator records
+        the config in the store registry when the run begins.
 
     Examples
     --------
@@ -293,13 +181,14 @@ def init_runtime_config(args) -> InternalConfig:
         if not base_dir_arg:
             raise ValueError("--base-dir is required when --run-id is provided")
 
-        if _run_id_exists(base_dir_arg, normalized_run_id):
+        saved = _load_run_config(base_dir_arg, normalized_run_id)
+        if saved is not None:
             print(f"Continuing existing run ID: {normalized_run_id}")
             print(
                 "Ignoring user config file and CLI config overrides; "
-                "reusing saved runtime config for this run."
+                "reusing the run's recorded config from the store registry."
             )
-            return _load_saved_runtime_config(base_dir_arg, normalized_run_id)
+            return saved
 
     # 1. Load and resolve configuration from all sources
     config_path = getattr(args, "config", None)
@@ -348,38 +237,16 @@ def init_runtime_config(args) -> InternalConfig:
     # Resolve to final internal config
     internal_config_dict = resolve_config(param_cfg, user_cfg, cli_cfg).model_dump()
 
-    # 2. Handle --rerun cleanup BEFORE directory setup
-    rerun = getattr(args, "rerun", False)
-    _handle_rerun_cleanup(
-        internal_config_dict["base_dir"],
-        internal_config_dict["downloader"]["radar"],
-        rerun,
-    )
-
-    # 3. Setup output directories
-    output_dirs = _setup_output_directories(internal_config_dict["base_dir"])
-
-    # Add output_dirs to config for orchestrator use
-    internal_config_dict["output_dirs"] = {k: str(v) for k, v in output_dirs.items()}
-
-    # 4. Generate or use provided run ID
+    # 2. Generate or use the provided run ID (no implicit reuse: a new
+    #    invocation is a new run unless --run-id names an existing one).
     if normalized_run_id:
         run_id = normalized_run_id
         print(f"Using user-provided run ID (new run): {run_id}")
     else:
-        run_id = _find_matching_run_id(internal_config_dict)
-        if run_id:
-            print(f"Reusing existing run ID (config unchanged): {run_id}")
-        else:
-            run_id = DataRepository.generate_run_id(internal_config_dict["downloader"]["radar"])
+        run_id = _generate_run_id(internal_config_dict["downloader"]["radar"])
     internal_config_dict["run_id"] = run_id
 
-    config = InternalConfig.model_validate(internal_config_dict)
-
-    # 5. Persist configuration for reproducibility
-    _persist_runtime_config(config, run_id, output_dirs)
-
-    return config
+    return InternalConfig.model_validate(internal_config_dict)
 
 
 # Only this function is exposed - everything else is internal

@@ -35,7 +35,7 @@
       "labels": ["Echo top (m)", "20 dBZ top (m)"]
     },
     "Lightning": {
-      "variables": ["flash_count", "source_count"],
+      "variables": ["flash_count", "lightning_source_count"],
       "styles": ["solid", "dashed"],
       "labels": ["Flashes/min", "Sources/min"]
     }

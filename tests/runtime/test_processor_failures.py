@@ -15,13 +15,26 @@ import xarray as xr
 
 from adapt.contracts import ContractViolation
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.queue_msg import msg as _msg
+
+# Distinct per-file times: two different scans sharing one nominal second
+# is rejected by the scans registry (UNIQUE(run_id, scan_time)).
+_MT1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+_MT2 = datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC)
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 
-def _make_proc(pipeline_config, pipeline_output_dirs, test_repository):
+def _make_proc(pipeline_config, store_env):
     q = queue.Queue()
-    return RadarProcessor(q, pipeline_config, pipeline_output_dirs, repository=test_repository)
+    return RadarProcessor(
+        q,
+        pipeline_config,
+        collection=store_env.collection,
+        registry=store_env.registry,
+        run_id=store_env.run_id,
+        history=store_env.history,
+    )
 
 
 def _fake_ds():
@@ -50,10 +63,10 @@ def _fake_single_result(scan_time):
 
 
 def test_process_file_pipeline_exception_returns_false(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+    monkeypatch, pipeline_config, store_env, tmp_path
 ):
     """process_file returns False when executor raises a non-contract exception."""
-    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+    proc = _make_proc(pipeline_config, store_env)
 
     # Seed one entry in history so required_history=1 executor is eligible to run
     proc._scan_history.append(_fake_single_result(datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)))
@@ -63,20 +76,19 @@ def test_process_file_pipeline_exception_returns_false(
 
     monkeypatch.setattr(proc._executors[1], "run", _boom)
 
-    ok = proc.process_file("/fake/path/file")
+    ok = proc.process_file(_msg(store_env, tmp_path, "file"))
     assert ok is False
 
 
 def test_process_file_contract_violation_stops_processor(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+    monkeypatch, pipeline_config, store_env, tmp_path
 ):
     """ContractViolation during multi-frame executor causes processor to stop."""
-    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+    proc = _make_proc(pipeline_config, store_env)
 
-    scan_times = [
-        datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-        datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
-    ]
+    t1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+    t2 = datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC)
+    scan_times = [t1, t2]
 
     def _fake_single(context):
         return _fake_single_result(scan_times.pop(0))
@@ -87,8 +99,8 @@ def test_process_file_contract_violation_stops_processor(
     monkeypatch.setattr(proc._executors[1], "run", _fake_single)
     monkeypatch.setattr(proc._executors[2], "run", _boom_multi)
 
-    ok1 = proc.process_file("/fake/path/file_1")
-    ok2 = proc.process_file("/fake/path/file_2")
+    ok1 = proc.process_file(_msg(store_env, tmp_path, "file_1", scan_time=t1))
+    ok2 = proc.process_file(_msg(store_env, tmp_path, "file_2", scan_time=t2))
     assert ok1 is True
     assert ok2 is False
     assert proc.stopped()
@@ -98,10 +110,10 @@ def test_process_file_contract_violation_stops_processor(
 
 
 def test_process_file_success_saves_netcdf_and_returns_true(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+    monkeypatch, pipeline_config, store_env, tmp_path
 ):
     """process_file returns True and attempts NetCDF save on success."""
-    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+    proc = _make_proc(pipeline_config, store_env)
 
     scan_times = [
         datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
@@ -126,24 +138,26 @@ def test_process_file_success_saves_netcdf_and_returns_true(
         proc._router, "persist", lambda modules, result, meta: persisted.append(meta)
     )
 
-    ok1 = proc.process_file("/fake/path/file_1")
-    ok2 = proc.process_file("/fake/path/file_2")
+    ok1 = proc.process_file(_msg(store_env, tmp_path, "file_1", scan_time=_MT1))
+    ok2 = proc.process_file(_msg(store_env, tmp_path, "file_2", scan_time=_MT2))
     assert ok1 is True
     assert ok2 is True
     assert len(persisted) == 2  # router invoked once per processed file
 
 
-def test_process_file_skips_already_analyzed(
-    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
-):
-    """process_file skips a file that the tracker marks as done."""
-    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+def test_process_file_skips_completed_scan(monkeypatch, pipeline_config, store_env, tmp_path):
+    """process_file skips a scan the catalog already marks complete."""
+    proc = _make_proc(pipeline_config, store_env)
+    message = _msg(store_env, tmp_path, "file")
+    catalog = store_env.collection.catalog
+    for product in ("gridded3d", "segmentation2d"):
+        catalog.link_scan_product(
+            store_env.run_id, message["scan_id"], product, artifact_id=message["artifact_id"]
+        )
+    catalog.link_scan_product(
+        store_env.run_id, message["scan_id"], "cell_stats", table_name="cell_stats"
+    )
 
-    class _FakeTracker:
-        def should_process(self, file_id, stage):
-            return False
-
-    proc.file_tracker = _FakeTracker()
     called = []
     monkeypatch.setattr(
         proc._executors[1],
@@ -151,6 +165,6 @@ def test_process_file_skips_already_analyzed(
         lambda ctx: called.append(1) or _fake_single_result(datetime.now(UTC)),
     )
 
-    ok = proc.process_file("/fake/path/file")
+    ok = proc.process_file(message)
     assert ok is True
     assert called == []  # single executor was NOT called

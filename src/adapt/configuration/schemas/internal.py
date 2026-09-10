@@ -57,8 +57,6 @@ class InternalRegridderConfig(AdaptBaseModel):
     roi_func: Literal["dist_beam", "dist"]
     min_radius: float
     weighting_function: Literal["cressman", "barnes", "nearest"]
-    save_netcdf: bool
-    netcdf_save_retries: int
 
 
 class InternalSegmenterConfig(AdaptBaseModel):

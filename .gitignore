@@ -88,6 +88,8 @@ scripts/user_config.py
 *.md
 !README.md
 !CLAUDE.md
+!AGENTS.md
+!ARCHITECTURE.md
 !.github/**/*.md
 !docs/**/*.md
 *.txt
@@ -105,9 +107,8 @@ data/
 *.bz2
 *.xz
 
-# ignore hidden files but not gitignore
+# ignore hidden files but not gitignore, import-linter config, or CI
 .*
 !.gitignore
 !.importlinter
-__pycache__/
-*.md
+!.github/

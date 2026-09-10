@@ -240,7 +240,6 @@ class TestDefaultValues:
 
         assert config.regridder.grid_shape is not None
         assert len(config.regridder.grid_shape) == 3
-        assert config.regridder.save_netcdf is True
 
 
 class TestConfigValidation:

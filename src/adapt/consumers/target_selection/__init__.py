@@ -3,7 +3,7 @@
 
 """Target Selection Engine — selects which tracked cell to observe.
 
-A Ring 2 consumer: reads only through adapt.api.RepositoryClient, never
+A Ring 2 consumer: reads only through adapt.api.StoreClient, never
 writes into the Adapt repository, and never controls the radar.
 """
 

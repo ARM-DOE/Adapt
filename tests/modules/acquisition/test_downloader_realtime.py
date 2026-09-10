@@ -9,7 +9,19 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_realtime_download_hybrid(tmp_path, fake_scan, fake_aws_conn, make_config):
+def _count_downloads(conn, calls):
+    """Wrap conn.download to record the scan keys of each download call."""
+    original = conn.download
+
+    def counting_download(scans, *a, **k):
+        calls.append([s.key for s in scans])
+        return original(scans, *a, **k)
+
+    conn.download = counting_download
+
+
+def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, make_config):
+    """Scans already in the store are acquired without downloading; new ones download."""
     now = datetime(2024, 1, 1, tzinfo=UTC)
 
     scans = [
@@ -18,6 +30,11 @@ def test_realtime_download_hybrid(tmp_path, fake_scan, fake_aws_conn, make_confi
     ]
 
     q = Queue()
+    conn = fake_aws_conn(scans)
+    download_calls: list = []
+    _count_downloads(conn, download_calls)
+
+    fake_gateway.acquired.add("scan1")  # already committed by a previous run
 
     config = make_config(
         radar_id="KDIX",
@@ -27,31 +44,34 @@ def test_realtime_download_hybrid(tmp_path, fake_scan, fake_aws_conn, make_confi
 
     d = AwsNexradDownloader(
         config,
-        output_dir=tmp_path,
         result_queue=q,
-        conn=fake_aws_conn(scans),
+        acquire=fake_gateway,
+        conn=conn,
         clock=lambda: now,
         sleeper=lambda _: None,
     )
 
     downloads = d._download_realtime()
 
-    assert len(downloads) == 2
-    assert q.qsize() == 2
+    assert downloads == ["scan2"]  # only the missing scan hit S3
+    assert download_calls == [["scan2"]]
+    assert fake_gateway.acquire_existing_calls == ["scan1"]
+    assert [uri for _, uri in fake_gateway.acquire_file_calls] == ["scan2"]
+    assert q.qsize() == 2  # both scans are queued for the processor
 
-    for path in downloads:
-        assert path.exists()
-        assert path.stat().st_size >= 1024
 
-
-def test_realtime_idempotent(tmp_path, fake_scan, fake_aws_conn, make_config):
+def test_realtime_idempotent(fake_scan, fake_aws_conn, fake_gateway, make_config):
     scans = [fake_scan("same")]
+
+    conn = fake_aws_conn(scans)
+    download_calls: list = []
+    _count_downloads(conn, download_calls)
 
     config = make_config()
     d = AwsNexradDownloader(
         config,
-        output_dir=tmp_path,
-        conn=fake_aws_conn(scans),
+        acquire=fake_gateway,
+        conn=conn,
         sleeper=lambda _: None,
     )
 
@@ -59,3 +79,4 @@ def test_realtime_idempotent(tmp_path, fake_scan, fake_aws_conn, make_config):
     d._download_realtime()
 
     assert len(d._known_files) == 1
+    assert download_calls == [["same"]]  # second pass skips the known URI

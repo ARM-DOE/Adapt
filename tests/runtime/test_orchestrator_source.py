@@ -15,8 +15,10 @@ class TestOrchestratorSourceResolution:
         from adapt.modules.acquisition.module import AwsNexradDownloader
 
         orch = PipelineOrchestrator(pipeline_config)
+        orch.collection = orch.store.collection("TEST_RADAR")
         source = orch._create_source()
         assert isinstance(source, AwsNexradDownloader)
+        orch.store.close()
 
     def test_local_directory_source_selected_by_config(self, pipeline_config, tmp_path):
         from adapt.runtime.sources import LocalDirectorySource
@@ -27,5 +29,7 @@ class TestOrchestratorSourceResolution:
             update={"source": "local_directory", "source_dir": str(src_dir)}
         )
         orch = PipelineOrchestrator(cfg)
+        orch.collection = orch.store.collection("TEST_RADAR")
         source = orch._create_source()
         assert isinstance(source, LocalDirectorySource)
+        orch.store.close()

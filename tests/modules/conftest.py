@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.directories import setup_output_directories
 from adapt.configuration.schemas.internal import InternalConfig
 from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.resolve import resolve_config
@@ -287,20 +286,3 @@ def radar_config(temp_dir) -> InternalConfig:
 def ingest_module_config_from_radar(radar_config):
     """IngestConfig derived from radar_config."""
     return LoadModule.build_config(radar_config)
-
-
-@pytest.fixture
-def radar_output_dirs(temp_dir):
-    """Output directories for radar tests.
-
-    Returns dict with 'base' and 'logs' from setup_output_directories,
-    plus backward-compatible keys that point to base for legacy tests.
-    """
-    dirs = setup_output_directories(temp_dir)
-    # Add legacy keys for backward compatibility in tests
-    # These point to base since the actual paths are now under RADAR_ID/
-    dirs["nexrad"] = dirs["base"]
-    dirs["gridnc"] = dirs["base"]
-    dirs["analysis"] = dirs["base"]
-    dirs["plots"] = dirs["base"]
-    return dirs

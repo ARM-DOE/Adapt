@@ -12,13 +12,10 @@ unit-testable without a display.
 import logging
 import math
 import re
-from collections.abc import Iterable, Mapping, Sequence
-from datetime import UTC, datetime
-from pathlib import Path
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib import colormaps
 from matplotlib.lines import Line2D
 
@@ -41,7 +38,6 @@ _CANDIDATE = "#4e79a7"
 _SELECTED = "#e15759"
 _INK = "#1a1a1a"
 
-_NC_STAMP = re.compile(r"(\d{8})_(\d{6})")
 _PROJECTION_X = re.compile(r"^cell_centroid_projection(\d+)_x$")
 
 
@@ -93,55 +89,6 @@ def build_tse_config(
             "snapshot": {"growth_window_scans": int(growth_window)},
         }
     )
-
-
-def filter_nc_paths_by_run(nc_paths: Iterable[Path], run_id: str | None) -> list[Path]:
-    """Keep only analysis NetCDFs belonging to ``run_id``.
-
-    The pipeline embeds the run id in every analysis filename
-    (``…_V06_<run_id>_analysis.nc``), so run membership is a substring test —
-    no catalog query. ``run_id`` of ``None`` returns the paths unchanged.
-    """
-    paths = list(nc_paths)
-    if not run_id:
-        return paths
-    return [p for p in paths if run_id in Path(p).stem]
-
-
-def nc_index_by_scan(nc_paths: Iterable[Path]) -> dict[datetime, Path]:
-    """Map ``scan_time`` → analysis NetCDF path by parsing the filename stamp.
-
-    Filenames look like ``RADAR_YYYYMMDD_HHMMSS_analysis.nc``. Paths without a
-    parseable ``YYYYMMDD_HHMMSS`` stamp are ignored.
-    """
-    index: dict[datetime, Path] = {}
-    for path in nc_paths:
-        match = _NC_STAMP.search(Path(path).name)
-        if not match:
-            continue
-        d, t = match.group(1), match.group(2)
-        stamp = datetime(
-            int(d[:4]), int(d[4:6]), int(d[6:8]), int(t[:2]), int(t[2:4]), int(t[4:6]), tzinfo=UTC
-        )
-        index[stamp] = Path(path)
-    return index
-
-
-def find_nc_for_scan(
-    nc_index: Mapping[datetime, Path], scan_ts, tolerance_s: float = 90.0
-) -> Path | None:
-    """NC path whose filename stamp matches *scan_ts* within *tolerance_s*."""
-    if not nc_index:
-        return None
-    target = pd.Timestamp(scan_ts)
-    if target.tzinfo is None:
-        target = target.tz_localize("UTC")
-    best, best_diff = None, None
-    for stamp, path in nc_index.items():
-        diff = abs((pd.Timestamp(stamp) - target).total_seconds())
-        if diff <= tolerance_s and (best_diff is None or diff < best_diff):
-            best, best_diff = path, diff
-    return best
 
 
 def draw_reflectivity_backdrop(ax, ds, var: str = "reflectivity", *, alpha: float = 0.35) -> None:
@@ -265,21 +212,28 @@ def draw_target_overlay(ax, ds, snapshot, selection, candidate_uids: Sequence[st
     ax.legend(handles=handles, loc="upper right", fontsize=8, framealpha=0.85)
 
 
-def draw_tse_map(ax, scan_ts, nc_path: Path | None, snapshot, selection, candidate_uids) -> None:
+def draw_tse_map(
+    ax, scan_ts, ds, snapshot, selection, candidate_uids, *, raise_errors=False
+) -> None:
     """Draw one Target Selection replay frame onto *ax* (clears it first).
 
-    Shared by the live tab canvas and the movie exporter, so exported frames
-    match the on-screen replay by construction.
+    ``ds`` is the scan's in-memory analysis dataset (or None when the scan has
+    no raster). Shared by the live tab canvas and the movie exporter, so
+    exported frames match the on-screen replay by construction. The live
+    canvas shows a placeholder on a draw failure (the replay keeps stepping);
+    an exporter passes ``raise_errors=True`` so a bad frame aborts the file
+    instead of silently baking "render error" into it.
     """
     ax.clear()
     title = pd.Timestamp(scan_ts).strftime("%Y-%m-%d %H:%M:%S UTC")
-    if nc_path is not None:
+    if ds is not None:
         try:
-            with xr.open_dataset(nc_path) as ds:
-                draw_reflectivity_backdrop(ax, ds)
-                draw_target_overlay(ax, ds, snapshot, selection, candidate_uids)
+            draw_reflectivity_backdrop(ax, ds)
+            draw_target_overlay(ax, ds, snapshot, selection, candidate_uids)
         except Exception:
-            logger.exception("Failed to draw replay frame for %s", nc_path)
+            if raise_errors:
+                raise
+            logger.exception("Failed to draw replay frame for %s", scan_ts)
             ax.text(0.5, 0.5, "render error", ha="center", transform=ax.transAxes)
     else:
         title += "  (no scan raster)"

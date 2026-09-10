@@ -8,7 +8,7 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_historical_mode_completes(tmp_path, fake_scan, fake_aws_conn, make_config):
+def test_historical_mode_completes(fake_scan, fake_aws_conn, fake_gateway, make_config):
     scans = [
         fake_scan("h1", datetime(2024, 1, 1, tzinfo=UTC)),
         fake_scan("h2", datetime(2024, 1, 1, 1, tzinfo=UTC)),
@@ -21,7 +21,7 @@ def test_historical_mode_completes(tmp_path, fake_scan, fake_aws_conn, make_conf
 
     d = AwsNexradDownloader(
         config,
-        output_dir=tmp_path,
+        acquire=fake_gateway,
         conn=fake_aws_conn(scans),
         sleeper=lambda _: None,
     )
@@ -35,7 +35,7 @@ def test_historical_mode_completes(tmp_path, fake_scan, fake_aws_conn, make_conf
 
 
 # Mock AWS completely.
-def test_fetch_scans_filters_and_sorts(monkeypatch, tmp_path, make_config):
+def test_fetch_scans_filters_and_sorts(monkeypatch, fake_gateway, make_config):
     class FakeScan:
         def __init__(self, key, scan_time):
             self.key = key
@@ -48,7 +48,7 @@ def test_fetch_scans_filters_and_sorts(monkeypatch, tmp_path, make_config):
     ]
 
     config = make_config()
-    d = AwsNexradDownloader(config, output_dir=tmp_path)
+    d = AwsNexradDownloader(config, acquire=fake_gateway)
     monkeypatch.setattr(d.conn, "get_avail_scans_in_range", lambda *args, **kwargs: scans)
 
     result = d._fetch_scans(datetime.now(UTC), datetime.now(UTC))

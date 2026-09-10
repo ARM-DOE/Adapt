@@ -21,7 +21,6 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 from adapt.contracts import check_cell_volume_stats  # noqa: E402
 from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule  # noqa: E402
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig  # noqa: E402
-from adapt.persistence.module_output import ModuleOutputWriter  # noqa: E402
 from adapt.utils.time import to_scan_iso  # noqa: E402
 
 
@@ -104,17 +103,37 @@ class TestRunAndWriteFixC:
         assert not df.empty
         check_cell_volume_stats(df)
 
-        db = tmp_path / "catalog.db"
-        ModuleOutputWriter(db, CellVolumeStatsModule.persistence[0]).write(df)
-        conn = sqlite3.connect(str(db))
+        from adapt.contracts.persistence import PersistenceMeta
+        from adapt.persistence.products import SchemaLedger, TableWriter
+        from adapt.persistence.store import Store, init_store
+
+        root = init_store(tmp_path / "store")
+        store = Store.open(root)
+        coll = store.collection("KTST")
+        writer = TableWriter(
+            SchemaLedger(coll.products_path, coll.catalog),
+            CellVolumeStatsModule.persistence[0],
+            owner_module="cell_volume_stats",
+        )
+        meta = PersistenceMeta(
+            scan_time=scan_time.replace(tzinfo=UTC),
+            scan_id="sid-vol-1",
+            run_id="R1",
+            source_file="",
+            collection_id="KTST",
+        )
+        writer.write(df, meta)
+        conn = sqlite3.connect(str(coll.products_path))
         try:
-            iso, unix = conn.execute(
-                "SELECT scan_time, scan_time_unix FROM cell_volume_stats LIMIT 1"
+            sid, iso, unix = conn.execute(
+                "SELECT scan_id, scan_time, scan_time_unix FROM cell_volume_stats LIMIT 1"
             ).fetchone()
             vol = conn.execute("SELECT cell_volume_km3 FROM cell_volume_stats").fetchone()[0]
         finally:
             conn.close()
-        assert iso == to_scan_iso(scan_time)  # joins to cells_by_scan
+        store.close()
+        assert sid == "sid-vol-1"  # the join key, stamped by the writer
+        assert iso == to_scan_iso(scan_time)
         assert unix == int(scan_time.replace(tzinfo=UTC).timestamp())
         assert vol > 0  # the cell has volume
 
@@ -126,7 +145,7 @@ class TestNodeDeclarations:
         assert CellVolumeStatsModule.persistence[0].table == "cell_volume_stats"
         assert CellVolumeStatsModule.persistence[0].primary_key == (
             "run_id",
-            "scan_time",
+            "scan_id",
             "cell_uid",
         )
 

@@ -3,13 +3,15 @@
 
 """AWS S3 NEXRAD Level-II file discovery and download.
 
-Monitors AWS S3 bucket for new NEXRAD radar files and downloads them locally
-in realtime or historical batches. Deduplicates files to avoid re-downloading.
+Monitors AWS S3 bucket for new NEXRAD radar files and acquires them into the
+store in realtime or historical batches. Deduplicates via the catalog (by
+source URI) to avoid re-downloading.
 """
 
 import contextlib
 import io
 import logging
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -40,8 +42,11 @@ class AwsNexradDownloader(threading.Thread):
     **Deduplication:** Maintains set of known files to avoid re-downloading.
     Safe to restart mid-execution.
 
-    **Queue Communication:** Sends filepath to result_queue for each new file.
-    Downstream processor can begin work immediately (streaming architecture).
+    **Queue Communication:** Puts one acquired-scan message per new file on
+    result_queue — ``{artifact_id, scan_id, scan_time, queued_at}`` — built by
+    the injected acquisition gateway, which commits the raw bytes into the
+    store at the source boundary. Downstream processor can begin work
+    immediately (streaming architecture).
 
     **File Size Filtering:** Ignores files < 1 KB (corrupted downloads or
     metadata-only files).
@@ -70,10 +75,8 @@ class AwsNexradDownloader(threading.Thread):
     def __init__(
         self,
         config,
-        output_dir: Path | None = None,
-        output_dirs: dict | None = None,
         result_queue=None,
-        file_tracker=None,
+        acquire=None,
         conn=None,
         clock=None,
         sleeper=None,
@@ -85,20 +88,14 @@ class AwsNexradDownloader(threading.Thread):
         config : InternalConfig
             Fully validated runtime configuration.
 
-        output_dir : Path, optional
-            DEPRECATED: Use output_dirs instead.
-            Legacy parameter for backward compatibility.
-
-        output_dirs : dict, optional
-            Output directories dict from setup_output_directories().
-            Used for new path structure (RADAR_ID/nexrad/YYYYMMDD/).
-
         result_queue : queue.Queue, optional
-            Queue to push filepaths of downloaded files. Processor reads from
-            this queue. If None, no downstream notification (download-only mode).
+            Queue for acquired-scan messages. Processor reads from this queue.
+            If None, scans are acquired into the store without notification.
 
-        file_tracker : FileProcessingTracker, optional
-            Optional file processing tracker to record download completion.
+        acquire : acquisition gateway
+            Injected by the runtime; commits raw scans into the store and
+            registers them for the run. Required — the module never touches
+            persistence itself.
 
         conn : adapt.downloaders.NexradS3, optional
             AWS S3 connection object. If None, creates new connection.
@@ -120,29 +117,33 @@ class AwsNexradDownloader(threading.Thread):
 
         super().__init__(daemon=True)
 
+        if acquire is None:
+            raise ValueError("AwsNexradDownloader requires the acquisition gateway")
+
         self.config = config
         self.radar = config.downloader.radar
-        self.output_dirs = output_dirs
-        # Legacy support: if output_dir provided but not output_dirs, use old behavior
-        self.output_dir = Path(output_dir) if output_dir else None
         self.poll_interval_sec = config.downloader.poll_interval_sec
         self.max_fetch_retries = config.downloader.max_fetch_retries
         self.latest_files = config.downloader.latest_files
         self.latest_minutes = config.downloader.latest_minutes
         self.start_time = config.downloader.start_time
         self.end_time = config.downloader.end_time
-        self.file_tracker = file_tracker
 
         self.result_queue = result_queue
+        self._acquire = acquire
         self.conn = conn or NexradS3()
         # injectable time helpers for testing
         self._clock = clock or (lambda: datetime.now(UTC))
         self._sleep = sleeper or time.sleep
 
         self._stop_event = threading.Event()
-        self._known_files: set[Path] = set()
+        # Sources already handed to the processor this run (by source URI).
+        self._known_files: set[str] = set()
         self._known_files_lock = threading.Lock()
         self._min_file_size = config.downloader.min_file_size
+        # Store-external scratch space for in-flight S3 downloads; every file is
+        # moved into the store (or deleted) immediately after download.
+        self._staging_dir = Path(tempfile.mkdtemp(prefix="adapt_download_"))
         self._last_availability_warning: tuple[object, object] | None = None
 
         # Historical mode tracking
@@ -470,8 +471,8 @@ class AwsNexradDownloader(threading.Thread):
             )
 
     def _process_scans(self, scans: list) -> list:
-        """Process list of scans: download if needed, queue only if file exists."""
-        new_downloads = []
+        """Acquire each scan into the store (downloading only when needed) and queue it."""
+        acquired = []
         queued = 0
         processed = 0
 
@@ -480,37 +481,35 @@ class AwsNexradDownloader(threading.Thread):
                 break
 
             processed += 1
-            local_path = self._get_local_path(scan)
-            is_new = False
-            download_seconds = None
+            source_uri = str(scan.key)
+            with self._known_files_lock:
+                already_queued = source_uri in self._known_files
+            if already_queued:
+                continue
 
-            # Download if not exists
-            if not self._file_exists(local_path):
-                t0 = time.perf_counter()
-                if self._download_scan(scan, local_path):
-                    download_seconds = time.perf_counter() - t0
-                    is_new = True
-                    new_downloads.append(local_path)
-                else:
-                    logger.warning("Failed to download: %s", scan.key)
-                    continue  # Skip queueing if download failed
-
-            # Queue the file ONLY if it now exists on disk
-            if self._file_exists(local_path):
-                with self._known_files_lock:
-                    if local_path not in self._known_files:
-                        self._notify_queue(local_path, scan.scan_time, is_new, download_seconds)
-                        self._known_files.add(local_path)
-                        queued += 1
+            if self._acquire.is_acquired(source_uri):
+                message = self._acquire.acquire_existing(source_uri, scan_time=scan.scan_time)
             else:
-                logger.error("File missing after download attempt: %s", local_path)
+                local = self._download_scan(scan)
+                if local is None:
+                    logger.warning("Failed to download: %s", scan.key)
+                    continue
+                try:
+                    message = self._acquire.acquire_file(
+                        local, source_uri=source_uri, scan_time=scan.scan_time
+                    )
+                finally:
+                    local.unlink(missing_ok=True)
+                acquired.append(source_uri)
 
-        if queued > 0 or new_downloads:
-            logger.info(
-                "Queued %d files (%d new downloads)",
-                queued,
-                len(new_downloads),
-            )
+            if self.result_queue is not None:
+                self.result_queue.put(message)
+            with self._known_files_lock:
+                self._known_files.add(source_uri)
+            queued += 1
+
+        if queued > 0 or acquired:
+            logger.info("Queued %d files (%d new downloads)", queued, len(acquired))
 
         # Mark historical complete when all scans have been attempted
         if self.config.downloader.mode == "historical":
@@ -519,88 +518,28 @@ class AwsNexradDownloader(threading.Thread):
                 self._historical_complete.set()
                 logger.info("Historical mode complete after processing %d scans", processed)
 
-        return new_downloads
+        return acquired
 
-    def _get_local_path(self, scan) -> Path:
-        """Get local path for scan: base/RADAR_ID/nexrad/YYYYMMDD/filename."""
-        filename = Path(scan.key).name
-        date_str = scan.scan_time.strftime("%Y%m%d")
-
-        if self.output_dirs:
-            return self.output_dirs["base"] / self.radar / "nexrad" / date_str / filename
-
-        # Legacy fallback
-        return (self.output_dir / date_str / self.radar / filename).resolve()
-
-    def _file_exists(self, path: Path) -> bool:
-        """Check if valid file exists."""
+    def _download_scan(self, scan) -> Path | None:
+        """Download one scan into the scratch dir; return the path or None."""
         try:
-            return path.exists() and path.stat().st_size >= self._min_file_size
-        except Exception:
-            return False
-
-    def _download_scan(self, scan, local_path: Path) -> bool:
-        """Download single scan to local path."""
-        try:
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Download to temp then move
-            # Use output_dirs["base"] if available, otherwise output_dir
-            base_dir: Path = self.output_dirs["base"] if self.output_dirs else self.output_dir  # type: ignore[assignment]
-            temp_dir = base_dir / "_temp"
-            temp_dir.mkdir(exist_ok=True)
-
             # Contain any stdout the conn's download() may emit (we log our own
             # controlled "Downloaded: <name>" below). Logging uses stderr, so this
             # narrow stdout redirect never swallows our own output.
             with contextlib.redirect_stdout(io.StringIO()):
-                results = self.conn.download([scan], temp_dir, keep_aws_folders=False)
+                results = self.conn.download([scan], self._staging_dir, keep_aws_folders=False)
             success = list(results.iter_success())
-
-            if success:
-                temp_file = Path(success[0].filepath)
-                if temp_file.exists():
-                    temp_file.rename(local_path)
-                    logger.info("Downloaded: %s", local_path.name)
-                    return True
-
-            return False
+            if not success:
+                return None
+            temp_file = Path(success[0].filepath)
+            if not temp_file.exists():
+                return None
+            if temp_file.stat().st_size < self._min_file_size:
+                logger.warning("Downloaded file below minimum size, discarding: %s", temp_file.name)
+                temp_file.unlink(missing_ok=True)
+                return None
+            logger.info("Downloaded: %s", temp_file.name)
+            return temp_file
         except Exception as e:
             logger.error("Download failed: %s - %s", scan.key, e)
-            return False
-
-    def _notify_queue(
-        self,
-        path: Path,
-        scan_time: datetime,
-        is_new: bool,
-        download_seconds: float | None = None,
-    ):
-        """Put file notification in result queue."""
-        # Keep the original behavior: if there is no result_queue, we don't
-        # queue items or attempt to register/mark the file with the tracker.
-        if self.result_queue is None:
-            return
-
-        try:
-            # Register with tracker if available
-            tracker = self.file_tracker
-            file_id = path.stem
-            if tracker:
-                tracker.register_file(file_id, self.radar, scan_time, path)
-                timings = (
-                    {"download_seconds": download_seconds} if download_seconds is not None else None
-                )
-                tracker.mark_stage_complete(file_id, "downloaded", path=path, timings=timings)
-
-            self.result_queue.put(
-                {
-                    "path": path,
-                    "scan_time": scan_time,
-                    "radar": self.radar,
-                    "file_id": file_id,
-                    "queued_at": time.time(),
-                }
-            )
-        except Exception as e:
-            logger.error("Failed to queue notification: %s", e)
+            return None

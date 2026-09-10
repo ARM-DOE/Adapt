@@ -28,11 +28,10 @@ from adapt.contracts.grid import assert_gridded, check_grid_ds_2d
 from adapt.contracts.history import check_scan_history
 from adapt.contracts.persistence import (
     NetcdfArtifact,
-    ParquetArtifact,
     PersistenceMeta,
     PersistenceSpec,
-    RegisterFileArtifact,
-    SqliteTable,
+    ProductTableWrite,
+    ScanRecord,
     TrackTablesWrite,
 )
 from adapt.contracts.pipeline import ContractViolation, require
@@ -57,13 +56,12 @@ __all__ = [
     "ContractViolation",
     "require",
     # persistence specs — modules declare these in their ``persistence`` ClassVar
-    "RegisterFileArtifact",
+    "ProductTableWrite",
     "NetcdfArtifact",
-    "ParquetArtifact",
     "TrackTablesWrite",
-    "SqliteTable",
     "PersistenceSpec",
     "PersistenceMeta",
+    "ScanRecord",
     "assert_gridded",
     "assert_segmented",
     "assert_projected",

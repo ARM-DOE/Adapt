@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from adapt.contracts import ParquetArtifact, check_cell_adjacency, check_cell_stats
+from adapt.contracts import ProductTableWrite, check_cell_adjacency, check_cell_stats
 from adapt.execution.module_registry import registry
 from adapt.modules.analysis.config import AnalysisConfig
 from adapt.modules.analysis.module import RadarCellAnalyzer
@@ -44,8 +44,17 @@ class AnalysisModule(BaseModule):
     }
     config_class = AnalysisConfig
     persistence = (
-        ParquetArtifact(key="cell_stats", product_type="analysis2d", producer="analysis"),
-        ParquetArtifact(key="cell_adjacency", product_type="analysis2d", producer="cell_adjacency"),
+        ProductTableWrite(
+            key="cell_stats",
+            table="cell_stats",
+            primary_key=("run_id", "scan_id", "cell_label"),
+            index_columns=("cell_label",),
+        ),
+        ProductTableWrite(
+            key="cell_adjacency",
+            table="cell_adjacency",
+            primary_key=("run_id", "scan_id", "cell_label_a", "cell_label_b"),
+        ),
     )
 
     @classmethod

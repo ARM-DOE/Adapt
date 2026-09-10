@@ -33,6 +33,9 @@ class MovieDialog(tk.Toplevel):
         self.title("Save Movie")
         self.resizable(False, False)
         self.transient(parent)
+        # Any destruction (main window close included) aborts the export and
+        # removes the partial file — a running writer must never be orphaned.
+        self.bind("<Destroy>", self._on_destroy)
 
         body = ttk.Frame(self, padding=10)
         body.pack(fill="both", expand=True)
@@ -124,6 +127,12 @@ class MovieDialog(tk.Toplevel):
         self._after_id = self.after(1, self._tick)
 
     def _cancel(self) -> None:
+        self._teardown()
+        self.destroy()
+
+    def _teardown(self) -> None:
+        """Stop the export and remove the partial file — shared by Cancel and
+        any other destruction (main window closing takes the Toplevel with it)."""
         if self._after_id is not None:
             self.after_cancel(self._after_id)
             self._after_id = None
@@ -131,5 +140,8 @@ class MovieDialog(tk.Toplevel):
             self._gen.close()  # finalizes the writer cleanly
             self._gen = None
             if self._path is not None:
-                self._path.unlink(missing_ok=True)  # cancelled → no partial file
-        self.destroy()
+                self._path.unlink(missing_ok=True)  # aborted → no partial file
+
+    def _on_destroy(self, event) -> None:
+        if event.widget is self:
+            self._teardown()

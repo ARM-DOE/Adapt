@@ -24,7 +24,7 @@ import glob
 import logging
 import os
 
-from adapt.contracts import SqliteTable, check_xlma_stat_minutes, check_xlma_stat_scan
+from adapt.contracts import ProductTableWrite, check_xlma_stat_minutes, check_xlma_stat_scan
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
 from adapt.modules.xlma_stat.config import XlmaStatConfig
@@ -46,13 +46,13 @@ class XlmaStatModule(BaseModule):
         "xlma_stat_scan_rows": check_xlma_stat_scan,
     }
     persistence = (
-        SqliteTable(
+        ProductTableWrite(
             key="xlma_stat_minutes_rows",
             table="xlma_stat_minutes",
             primary_key=("run_id", "time", "cell_uid"),
             index_columns=("cell_uid", "time"),
         ),
-        SqliteTable(
+        ProductTableWrite(
             key="xlma_stat_scan_rows",
             table="xlma_stat_scan",
             primary_key=("run_id", "scan_time", "cell_uid"),

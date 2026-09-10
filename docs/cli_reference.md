@@ -3,6 +3,7 @@
 Adapt command structure: `adapt <command> [options]`
 
 ```
+adapt init         # initialize an empty data store
 adapt run-nexrad   # run the processing pipeline
 adapt config       # generate a config.yaml template
 adapt dashboard    # open the GUI dashboard
@@ -12,6 +13,23 @@ adapt postprocess  # enrich an existing repository with extension tables
 `adapt --version` prints the installed version and the path Adapt was installed
 to. `adapt --help` and `adapt <command> --help` print this same reference from
 the command line.
+
+---
+
+## `adapt init`
+
+Create the store layout: `registry.db`, `logs/`, `collections/`. This is the
+only command that ever creates it — `adapt run-nexrad` and `adapt dashboard`
+fail loudly on an uninitialized directory.
+
+```bash
+adapt init            # initialize the current directory
+adapt init /data/kilx # initialize a specific directory
+```
+
+| Argument | Description |
+|----------|-------------|
+| `directory` | Root directory for the new store. Defaults to the current directory. Fails if the store already exists or the directory uses the obsolete pre-store layout. |
 
 ---
 
@@ -40,11 +58,10 @@ adapt run-nexrad [config.yaml] --radar KDIX --base-dir /data \
 | `--mode` | `realtime` | `realtime` (continuous) or `historical` (fixed window) |
 | `--start-time ISO` | — | Start of historical window, ISO 8601 (e.g. `2025-03-05T15:00:00Z`) |
 | `--end-time ISO` | — | End of historical window, ISO 8601 |
-| `--base-dir PATH` | — | Root output directory for all artifacts |
-| `--run-id ID` | — | Resume a previous run by ID (format: `YYYYMONDD-HHMM-RADAR`) |
+| `--base-dir PATH` | — | Store root (must be initialized with `adapt init`) |
+| `--run-id ID` | — | Resume a previous run by ID (format: `YYYYMONDD-HHMM-RADAR`); the run's configuration is reloaded from the store's registry |
 | `--max-runtime MIN` | — | Stop after this many minutes (realtime mode only) |
-| `--rerun` | off | Delete existing output for this radar before starting |
-| `--no-plot` | off | Disable the plot consumer thread |
+| `--plot-dir PATH` | — | Directory for live PNG plots, outside the store. Plotting runs only when this is given |
 | `--plot-interval SEC` | `2.0` | How often the plot consumer checks for new data (seconds) |
 | `--show-plots` | off | Open a live window showing plots as they are produced |
 | `--only NODES` | — | Comma-separated pipeline node names to run; skip the rest. Mutually exclusive with `--not` |

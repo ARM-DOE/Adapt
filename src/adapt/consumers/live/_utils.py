@@ -182,21 +182,51 @@ def _visible_uids_in_scan(
     return {uid_map[lbl] for lbl in unique if lbl in uid_map}
 
 
+def require_scan_identity(df, table: str = "cells_by_scan") -> None:
+    """Raise with recreate guidance when a per-scan frame predates scan identity."""
+    if "scan_id" not in df.columns:
+        raise ValueError(
+            f"{table} carries no scan_id column — the repository predates "
+            "scan identity. Recreate it (delete and rerun the pipeline)."
+        )
+
+
+def cells_for_scan(df, scan_id: str, cell_id: int | None = None):
+    """Rows of a ``cells_by_scan`` frame belonging to one scan, by identity.
+
+    The join key is ``scan_id`` — never a timestamp comparison or tolerance
+    window.
+    """
+    require_scan_identity(df)
+    rows = df[df["scan_id"] == scan_id]
+    if cell_id is None:
+        return rows
+    return rows[rows["cell_label"] == cell_id]
+
+
 def format_run_labels(runs: Iterable) -> list[str]:
     """Format run records as ``"run_id  (MM-DD HH:MM)"`` toolbar labels."""
     labels = []
     for run in runs:
-        mtime = run.start_time.strftime("%m-%d %H:%M") if run.start_time else "?"
+        mtime = run.started_at.strftime("%m-%d %H:%M") if run.started_at else "?"
         labels.append(f"{run.run_id}  ({mtime})")
     return labels
 
 
 def is_repository(path: Path) -> bool:
-    """True if *path* is an Adapt repository root.
+    """True if *path* is an Adapt store root.
 
-    ``adapt_registry.db`` sits at the root and is created by the pipeline on its
-    first run, so it is the marker that distinguishes a repository from any other
-    directory.
+    ``registry.db`` sits at the root and is created by ``adapt init``, so it is
+    the marker that distinguishes a store from any other directory.
+    """
+    return (path / "registry.db").exists()
+
+
+def is_legacy_repository(path: Path) -> bool:
+    """True for a pre-store repository root (``adapt_registry.db`` marker).
+
+    Legacy roots are surfaced with an explicit obsolete-layout error rather
+    than being silently treated as empty directories.
     """
     return (path / "adapt_registry.db").exists()
 
@@ -215,27 +245,21 @@ def startup_repo(explicit: str | None, cwd: Path, recent: Sequence[str]) -> str 
     return recent[0] if recent else None
 
 
-def _list_radars(repo: Path) -> list:
-    """Return all registered radar IDs from the repository registry."""
+def _list_collections(repo: Path) -> list:
+    """Return all registered collection IDs from the store registry."""
     if not is_repository(repo):
         return []
-    from adapt.api.client import RepositoryClient
+    from adapt.api.store_client import StoreClient
 
-    with contextlib.closing(RepositoryClient(repo)) as client:
-        return sorted(client.radars())
+    with contextlib.closing(StoreClient(repo)) as client:
+        return sorted(c.collection_id for c in client.collections())
 
 
-def _list_runs(repo: Path, radar: str | None = None) -> list:
-    """Return formatted run strings from the repository registry.
-
-    Returns
-    -------
-    list
-        List of strings: "run_id  (MM-DD HH:MM)"
-    """
+def _list_runs(repo: Path, collection: str | None = None) -> list:
+    """Return formatted run strings ("run_id  (MM-DD HH:MM)") from the registry."""
     if not is_repository(repo):
         return []
-    from adapt.api.client import RepositoryClient
+    from adapt.api.store_client import StoreClient
 
-    with contextlib.closing(RepositoryClient(repo)) as client:
-        return format_run_labels(client.runs(radar=radar))
+    with contextlib.closing(StoreClient(repo)) as client:
+        return format_run_labels(client.runs(collection))

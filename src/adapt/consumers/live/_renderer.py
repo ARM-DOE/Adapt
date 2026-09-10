@@ -9,9 +9,8 @@ view for the same :class:`ViewState`.
 """
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import cmweather  # noqa: F401 — registers ChaseSpectral and other radar colormaps
@@ -23,7 +22,7 @@ import xarray as xr
 from matplotlib import colormaps
 from matplotlib.figure import Figure
 
-from adapt.consumers.live._utils import _centroid_track_to_km, _visible_uids_in_scan
+from adapt.consumers.live._utils import _centroid_track_to_km, _visible_uids_in_scan, cells_for_scan
 
 logger = logging.getLogger(__name__)
 
@@ -82,14 +81,25 @@ class OverlayData:
 class RenderResult:
     cell_contours: dict[int, Any]  # label → ContourSet, for click/hover hit-testing
     track_overlays: dict[str, list]  # uid → removable artists
-    scan_ts: pd.Timestamp
+    scan_id: str  # scan identity from ds.attrs — the join key for all row lookups
+    scan_ts: pd.Timestamp  # canonical scan time from ds.attrs — display/ordering only
 
 
-def _scan_timestamp(ds: xr.Dataset) -> pd.Timestamp:
-    if "time" not in ds.coords:
-        raise ValueError("Dataset has no 'time' coordinate — not an analysis scan file")
-    tv = ds.coords["time"].values
-    return pd.Timestamp(tv.item() if np.ndim(tv) == 0 else tv[0])
+def _scan_identity(ds: xr.Dataset) -> tuple[str, pd.Timestamp]:
+    """(scan_id, scan_time) the pipeline stamped into the artifact's attrs.
+
+    Identity never derives from the filename or the ``time`` coordinate (a
+    different clock). A file without these attrs predates scan identity and
+    fails loudly with recreate guidance.
+    """
+    scan_id = ds.attrs.get("scan_id")
+    scan_time = ds.attrs.get("scan_time")
+    if not scan_id or not scan_time:
+        raise ValueError(
+            "analysis file carries no scan identity (missing scan_id/scan_time attrs). "
+            "Recreate the repository (delete it and rerun the pipeline)."
+        )
+    return str(scan_id), pd.Timestamp(scan_time)
 
 
 def _masked_cmap(name: str):
@@ -118,7 +128,7 @@ def render_scan(
     ax.set_facecolor("white")
 
     radar_id = ds.attrs.get("radar", ds.attrs.get("radar_id", ""))
-    ts = _scan_timestamp(ds)
+    scan_id, ts = _scan_identity(ds)
     tstr = ts.strftime("%Y-%m-%d %H:%M:%S UTC")
 
     x_km = ds["x"].values / 1000.0
@@ -273,16 +283,12 @@ def render_scan(
         ax.set_ylim(view.zoom[1])
 
     track_overlays = draw_track_overlays(ax, ds, view, overlays)
-    return RenderResult(cell_contours=cell_contours, track_overlays=track_overlays, scan_ts=ts)
-
-
-def _scan_window_rows(df: pd.DataFrame, scan_ts: pd.Timestamp) -> pd.DataFrame:
-    """Rows of *df* whose scan_time is within 60 s of *scan_ts*."""
-    if "scan_time" not in df.columns:
-        return df
-    st = pd.to_datetime(df["scan_time"], utc=True)
-    ts = scan_ts if scan_ts.tzinfo is not None else scan_ts.tz_localize("UTC")
-    return df[(st - ts).abs() < pd.Timedelta(seconds=60)]
+    return RenderResult(
+        cell_contours=cell_contours,
+        track_overlays=track_overlays,
+        scan_id=scan_id,
+        scan_ts=ts,
+    )
 
 
 def draw_track_overlays(
@@ -300,9 +306,9 @@ def draw_track_overlays(
     if cell_labels_da is None:
         return result
     labels_arr = cell_labels_da.values
-    scan_ts = _scan_timestamp(ds)
+    scan_id, _ = _scan_identity(ds)
 
-    # label int → cell_uid for this scan
+    # label int → cell_uid for this scan (identity join, no time window)
     uid_map: dict[int, str] = {}
     cell_df = overlays.cell_df
     if (
@@ -311,7 +317,7 @@ def draw_track_overlays(
         and "cell_label" in cell_df.columns
         and "cell_uid" in cell_df.columns
     ):
-        scan_df = _scan_window_rows(cell_df, scan_ts)
+        scan_df = cells_for_scan(cell_df, scan_id)
         uid_map = dict(zip(scan_df["cell_label"].astype(int), scan_df["cell_uid"], strict=False))
     visible = _visible_uids_in_scan(labels_arr, uid_map)
 
@@ -349,7 +355,7 @@ def draw_track_overlays(
 
         # Current-scan star only when the cell is present in this scan
         if uid in visible and cell_df is not None and "cell_uid" in cell_df.columns:
-            scan_rows = _scan_window_rows(cell_df, scan_ts)
+            scan_rows = cells_for_scan(cell_df, scan_id)
             scan_rows = scan_rows[scan_rows["cell_uid"] == uid]
             if not scan_rows.empty:
                 cur = scan_rows.iloc[0]
@@ -375,19 +381,23 @@ def draw_track_overlays(
 
 
 def scan_frame_drawer(
-    nc_paths: Sequence[Path], view: ViewState, overlays: OverlayData
+    open_raster: Callable[[int], Any], view: ViewState, overlays: OverlayData
 ) -> Callable[[Figure, int], None]:
-    """Return a movie draw_frame callable rendering nc_paths[i] via render_scan."""
+    """Return a movie draw_frame callable rendering frame *i* via render_scan.
+
+    ``open_raster(i)`` yields the frame's in-memory ScanRaster; it is closed
+    after drawing, so a movie export never accumulates datasets across frames.
+    """
 
     def draw(fig: Figure, i: int) -> None:
         gs = fig.add_gridspec(1, 2, width_ratios=[1, 0.045])
         ax = fig.add_subplot(gs[0])
         cbar_ax = fig.add_subplot(gs[1])
-        ds = xr.open_dataset(nc_paths[i])
+        raster = open_raster(i)
         try:
-            render_scan(ax, cbar_ax, ds, view, overlays)
+            render_scan(ax, cbar_ax, raster.dataset, view, overlays)
         finally:
-            ds.close()
+            raster.close()
 
     return draw
 
@@ -437,6 +447,8 @@ def add_basemap(ax, ds, x_km, y_km) -> None:
     cached = getattr(ax, "_adapt_basemap", None)
     if cached is not None and cached[0] == key:
         _, array, extent, origin = cached
+        if array is None:  # this extent already failed to fetch; don't re-hit the network
+            return
         # aspect=ax.get_aspect() mirrors contextily (GH251): a bare imshow would
         # force aspect='equal' and squash the radar panel on every redraw.
         ax.imshow(array, extent=extent, origin=origin, aspect=ax.get_aspect(), alpha=0.6, zorder=0)
@@ -456,6 +468,7 @@ def add_basemap(ax, ds, x_km, y_km) -> None:
         )
     except Exception as e:
         logger.warning("Basemap unavailable: %s", e)
+        ax._adapt_basemap = (key, None, None, None)  # negative cache: retry only on zoom
         return
 
     added = [im for im in ax.images if im not in before]

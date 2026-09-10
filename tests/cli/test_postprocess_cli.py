@@ -10,10 +10,11 @@ import pandas as pd
 import pytest
 
 import adapt.cli as cli
-from adapt.contracts import SqliteTable
+from adapt.contracts import ProductTableWrite
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
-from adapt.persistence import DataRepository
+from adapt.persistence.store import Store, init_store
+from adapt.persistence.store_registry import RunStart, StoreRegistry
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -24,7 +25,7 @@ class _FakePostModule(BaseModule):
     inputs = ["run_id"]
     outputs = ["fake_rows"]
     persistence = (
-        SqliteTable(key="fake_rows", table="fake_ext", primary_key=("run_id", "cell_uid")),
+        ProductTableWrite(key="fake_rows", table="fake_ext", primary_key=("run_id", "cell_uid")),
     )
 
     def run(self, context: dict) -> dict:
@@ -51,14 +52,26 @@ def test_repository_defaults_to_cwd():
 
 
 def test_postprocess_cmd_runs_module_and_writes_table(monkeypatch, internal_config, temp_dir):
-    repo = DataRepository(run_id="CLITEST1", base_dir=temp_dir, radar="TEST_RADAR")
-    monkeypatch.setattr(
-        cli, "_open_repository", lambda repo_root, config_path: (repo, internal_config)
+    root = init_store(temp_dir / "store")
+    store = Store.open(root)
+    collection = store.collection("TEST_RADAR")
+    reg = StoreRegistry.get_instance(root)
+    reg.register_collection("TEST_RADAR", source_kind="nexrad")
+    run_config = internal_config.model_copy(update={"run_id": "CLITEST1"})
+    reg.begin_run(
+        RunStart(
+            run_id="CLITEST1",
+            collection_id="TEST_RADAR",
+            config_hash="h",
+            config_json=run_config.model_dump_json(),
+            pipeline_version="0",
+            environment_json="{}",
+        )
     )
     registry.register(_FakePostModule)
     try:
         args = argparse.Namespace(
-            repository=str(temp_dir),
+            repository=str(root),
             module=["fake_post"],
             input_dir=None,
             config=None,
@@ -66,7 +79,7 @@ def test_postprocess_cmd_runs_module_and_writes_table(monkeypatch, internal_conf
         )
         cli._postprocess_cmd(args)
 
-        conn = sqlite3.connect(repo.catalog.db_path)
+        conn = sqlite3.connect(collection.products_path)
         try:
             rows = conn.execute("SELECT cell_uid, v FROM fake_ext").fetchall()
         finally:
@@ -74,5 +87,4 @@ def test_postprocess_cmd_runs_module_and_writes_table(monkeypatch, internal_conf
         assert rows == [("z", 2)]
     finally:
         registry.unregister("fake_post")
-        repo.close()
-        repo.registry.close()
+        store.close()

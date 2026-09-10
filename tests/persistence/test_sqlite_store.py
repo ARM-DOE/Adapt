@@ -14,8 +14,8 @@ def test_missing_schema_file_raises(tmp_path):
 
 
 def test_registry_schema_loads_from_file(tmp_path):
-    """The real registry schema loads, including the schema_registry table."""
-    store = SqliteStore(tmp_path / "reg.db", "registry_schema.sql")
+    """The real store-registry schema loads, including the run-lifecycle tables."""
+    store = SqliteStore(tmp_path / "reg.db", "store_registry.sql")
     try:
         tables = {
             row[0]
@@ -26,11 +26,11 @@ def test_registry_schema_loads_from_file(tmp_path):
     finally:
         store.close()
 
-    assert {"runs", "radars", "item_types", "schema_registry"} <= tables
+    assert {"collections", "runs", "run_modules", "run_events"} <= tables
 
 
 def test_close_is_idempotent(tmp_path):
     """close() may be called repeatedly without error."""
-    store = SqliteStore(tmp_path / "reg.db", "registry_schema.sql")
+    store = SqliteStore(tmp_path / "reg.db", "store_registry.sql")
     store.close()
     store.close()

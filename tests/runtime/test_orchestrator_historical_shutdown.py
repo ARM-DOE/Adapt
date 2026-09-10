@@ -148,15 +148,15 @@ def test_stop_processor_quiet_when_idle(pipeline_config, caplog):
     assert "shutdown clean" not in messages
 
 
-def test_stop_skips_repository_close_when_owned_externally(pipeline_config):
+def test_stop_skips_store_close_when_owned_externally(pipeline_config):
+    """With close_repository_on_stop=False the store handles stay open for a
+    consumer (e.g. the plot thread); close_store() releases them later."""
     orch = PipelineOrchestrator(pipeline_config, close_repository_on_stop=False)
-    repo = _FakeRepository()
-    orch.repository = repo
+    collection = orch.store.collection("TEST_RADAR")
 
     orch.stop()
 
-    assert repo.finalized is True
-    assert repo.closed is False
+    # Catalog connection still usable after stop().
+    assert collection.catalog.get_scan("none", "none") is None
 
-    orch.close_repository()
-    assert repo.closed is True
+    orch.close_store()

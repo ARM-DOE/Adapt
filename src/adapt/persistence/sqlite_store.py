@@ -4,8 +4,8 @@
 """Shared SQLite store base for Adapt persistence.
 
 Owns the thread-safe WAL connection and schema bootstrap from the canonical SQL
-files in ``adapt/configuration/schemas/``. Subclasses (``RadarCatalog``,
-``RepositoryRegistry``) supply their database path and schema filename and add
+files in ``adapt/configuration/schemas/``. Subclasses (``Catalog``,
+``StoreRegistry``) supply their database path and schema filename and add
 their table-specific methods.
 
 A missing schema file raises immediately — there is no inline fallback.

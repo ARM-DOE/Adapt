@@ -108,7 +108,6 @@ class UserRegridderConfig(_UserSection):
     roi_func: str | None = None
     min_radius: float | None = None
     weighting_function: str | None = None
-    save_netcdf: bool | None = None
 
 
 class UserDownloaderConfig(_UserSection):

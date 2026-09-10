@@ -1,5 +1,4 @@
 # tests/test_downloader_queue.py
-from datetime import UTC, datetime
 from queue import Queue
 
 import pytest
@@ -9,45 +8,42 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_notify_queue_puts_item(tmp_path, make_config):
+def test_process_scans_queues_gateway_message(fake_scan, fake_aws_conn, fake_gateway, make_config):
+    """Each new scan puts the gateway's acquired-scan message on the queue."""
     q = Queue()
-    config = make_config()
-    d = AwsNexradDownloader(config, output_dir=tmp_path, result_queue=q)
-
-    path = tmp_path / "file1"
-
-    d._notify_queue(
-        path=path,
-        scan_time=datetime.now(UTC),
-        is_new=True,
+    scan = fake_scan("scan1")
+    d = AwsNexradDownloader(
+        make_config(),
+        result_queue=q,
+        acquire=fake_gateway,
+        conn=fake_aws_conn([scan]),
     )
 
+    d._process_scans([scan])
+
     item = q.get_nowait()
+    assert item == fake_gateway.messages[0]
+    assert item["artifact_id"] == "art-1"
+    assert item["scan_id"] == "sid-scan1"
+    assert item["scan_time"] == scan.scan_time
+    assert "queued_at" in item
 
-    assert item["radar"] == d.radar
-    assert item["path"] == path
-    assert "scan_time" in item
-    assert "file_id" in item
 
-
-def test_notify_queue_calls_tracker(tmp_path, fake_scan, make_config):
-    class FakeTracker:
-        def __init__(self):
-            self.registered = False
-
-        def register_file(self, *a, **k):
-            self.registered = True
-
-        def mark_stage_complete(self, *a, **k):
-            pass
-
-    tracker = FakeTracker()
-    from queue import Queue
-
+def test_process_scans_does_not_requeue_known_uri(
+    fake_scan, fake_aws_conn, fake_gateway, make_config
+):
+    """A source URI already queued this run is skipped on later passes."""
     q = Queue()
-    config = make_config()
-    d = AwsNexradDownloader(config, output_dir=tmp_path, result_queue=q, file_tracker=tracker)
+    scan = fake_scan("scan1")
+    d = AwsNexradDownloader(
+        make_config(),
+        result_queue=q,
+        acquire=fake_gateway,
+        conn=fake_aws_conn([scan]),
+    )
 
-    d._notify_queue(path=tmp_path / "f", scan_time=fake_scan("x").scan_time, is_new=True)
+    d._process_scans([scan])
+    d._process_scans([scan])
 
-    assert tracker.registered
+    assert q.qsize() == 1
+    assert [uri for _, uri in fake_gateway.acquire_file_calls] == ["scan1"]

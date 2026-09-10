@@ -121,10 +121,13 @@ def test_module_does_not_import_execution_or_runtime(pkg: str) -> None:
 
 
 # ── Canonical scan-time serialization (single source of truth) ────────────────
-# scan_time is the cross-table join key: cells_by_scan and every derived module
-# table must store the identical string, or joins silently fail. The format lives
-# in exactly one function — adapt.utils.time.to_scan_iso. This fitness function
-# fails if any other code formats scan-time independently (drift = broken joins).
+# scan_id is the cross-table join key; scan_time is ordering/display METADATA —
+# but it must still serialize identically everywhere (one canonical format), or
+# time-ordered reads and displays silently disagree. The format lives in exactly
+# one function — adapt.utils.time.to_scan_iso. This fitness function fails if
+# any other code formats scan-time independently. (Evidence for the join-key
+# change: the pre-identity dashboard failure class — wall-clock-corrupted rows,
+# "+00:00" vs "Z" divergence, and ±60/±90 s consumer tolerance windows.)
 
 _SCAN_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _SRC_ADAPT = Path(__file__).parents[1] / "src" / "adapt"
@@ -140,7 +143,7 @@ def _rel(py_file: Path, root: Path) -> str:
 
 
 def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
-    """The scan-time join-key format may appear only in adapt.utils.time."""
+    """The canonical scan-time metadata format may appear only in adapt.utils.time."""
     offenders: list[str] = []
     for py_file in _SRC_ADAPT.rglob("*.py"):
         if _SCAN_TIME_FORMAT in py_file.read_text(encoding="utf-8"):
@@ -150,7 +153,8 @@ def test_scan_time_format_is_defined_in_exactly_one_place() -> None:
         "scan-time format must be centralized in adapt.utils.time.to_scan_iso — "
         f"found the literal {_SCAN_TIME_FORMAT!r} in: {offenders}. "
         "Serialize scan_time via to_scan_iso (or let ModuleOutputWriter do it); "
-        "never hardcode the format, or derived tables will not join cells_by_scan."
+        "never hardcode the format. Rows JOIN on scan_id; scan_time is the "
+        "single-format ordering/display metadata."
     )
 
 
@@ -219,6 +223,28 @@ def test_module_does_not_read_wall_clock_or_global_rng(pkg: str) -> None:
     )
 
 
+def test_execution_nodes_do_not_read_wall_clock() -> None:
+    """Graph nodes must be deterministic too, not just modules/*.
+
+    The pre-identity wall-clock scan_time fallback lived in
+    execution/nodes/ingest.py — exactly where the per-module fitness function
+    above does not look. Scan times come from the source boundary; nothing in
+    the execution layer may substitute a clock.
+    """
+    execution_dir = _SRC_ADAPT / "execution"
+    violations: list[str] = []
+    for py_file in execution_dir.rglob("*.py"):
+        violations.extend(
+            f"  {_rel(py_file, execution_dir)}: {hit}" for hit in _nondeterminism_calls(py_file)
+        )
+
+    assert not violations, (
+        "\nadapt.execution reads the wall clock or global RNG — scan times are "
+        "owned by the source boundary and identical inputs must give identical "
+        "outputs:\n" + "\n".join(violations)
+    )
+
+
 # ── Heavy third-party dependencies stay in their owning component ──────────────
 # Each heavy or domain-specific dependency is imported by exactly one component.
 # If one leaks (e.g. matplotlib into modules/, cv2 into runtime/), the core
@@ -233,7 +259,6 @@ _DEP_HOMES = {
     "boto3": ("downloaders/",),
     "botocore": ("downloaders/",),
     "networkx": ("modules/tracking/",),
-    "duckdb": ("api/",),
     "pyxlma": ("modules/xlma_stat/",),
     "sklearn": ("modules/xlma_stat/",),
     "skimage": ("modules/detection/", "modules/analysis/"),
@@ -282,7 +307,7 @@ _CONTEXT_SEED_KEYS = frozenset(
         "scan_history",  # rolling window of prior segmented scans
         "grid_ds_3d",  # full 3D grid sliced in by the processor
         "run_id",  # repository run identifier
-        "scan_time",  # ingest outputs it; processor re-seeds it in phase 2
+        "scan_time",  # owned by the source boundary; processor seeds it every scan
         "ingest_config",
         "detection_config",
         "projection_config",
@@ -349,8 +374,6 @@ def test_module_inputs_are_produced_or_seeded() -> None:
 # shrink: never add to it — write a check_* validator in adapt.contracts instead.
 _UNCONTRACTED_OUTPUTS = {
     ("ingest", "grid_ds"),
-    ("ingest", "scan_time"),
-    ("ingest", "grid_nc_path"),
     ("detection", "num_cells"),
 }
 
@@ -378,6 +401,76 @@ def test_module_outputs_carry_contracts() -> None:
     )
 
 
+# ── Architecture doc, import-linter config, and source tree stay in sync ──────
+# ARCHITECTURE.md is the human/agent-facing contract; .importlinter is the
+# machine-enforced one; src/adapt is reality. These fitness functions fail the
+# moment any of the three drifts — the exact failure mode of the pre-audit
+# AGENTS.md, which described an architecture that no longer existed.
+
+_REPO_ROOT = Path(__file__).parents[1]
+_ARCHITECTURE_MD = _REPO_ROOT / "ARCHITECTURE.md"
+_IMPORTLINTER = _REPO_ROOT / ".importlinter"
+
+
+def _doc_layer_lines() -> list[str]:
+    """The lines of the ```layers fenced block in ARCHITECTURE.md."""
+    text = _ARCHITECTURE_MD.read_text(encoding="utf-8")
+    match = re.search(r"```layers\n(.*?)```", text, re.DOTALL)
+    assert match, "ARCHITECTURE.md must contain a ```layers fenced block"
+    return [line.strip() for line in match.group(1).splitlines() if line.strip()]
+
+
+def _importlinter_field(field: str) -> list[str]:
+    """Indented entries of a `field =` list in the .importlinter layers contract."""
+    lines = _IMPORTLINTER.read_text(encoding="utf-8").splitlines()
+    entries: list[str] = []
+    in_field = False
+    for line in lines:
+        if line.strip() == f"{field} =":
+            in_field = True
+            continue
+        if in_field:
+            if line.startswith((" ", "\t")) and line.strip():
+                entries.append(line.strip())
+            else:
+                break
+    return entries
+
+
+def test_architecture_md_layers_match_importlinter() -> None:
+    """The layer stack in ARCHITECTURE.md is identical to the one lint-imports enforces."""
+    assert _doc_layer_lines() == _importlinter_field("layers"), (
+        "ARCHITECTURE.md's ```layers block and .importlinter's `layers =` list "
+        "have diverged — update both in the same change."
+    )
+
+
+def test_layer_stack_covers_the_real_source_tree() -> None:
+    """Every top-level package/module under src/adapt is placed in a layer
+    (or deliberately listed in exhaustive_ignores). lint-imports enforces this
+    too; this test keeps the guarantee even where only pytest runs."""
+    placed = {name for line in _doc_layer_lines() for name in line.split("|")}
+    placed = {name.strip() for name in placed}
+    ignored = set(_importlinter_field("exhaustive_ignores"))
+
+    actual = {
+        p.name
+        for p in _SRC_ADAPT.iterdir()
+        if p.is_dir() and (p / "__init__.py").exists() and p.name != "__pycache__"
+    } | {p.stem for p in _SRC_ADAPT.glob("*.py") if p.stem != "__init__"}
+
+    assert placed | ignored == actual, (
+        f"Layer stack + exhaustive_ignores != src/adapt tree.\n"
+        f"  unplaced packages: {sorted(actual - placed - ignored)}\n"
+        f"  phantom entries:   {sorted((placed | ignored) - actual)}\n"
+        "Place new packages in a layer in BOTH ARCHITECTURE.md and .importlinter."
+    )
+    assert not placed & ignored, (
+        f"{sorted(placed & ignored)} appear both in the layer stack and in "
+        "exhaustive_ignores — pick one."
+    )
+
+
 # ── Telemetry ids stay out of the science context dict ────────────────────────
 # Observability correlation ids (trace/span/scan/pipeline/...) travel out-of-band
 # in contextvars. If one ever appeared as a module input/output key it would couple
@@ -399,3 +492,66 @@ def test_obs_context_fields_never_in_module_io() -> None:
         "\nTelemetry correlation ids leaked into the science context dict — keep "
         "ObsContext fields out of module inputs/outputs:\n" + "\n".join(leaks)
     )
+
+
+# ── Consumer boundary: consumers read ONLY through the store API ───────────────
+# Consumers (dashboard, TSE) may import adapt.api + adapt.utils only; the store
+# fitness below closes the I/O side doors the import-linter cannot see: raw
+# sqlite, direct NetCDF/parquet opens, directory walks, and store-internal
+# path construction. Rasters arrive in-memory via the client; tables arrive as
+# DataFrames. The one sanctioned literal is the registry.db root marker used
+# for repo detection in _utils.
+_CONSUMER_FORBIDDEN_CALLS = {
+    "open_dataset",
+    "open_mfdataset",
+    "load_dataset",
+    "read_parquet",
+    "glob",
+    "rglob",
+    "iterdir",
+    "connect",  # sqlite3.connect / duckdb.connect
+}
+_CONSUMER_FORBIDDEN_LITERALS = ("catalog.db", "products.db", "adapt_registry.db")
+_CONSUMER_LITERAL_ALLOWLIST = {"_utils.py"}  # legacy-root detection marker only
+
+
+def _consumer_violations(py_file: Path) -> list[str]:
+    import ast
+
+    tree = ast.parse(py_file.read_text(encoding="utf-8"))
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in {"sqlite3", "duckdb"}:
+                    violations.append(f"{py_file.name}:{node.lineno} imports {alias.name}")
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split(".")[0] in {"sqlite3", "duckdb"}:
+                violations.append(f"{py_file.name}:{node.lineno} imports {node.module}")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name in _CONSUMER_FORBIDDEN_CALLS:
+                violations.append(f"{py_file.name}:{node.lineno} calls {name}()")
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and any(lit in node.value for lit in _CONSUMER_FORBIDDEN_LITERALS)
+            and py_file.name not in _CONSUMER_LITERAL_ALLOWLIST
+        ):
+            violations.append(f"{py_file.name}:{node.lineno} builds store path {node.value!r}")
+    return violations
+
+
+def test_consumers_read_only_through_the_store_api() -> None:
+    """No consumer touches storage directly — every read goes through StoreClient.
+
+    Guards the exact failure classes behind past dashboard bugs: raw sqlite
+    connections (fd leaks), per-frame NetCDF opens (too many open files),
+    directory globs (stale/foreign files), and hardcoded store paths.
+    """
+    consumers_dir = Path(__file__).parent.parent / "src" / "adapt" / "consumers"
+    violations: list[str] = []
+    for py_file in sorted(consumers_dir.rglob("*.py")):
+        violations.extend(_consumer_violations(py_file))
+    assert not violations, "consumers must read via the store API only:\n" + "\n".join(violations)

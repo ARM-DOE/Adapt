@@ -5,9 +5,9 @@
 
 Each method builds the convective mask from a pyart classifier over the full 3D
 grid (via ``pyart.xradar.Xgrid``); the shared watershed backend then labels
-cells. Inputs are synthetic: a gridded NetCDF with an analytically-placed
-convective core, written with pyart and read back exactly as the ingest node's
-``grid_nc_path`` artifact would be.
+cells. Inputs are synthetic: a gridded volume with an analytically-placed
+convective core, built with pyart and handed over in-memory exactly as the
+ingest node's ``grid_ds`` output would be.
 """
 
 import numpy as np
@@ -54,8 +54,8 @@ def _config(method: str) -> DetectionConfig:
 
 
 @pytest.fixture
-def grid_nc(tmp_path):
-    """Synthetic 3D grid NetCDF: a strong convective core plus a broad stratiform blob."""
+def grid_ds():
+    """Synthetic 3D grid dataset: a strong convective core plus a broad stratiform blob."""
     nz, ny, nx = 11, 60, 60
     grid = pyart.testing.make_empty_grid(
         (nz, ny, nx), ((0.0, 10000.0), (-30000.0, 30000.0), (-30000.0, 30000.0))
@@ -68,25 +68,22 @@ def grid_nc(tmp_path):
     field += 16.0 * np.exp(-(((yy - 42) ** 2 + (xx - 42) ** 2) / 100.0))  # stratiform
     refl = np.repeat(field[None, :, :], nz, axis=0)
     grid.fields["reflectivity"] = {"data": np.ma.masked_invalid(refl), "units": "dBZ"}
-    path = tmp_path / "grid.nc"
-    pyart.io.write_grid(str(path), grid)
-    return str(path)
+    return grid.to_xarray()
 
 
 @pytest.fixture
-def ds_2d(grid_nc):
+def ds_2d(grid_ds):
     """2D reflectivity slice at the analysis z-level (as the ingest node produces)."""
-    with xr.open_dataset(grid_nc, decode_times=False) as g:
-        z_idx = int(np.argmin(np.abs(g["z"].values - Z_LEVEL)))
-        refl = g["reflectivity"].isel(time=0, z=z_idx).values
-        coords = {"y": g["y"].values, "x": g["x"].values}
+    z_idx = int(np.argmin(np.abs(grid_ds["z"].values - Z_LEVEL)))
+    refl = grid_ds["reflectivity"].isel(time=0, z=z_idx).values
+    coords = {"y": grid_ds["y"].values, "x": grid_ds["x"].values}
     return xr.Dataset({"reflectivity": (("y", "x"), refl)}, coords=coords)
 
 
 @pytest.mark.parametrize("method", PYART_METHODS)
-def test_output_satisfies_segmentation_contract(method, ds_2d, grid_nc):
+def test_output_satisfies_segmentation_contract(method, ds_2d, grid_ds):
     """Labels are integer, non-negative, 2D, and shaped like the input slice."""
-    out = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_nc)
+    out = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_ds)
     labels = out["cell_labels"]
 
     assert labels.dtype.kind in {"i", "u"}
@@ -97,9 +94,9 @@ def test_output_satisfies_segmentation_contract(method, ds_2d, grid_nc):
 
 
 @pytest.mark.parametrize("method", PYART_METHODS)
-def test_convective_core_is_labelled(method, ds_2d, grid_nc):
+def test_convective_core_is_labelled(method, ds_2d, grid_ds):
     """A 48 dBZ compact core is convective for every method and yields a cell."""
-    labels = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_nc)["cell_labels"].values
+    labels = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_ds)["cell_labels"].values
     cy, cx = CORE_YX
 
     assert labels.max() >= 1
@@ -107,25 +104,25 @@ def test_convective_core_is_labelled(method, ds_2d, grid_nc):
 
 
 @pytest.mark.parametrize("method", PYART_METHODS)
-def test_deterministic(method, ds_2d, grid_nc):
+def test_deterministic(method, ds_2d, grid_ds):
     """Identical inputs produce identical labels."""
-    first = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_nc)["cell_labels"].values
-    second = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_nc)["cell_labels"].values
+    first = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_ds)["cell_labels"].values
+    second = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_ds)["cell_labels"].values
     np.testing.assert_array_equal(first, second)
 
 
 @pytest.mark.parametrize("method", PYART_METHODS)
-def test_missing_grid_nc_path_raises(method, ds_2d):
+def test_missing_grid_ds_raises(method, ds_2d):
     """A pyart method with no 3D grid file fails loudly (no silent fallback)."""
-    with pytest.raises(RuntimeError, match="grid_nc_path"):
+    with pytest.raises(RuntimeError, match="grid_ds"):
         RadarCellSegmenter(_config(method)).segment(ds_2d, None)
 
 
 @pytest.mark.parametrize("method", PYART_METHODS)
-def test_records_method_params_in_attrs(method, ds_2d, grid_nc):
+def test_records_method_params_in_attrs(method, ds_2d, grid_ds):
     """The output records exactly the parameters passed to the method."""
     params = _method_params(method)
-    attrs = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_nc)["cell_labels"].attrs
+    attrs = RadarCellSegmenter(_config(method)).segment(ds_2d, grid_ds)["cell_labels"].attrs
 
     for key, value in params.items():
         expected = int(value) if isinstance(value, bool) else value

@@ -5,7 +5,7 @@
 
 The only module in this package that imports adapt.api. Repository
 tables are converted to the frozen Snapshot exactly once, here; the
-engine never sees pandas or RepositoryClient.
+engine never sees pandas or the StoreClient.
 """
 
 import re
@@ -15,7 +15,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from adapt.api.client import RepositoryClient
+from adapt.api.store_client import StoreClient
 from adapt.consumers.target_selection.snapshot import (
     CellSnapshot,
     Snapshot,
@@ -29,9 +29,9 @@ _TRACK_COLUMNS = ("n_scans", "duration_seconds", "max_area_sqkm", "max_reflectiv
 
 
 def build_snapshot(
-    client: RepositoryClient,
+    client: StoreClient,
     run_id: str,
-    radar: str,
+    collection: str,
     *,
     growth_window_scans: int,
     at: datetime | None = None,
@@ -41,16 +41,17 @@ def build_snapshot(
     With ``at``, the run is replayed as of that instant: only scans at or
     before ``at`` are visible (growth rates and scan cadence included).
     """
-    history = client.table("cells_by_scan", radar=radar, run_id=run_id)
+    history = client.cells(run_id, collection)
     if history.empty:
-        raise ValueError(f"No cells_by_scan rows for run {run_id!r} (radar {radar!r})")
+        raise ValueError(f"No cells_by_scan rows for run {run_id!r} (collection {collection!r})")
     if at is not None:
         history = history[history["scan_time"] <= to_scan_iso(at)]
         if history.empty:
             raise ValueError(
-                f"No scans at or before {to_scan_iso(at)} in run {run_id!r} (radar {radar!r})"
+                f"No scans at or before {to_scan_iso(at)} in run {run_id!r} "
+                f"(collection {collection!r})"
             )
-    tracks = client.tracks(run_id, radar=radar)
+    tracks = client.tracks(collection, run_id=run_id)
 
     scan_times = sorted(history["scan_time"].unique())
     latest_iso = scan_times[-1]

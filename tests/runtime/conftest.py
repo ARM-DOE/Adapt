@@ -27,8 +27,15 @@ def temp_dir():
 
 @pytest.fixture
 def store_root(temp_dir):
-    """An initialized store root (registry.db + logs/ + collections/)."""
-    return init_store(temp_dir / "store")
+    """An initialized store root (registry.db + logs/ + collections/).
+
+    The registry connection is released here, before ``temp_dir`` removes the
+    directory: Windows refuses to delete ``registry.db`` while it is open, and
+    the autouse reset in ``tests/conftest.py`` only tears down after ``temp_dir``.
+    """
+    root = init_store(temp_dir / "store")
+    yield root
+    StoreRegistry.close_all()
 
 
 @pytest.fixture

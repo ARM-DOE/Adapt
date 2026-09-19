@@ -6,14 +6,22 @@
 ![API](https://img.shields.io/badge/API-BREAKING%20CHANGES-red?style=for-the-badge&logo=dependabot)
 ![Stability](https://img.shields.io/badge/STABILITY-ALPHA-yellow?style=for-the-badge)
 
+**Health**
+
 [![CI](https://github.com/ARM-DOE/Adapt/actions/workflows/ci.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions/workflows/ci.yml)
 [![Docs](https://github.com/ARM-DOE/Adapt/actions/workflows/docs.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions/workflows/docs.yml)
 [![codecov](https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov)](https://codecov.io/gh/ARM-DOE/Adapt)
 [![CodeFactor](https://www.codefactor.io/repository/github/arm-doe/adapt/badge)](https://www.codefactor.io/repository/github/arm-doe/adapt)
-[![PyPI](https://img.shields.io/pypi/v/arm-adapt?logo=pypi&logoColor=white)](https://pypi.org/project/arm-adapt/)
-[![conda-forge](https://img.shields.io/conda/vn/conda-forge/arm-adapt.svg?logo=anaconda&logoColor=white)](https://anaconda.org/conda-forge/arm-adapt)
+
+**Install**
+
+[![PyPI](https://img.shields.io/pypi/v/arm-adapt?logo=pypi&logoColor=blue)](https://pypi.org/project/arm-adapt/)
+[![conda-forge](https://img.shields.io/conda/vn/conda-forge/arm-adapt.svg?logo=anaconda&logoColor=green)](https://anaconda.org/conda-forge/arm-adapt)
 [![Python](https://img.shields.io/pypi/pyversions/arm-adapt?logo=python&logoColor=white)](https://pypi.org/project/arm-adapt/)
-[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-lightgrey)](https://arm-doe.github.io/Adapt/installation.html)
+[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-peru)](https://arm-doe.github.io/Adapt/installation.html)
+
+**Project**
+
 [![PyPI Downloads](https://img.shields.io/pypi/dm/arm-adapt.svg?logo=pypi&logoColor=white)](https://pypi.org/project/arm-adapt/)
 [![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/arm-adapt.svg?logo=anaconda&logoColor=white)](https://anaconda.org/conda-forge/arm-adapt)
 [![License](https://img.shields.io/pypi/l/arm-adapt?logo=opensourceinitiative&logoColor=white)](https://github.com/ARM-DOE/Adapt?tab=License-1-ov-file)

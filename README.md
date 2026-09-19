@@ -10,11 +10,15 @@
 [![Docs](https://github.com/ARM-DOE/Adapt/actions/workflows/docs.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions/workflows/docs.yml)
 [![codecov](https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov)](https://codecov.io/gh/ARM-DOE/Adapt)
 [![CodeFactor](https://www.codefactor.io/repository/github/arm-doe/adapt/badge)](https://www.codefactor.io/repository/github/arm-doe/adapt)
-[![PyPI Release](https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml)
-[![conda-forge](https://img.shields.io/conda/vn/conda-forge/arm-adapt.svg)](https://anaconda.org/conda-forge/arm-adapt)
-[![Downloads](https://static.pepy.tech/personalized-badge/arm-adapt?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pypi.org/project/arm-adapt/)
-[![License](https://img.shields.io/pypi/l/arm-adapt)](https://github.com/ARM-DOE/Adapt?tab=License-1-ov-file)
+[![PyPI](https://img.shields.io/pypi/v/arm-adapt?logo=pypi&logoColor=white)](https://pypi.org/project/arm-adapt/)
+[![conda-forge](https://img.shields.io/conda/vn/conda-forge/arm-adapt.svg?logo=anaconda&logoColor=white)](https://anaconda.org/conda-forge/arm-adapt)
+[![Python](https://img.shields.io/pypi/pyversions/arm-adapt?logo=python&logoColor=white)](https://pypi.org/project/arm-adapt/)
+[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-lightgrey)](https://arm-doe.github.io/Adapt/installation.html)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/arm-adapt.svg?logo=pypi&logoColor=white)](https://pypi.org/project/arm-adapt/)
+[![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/arm-adapt.svg?logo=anaconda&logoColor=white)](https://anaconda.org/conda-forge/arm-adapt)
+[![License](https://img.shields.io/pypi/l/arm-adapt?logo=opensourceinitiative&logoColor=white)](https://github.com/ARM-DOE/Adapt?tab=License-1-ov-file)
 [![ARM Sponsor](https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&colorB=00539c)](https://www.arm.gov/)
+
 
 > **Note.** Adapt is under active development. External pull requests are not being accepted at this
 > time; contribution guidelines will follow the first stable release. APIs, configuration files,

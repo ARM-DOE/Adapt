@@ -38,7 +38,9 @@ def format_banner(version: str) -> str:
     return "\n".join(
         [
             f"ARM Adapt v{version}",
-            "Copyright © 2026, UChicago Argonne, LLC.",
+            "Copyright © 2026, UChicago Argonne, LLC",
+            "All Rights Reserved",
+            "By: Argonne National Laboratory",
             f"See the LICENSE ({_LICENSE_URL}) for terms and disclaimer.",
         ]
     )

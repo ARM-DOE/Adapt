@@ -183,6 +183,12 @@ def test_format_banner_is_plain_name_version_and_copyright():
     out = format_banner("0.1.3")
 
     assert out.splitlines()[0] == "ARM Adapt v0.1.3"  # first line, exact
-    assert "Copyright © 2026, UChicago Argonne, LLC" in out
     assert "https://arm-doe.github.io/Adapt/license.html" in out
     assert "─" not in out  # no decorative rule lines
+
+    # Attribution reproduced as LICENSE states it, one claim per line.
+    assert out.splitlines()[1:4] == [
+        "Copyright © 2026, UChicago Argonne, LLC",
+        "All Rights Reserved",
+        "By: Argonne National Laboratory",
+    ]

@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>User Guide &#8212; Adapt 0.1.4 documentation</title>
+    <title>User Guide &#8212; Adapt 0.1.5 documentation</title>
   
   
   
@@ -27,25 +27,25 @@
   </noscript>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
-<link href="_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+  <link href="_static/styles/theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
   
   <!-- So that users can add custom icons -->
-  <script defer src="_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="_static/scripts/fontawesome.js?digest=cb8930eaaf36d9849b67"></script>
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
-<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67" />
 
-    <script src="_static/documentation_options.js?v=fd825880"></script>
+    <script src="_static/documentation_options.js?v=59fadc99"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'USAGE';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Adapt Dashboard — Reference" href="dashboard_reference.html" />
+    <link rel="next" title="Variable Names and the Tracking Field" href="variable_names.html" />
     <link rel="prev" title="Installation" href="installation.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -117,7 +117,7 @@
   
   
   
-    <p class="title logo__title">Adapt 0.1.4 documentation</p>
+    <p class="title logo__title">Adapt 0.1.5 documentation</p>
   
 </a></div>
     
@@ -146,6 +146,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="dashboard_reference.html">
     Adapt Dashboard — Reference
   </a>
@@ -158,13 +165,6 @@
   </a>
 </li>
 
-
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="license.html">
-    License
-  </a>
-</li>
-
             <li class="nav-item dropdown">
                 <button class="btn dropdown-toggle nav-item" type="button"
                 data-bs-toggle="dropdown" aria-expanded="false"
@@ -173,6 +173,13 @@
                 </button>
                 <ul id="pst-nav-more-links" class="dropdown-menu">
                     
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="license.html">
+    License
+  </a>
+</li>
+
+
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="api/cli.html">
     Command-Line Interface
@@ -189,7 +196,7 @@
 
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="api/client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -312,6 +319,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="dashboard_reference.html">
     Adapt Dashboard — Reference
   </a>
@@ -348,7 +362,7 @@
 
 <li class="nav-item ">
   <a class="nav-link nav-internal" href="api/client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -478,11 +492,13 @@ outputs, and configuring the system. For installation see <a class="reference in
 <hr class="docutils" />
 <section id="quick-start">
 <h2>Quick start<a class="headerlink" href="#quick-start" title="Link to this heading">#</a></h2>
-<p>Make a directory and work inside it — that directory becomes the repository.
-<code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> writes <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> there with <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> pointing at itself, and
-every other command reads it from the working directory, so there are no paths to
-pass:</p>
+<p>Make a directory, initialize it as a data store, and work inside it. <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code>
+creates the store layout (nothing else ever does — the pipeline refuses to run in
+an uninitialized directory). <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> writes <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> there with
+<code class="docutils literal notranslate"><span class="pre">base_dir</span></code> pointing at itself, and every other command reads it from the working
+directory, so there are no paths to pass:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mkdir<span class="w"> </span>my_case<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>my_case
+adapt<span class="w"> </span>init<span class="w">            </span><span class="c1"># creates registry.db, logs/, collections/</span>
 adapt<span class="w"> </span>config<span class="w">          </span><span class="c1"># skip if you already have a config.yaml here</span>
 </pre></div>
 </div>
@@ -553,9 +569,11 @@ pre-populates that field:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>dashboard<span class="w"> </span>--repo<span class="w"> </span>/data/radar
 </pre></div>
 </div>
-<p>A directory only counts as a repository once the pipeline has run in it and
-created <code class="docutils literal notranslate"><span class="pre">adapt_registry.db</span></code>. Start the dashboard before that and it falls back
-to your previous repository; use the selector, or just wait for the first scan.</p>
+<p>A directory counts as a repository once <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code> has created <code class="docutils literal notranslate"><span class="pre">registry.db</span></code>
+in it. Start the dashboard before the first scan is processed and the timeline
+is simply empty until data arrives. Pre-store repositories (marked by the old
+<code class="docutils literal notranslate"><span class="pre">adapt_registry.db</span></code>) are not readable — recreate them with <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code> and a
+rerun.</p>
 <p>The dashboard is <strong>read-only</strong> — it does not affect the pipeline.</p>
 <section id="controls">
 <h3>Controls<a class="headerlink" href="#controls" title="Link to this heading">#</a></h3>
@@ -600,41 +618,53 @@ internet and may take a few seconds.</p>
 </section>
 </section>
 <hr class="docutils" />
-<section id="outputs">
-<h2>Outputs<a class="headerlink" href="#outputs" title="Link to this heading">#</a></h2>
-<p>All pipeline artifacts are written under <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> — the repository root,
-which is the working directory unless the config or <code class="docutils literal notranslate"><span class="pre">--base-dir</span></code> says otherwise:</p>
+<section id="outputs-the-data-store">
+<h2>Outputs — the data store<a class="headerlink" href="#outputs-the-data-store" title="Link to this heading">#</a></h2>
+<p>All pipeline artifacts live in the data store created by <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code> — the
+repository root, which is the working directory unless the config or
+<code class="docutils literal notranslate"><span class="pre">--base-dir</span></code> says otherwise:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>my_case/
-├── KLOT/
-│   ├── nexrad/                        # raw Level-II files from AWS
-│   ├── gridnc/
-│   │   └── 20250305/
-│   │       └── KLOT20250305_183210_V06.nc   # regridded Cartesian NetCDF
-│   └── analysis/
-│       ├── 20250305/
-│       │   └── KLOT_20250305_183210_analysis.nc  # per-scan analysis
-│       └── catalog.db                 # SQLite: cell records, tracking events
-├── adapt_registry.db                  # run registry
-└── runtime_config_&lt;run-id&gt;.json       # configuration snapshot for this run
+├── registry.db                # runs (with their full config), collections, events
+├── logs/                      # run log files
+└── collections/
+    └── KLOT/                  # one collection per radar
+        ├── catalog.db         # scans, artifacts, checksums, lineage
+        ├── products.db        # cell stats, tracks, module tables, annotations
+        └── objects/           # immutable NetCDF files, content-addressed
 </pre></div>
 </div>
-<section id="analysis-netcdf">
-<h3>Analysis NetCDF<a class="headerlink" href="#analysis-netcdf" title="Link to this heading">#</a></h3>
-<p>Each scan produces one NetCDF file containing:</p>
-<ul class="simple">
-<li><p>Regridded radar fields (reflectivity, ZDR, velocity, etc.)</p></li>
-<li><p>Cell label mask</p></li>
-<li><p>Projected future cell positions (optical flow)</p></li>
-</ul>
+<p>Files in <code class="docutils literal notranslate"><span class="pre">objects/</span></code> are named by artifact ID, not by scan time — everything is
+discovered through the catalog, never by walking directories. Each scan is
+identified by <code class="docutils literal notranslate"><span class="pre">scan_id</span></code>, the first 16 hex digits of the SHA-256 of the raw
+Level-II file (verify externally with <code class="docutils literal notranslate"><span class="pre">sha256sum</span> <span class="pre">&lt;raw</span> <span class="pre">file&gt;</span> <span class="pre">|</span> <span class="pre">cut</span> <span class="pre">-c1-16</span></code>).
+Every derived file records its checksum and its lineage back to that raw
+volume, and every run records the exact configuration it ran with.</p>
+<section id="scan-artifacts">
+<h3>Scan artifacts<a class="headerlink" href="#scan-artifacts" title="Link to this heading">#</a></h3>
+<p>Each scan produces a gridded 3-D NetCDF and a 2-D segmentation NetCDF
+containing regridded radar fields, the cell label mask, and projected future
+cell positions (optical flow). A scan is listed as complete only once all of
+its required products exist, so readers never see half-written scans.</p>
 </section>
-<section id="catalog-database">
-<h3>Catalog database<a class="headerlink" href="#catalog-database" title="Link to this heading">#</a></h3>
-<p><code class="docutils literal notranslate"><span class="pre">catalog.db</span></code> is a SQLite database with WAL journalling. Query it directly or
-use the <a class="reference internal" href="api/client.html"><span class="std std-doc">DataClient API</span></a>:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">adapt.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataClient</span>
+<section id="querying-storeclient">
+<h3>Querying — StoreClient<a class="headerlink" href="#querying-storeclient" title="Link to this heading">#</a></h3>
+<p>Everything is queryable through the read-only <a class="reference internal" href="api/client.html"><span class="std std-doc">StoreClient API</span></a>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">adapt.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">StoreClient</span>
 
-<span class="n">client</span> <span class="o">=</span> <span class="n">DataClient</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>  <span class="c1"># or any repository path</span>
-<span class="n">df</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">latest</span><span class="p">(</span><span class="s2">&quot;cells_by_scan&quot;</span><span class="p">,</span> <span class="n">radar</span><span class="o">=</span><span class="s2">&quot;KLOT&quot;</span><span class="p">)</span>
+<span class="n">client</span> <span class="o">=</span> <span class="n">StoreClient</span><span class="p">(</span><span class="s2">"."</span><span class="p">)</span>  <span class="c1"># or any store path</span>
+<span class="n">run</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">latest_run</span><span class="p">(</span><span class="s2">"KLOT"</span><span class="p">)</span>
+
+<span class="n">cells</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">cells</span><span class="p">(</span><span class="n">run</span><span class="o">.</span><span class="n">run_id</span><span class="p">,</span> <span class="s2">"KLOT"</span><span class="p">)</span>            <span class="c1"># all tracked cells</span>
+<span class="n">history</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">track_history</span><span class="p">(</span><span class="n">run</span><span class="o">.</span><span class="n">run_id</span><span class="p">,</span> <span class="n">cells</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">"cell_uid"</span><span class="p">],</span> <span class="s2">"KLOT"</span><span class="p">)</span>
+
+<span class="c1"># Any module's table, with typed filters</span>
+<span class="n">big</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">table</span><span class="p">(</span><span class="s2">"cell_tracks"</span><span class="p">,</span> <span class="s2">"KLOT"</span><span class="p">,</span> <span class="n">run_id</span><span class="o">=</span><span class="n">run</span><span class="o">.</span><span class="n">run_id</span><span class="p">,</span>
+                   <span class="n">filters</span><span class="o">=</span><span class="p">{</span><span class="s2">"max_reflectivity"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"op"</span><span class="p">:</span> <span class="s2">"gt"</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">:</span> <span class="mf">50.0</span><span class="p">}})</span>
+
+<span class="c1"># Arbitrary read-only SQL over products.db (catalog attached as `catalog`)</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">sql</span><span class="p">(</span><span class="s2">"SELECT COUNT(DISTINCT cell_uid) AS n FROM cells_by_scan"</span><span class="p">,</span> <span class="s2">"KLOT"</span><span class="p">)</span>
+
+<span class="n">client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </pre></div>
 </div>
 </section>
@@ -647,16 +677,21 @@ use the <a class="reference internal" href="api/client.html"><span class="std st
 <p>The first scan takes longer (regridding + initial cell detection). Wait
 30–60 seconds then click <strong>Show Latest</strong>.</p>
 </section>
-<section id="no-analysis-nc-for-today">
-<h3><code class="docutils literal notranslate"><span class="pre">No</span> <span class="pre">*_analysis.nc</span> <span class="pre">for</span> <span class="pre">today</span></code><a class="headerlink" href="#no-analysis-nc-for-today" title="Link to this heading">#</a></h3>
-<p>The pipeline has not produced output yet. Check the <strong>Log</strong> tab in the dashboard
-for errors.</p>
+<section id="no-adapt-store-at-registry-db-not-found">
+<h3><code class="docutils literal notranslate"><span class="pre">No</span> <span class="pre">Adapt</span> <span class="pre">store</span> <span class="pre">at</span> <span class="pre">...:</span> <span class="pre">registry.db</span> <span class="pre">not</span> <span class="pre">found</span></code><a class="headerlink" href="#no-adapt-store-at-registry-db-not-found" title="Link to this heading">#</a></h3>
+<p>Run <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code> in the directory first (the launch wizard in the dashboard
+does this for you when starting a new pipeline).</p>
+</section>
+<section id="uses-the-obsolete-pre-store-layout-adapt-registry-db">
+<h3><code class="docutils literal notranslate"><span class="pre">...</span> <span class="pre">uses</span> <span class="pre">the</span> <span class="pre">obsolete</span> <span class="pre">pre-store</span> <span class="pre">layout</span> <span class="pre">(adapt_registry.db)</span></code><a class="headerlink" href="#uses-the-obsolete-pre-store-layout-adapt-registry-db" title="Link to this heading">#</a></h3>
+<p>The directory holds output from a pre-store version of Adapt. Move the old
+data aside, run <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code>, and reprocess.</p>
 </section>
 <section id="basemap-not-loading">
 <h3>Basemap not loading<a class="headerlink" href="#basemap-not-loading" title="Link to this heading">#</a></h3>
 <p><code class="docutils literal notranslate"><span class="pre">contextily</span></code> requires internet access to fetch map tiles. The first load for a
 new area is slow. Check your network connection. Install if missing:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;arm-adapt[maps]&quot;</span>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"arm-adapt[maps]"</span>
 </pre></div>
 </div>
 </section>
@@ -697,11 +732,11 @@ new area is slow. Check your network connection. Install if missing:</p>
       </div>
     </a>
     <a class="right-next"
-       href="dashboard_reference.html"
+       href="variable_names.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Adapt Dashboard — Reference</p>
+        <p class="prev-next-title">Variable Names and the Tracking Field</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -736,14 +771,15 @@ new area is slow. Check your network connection. Install if missing:</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#basemap">Basemap</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#outputs">Outputs</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#analysis-netcdf">Analysis NetCDF</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#catalog-database">Catalog database</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#outputs-the-data-store">Outputs — the data store</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#scan-artifacts">Scan artifacts</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#querying-storeclient">Querying — StoreClient</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-data-in-dashboard-after-starting">No data in dashboard after starting</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-analysis-nc-for-today"><code class="docutils literal notranslate"><span class="pre">No</span> <span class="pre">*_analysis.nc</span> <span class="pre">for</span> <span class="pre">today</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-adapt-store-at-registry-db-not-found"><code class="docutils literal notranslate"><span class="pre">No</span> <span class="pre">Adapt</span> <span class="pre">store</span> <span class="pre">at</span> <span class="pre">...:</span> <span class="pre">registry.db</span> <span class="pre">not</span> <span class="pre">found</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#uses-the-obsolete-pre-store-layout-adapt-registry-db"><code class="docutils literal notranslate"><span class="pre">...</span> <span class="pre">uses</span> <span class="pre">the</span> <span class="pre">obsolete</span> <span class="pre">pre-store</span> <span class="pre">layout</span> <span class="pre">(adapt_registry.db)</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#basemap-not-loading">Basemap not loading</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pipeline-error-on-first-scan">Pipeline error on first scan</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt-command-not-found"><code class="docutils literal notranslate"><span class="pre">adapt:</span> <span class="pre">command</span> <span class="pre">not</span> <span class="pre">found</span></code></a></li>
@@ -774,8 +810,8 @@ new area is slow. Check your network connection. Install if missing:</p>
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script defer src="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
-<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67"></script>
 
   <footer class="bd-footer">
 <div class="bd-footer__inner bd-page-width">
@@ -809,7 +845,7 @@ new area is slow. Check your network connection. Install if missing:</p>
         <div class="footer-item">
 <p class="theme-version">
   <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
-  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.21.0.
 </p></div>
       
     </div>

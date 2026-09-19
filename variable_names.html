@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Installation &#8212; Adapt 0.1.5 documentation</title>
+    <title>Variable Names and the Tracking Field &#8212; Adapt 0.1.5 documentation</title>
   
   
   
@@ -41,12 +41,12 @@
     <script src="_static/documentation_options.js?v=59fadc99"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'installation';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'variable_names';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="User Guide" href="USAGE.html" />
-    <link rel="prev" title="Adapt" href="readme.html" />
+    <link rel="next" title="Adapt Dashboard — Reference" href="dashboard_reference.html" />
+    <link rel="prev" title="User Guide" href="USAGE.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -131,8 +131,8 @@
 <nav>
   <ul class="bd-navbar-elements navbar-nav">
     
-<li class="nav-item current active">
-  <a class="nav-link nav-internal" href="#">
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="installation.html">
     Installation
   </a>
 </li>
@@ -145,8 +145,8 @@
 </li>
 
 
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="variable_names.html">
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#">
     Variable Names and the Tracking Field
   </a>
 </li>
@@ -304,8 +304,8 @@
 <nav>
   <ul class="bd-navbar-elements navbar-nav">
     
-<li class="nav-item current active">
-  <a class="nav-link nav-internal" href="#">
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="installation.html">
     Installation
   </a>
 </li>
@@ -318,8 +318,8 @@
 </li>
 
 
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="variable_names.html">
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#">
     Variable Names and the Tracking Field
   </a>
 </li>
@@ -468,7 +468,7 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Installation</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Variable Names and the Tracking Field</span></li>
   </ul>
 </nav>
 </div>
@@ -485,133 +485,140 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="installation">
-<h1>Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h1>
-<section id="requirements">
-<h2>Requirements<a class="headerlink" href="#requirements" title="Link to this heading">#</a></h2>
+  <section id="variable-names-and-the-tracking-field">
+<h1>Variable Names and the Tracking Field<a class="headerlink" href="#variable-names-and-the-tracking-field" title="Link to this heading">#</a></h1>
+<p>Adapt works with any radar source and, in principle, any 2-D scalar field.
+Two independent bindings make that possible, and each lives in exactly one
+place:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Binding</p></th>
+<th class="head"><p>Config knob</p></th>
+<th class="head"><p>Applied where</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Source name → canonical name</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">reader.field_map</span></code>, <code class="docutils literal notranslate"><span class="pre">reader.fields</span></code></p></td>
+<td><p>Once, inside the ingest module</p></td>
+</tr>
+<tr class="row-odd"><td><p>Role → canonical field</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">global.tracking_field</span></code></p></td>
+<td><p>Read by detection / projection / tracking</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Everything downstream of ingest — module code, contracts, stored column
+names, the dashboard, the Target Selection Engine — speaks <strong>canonical
+names only</strong> and never maps names again.</p>
+<section id="canonical-names">
+<h2>Canonical names<a class="headerlink" href="#canonical-names" title="Link to this heading">#</a></h2>
+<p>The canonical vocabulary is simply Adapt’s established names:
+<code class="docutils literal notranslate"><span class="pre">reflectivity</span></code>, <code class="docutils literal notranslate"><span class="pre">velocity</span></code>, <code class="docutils literal notranslate"><span class="pre">differential_reflectivity</span></code>,
+<code class="docutils literal notranslate"><span class="pre">spectrum_width</span></code>, <code class="docutils literal notranslate"><span class="pre">cross_correlation_ratio</span></code>, <code class="docutils literal notranslate"><span class="pre">differential_phase</span></code>, …
+The segmentation label grid is always <code class="docutils literal notranslate"><span class="pre">cell_labels</span></code> (pipeline-internal,
+not configurable). Per-cell statistics columns are always minted as
+<code class="docutils literal notranslate"><span class="pre">radar_&lt;field&gt;_&lt;stat&gt;</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">radar_reflectivity_max</span></code>) — the <code class="docutils literal notranslate"><span class="pre">radar_</span></code>
+prefix is a namespace, not a physics claim.</p>
+</section>
+<section id="renaming-source-variables-reader-field-map">
+<h2>Renaming source variables (<code class="docutils literal notranslate"><span class="pre">reader.field_map</span></code>)<a class="headerlink" href="#renaming-source-variables-reader-field-map" title="Link to this heading">#</a></h2>
+<p>If your input files name a field differently — ARM CMAC calls reflectivity
+<code class="docutils literal notranslate"><span class="pre">corrected_reflectivity</span></code> — declare the rename once:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">reader</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">field_map</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">corrected_reflectivity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reflectivity</span>
+<span class="w">    </span><span class="nt">corrected_differential_reflectivity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">differential_reflectivity</span>
+<span class="w">  </span><span class="nt">fields</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">reflectivity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">differential_reflectivity</span><span class="p p-Indicator">]</span>
+</pre></div>
+</div>
 <ul class="simple">
-<li><p>Python 3.10 or later</p></li>
-<li><p>Internet access (to download NEXRAD data from AWS S3)</p></li>
-<li><p>macOS, Linux, or Windows</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">field_map</span></code> maps <strong>source name → canonical name</strong> and is applied inside
+ingest, immediately after regridding. Map entries whose source variable
+is absent from a given file are ignored.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fields</span></code> is the explicit keep-list (canonical names, checked after the
+renames). An empty list keeps every field the file provides. If a
+listed field is missing, the run fails loudly naming what was available.</p></li>
+<li><p>The legacy <code class="docutils literal notranslate"><span class="pre">REFLECTIVITY_VAR:</span> <span class="pre">dbz</span></code> user setting still works and means
+exactly this: <code class="docutils literal notranslate"><span class="pre">field_map:</span> <span class="pre">{dbz:</span> <span class="pre">reflectivity}</span></code>.</p></li>
+</ul>
+<p>The applied mapping is recorded as provenance: in each grid’s
+<code class="docutils literal notranslate"><span class="pre">source_fields_json</span></code> attribute and in the run’s stored configuration
+(<code class="docutils literal notranslate"><span class="pre">registry.db</span> <span class="pre">→</span> <span class="pre">runs.config_json</span></code>), readable via
+<code class="docutils literal notranslate"><span class="pre">StoreClient.run_config(run_id)</span></code>.</p>
+</section>
+<section id="choosing-the-tracked-field-global-tracking-field">
+<h2>Choosing the tracked field (<code class="docutils literal notranslate"><span class="pre">global.tracking_field</span></code>)<a class="headerlink" href="#choosing-the-tracked-field-global-tracking-field" title="Link to this heading">#</a></h2>
+<p>Detection thresholds on, projection flows on, and tracking links cells on
+one canonical field — <code class="docutils literal notranslate"><span class="pre">reflectivity</span></code> by default:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">global</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">tracking_field</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reflectivity</span><span class="w">   </span><span class="c1"># or any canonical field, e.g. pressure</span>
+<span class="nt">analyzer</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">radar_variables</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">reflectivity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">velocity</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># must include tracking_field</span>
+</pre></div>
+</div>
+<p>Two rules are enforced at configuration time (the run refuses to start
+otherwise):</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tracking_field</span></code> must be in <code class="docutils literal notranslate"><span class="pre">analyzer.radar_variables</span></code> — otherwise the
+per-cell statistics the tracker reads are never computed.</p></li>
+<li><p>If <code class="docutils literal notranslate"><span class="pre">reader.fields</span></code> is non-empty, it must include <code class="docutils literal notranslate"><span class="pre">tracking_field</span></code>.</p></li>
+</ol>
+<p>Dual-polarization fields are <strong>optional</strong>: a source without
+<code class="docutils literal notranslate"><span class="pre">differential_reflectivity</span></code> runs the full pipeline; ZDR-derived columns
+simply do not exist for that run (consumers discover available columns
+through the store’s <code class="docutils literal notranslate"><span class="pre">table_schemas</span></code>).</p>
+</section>
+<section id="cell-identity-uid-v2">
+<h2>Cell identity (uid v2)<a class="headerlink" href="#cell-identity-uid-v2" title="Link to this heading">#</a></h2>
+<p>Cell uids are <code class="docutils literal notranslate"><span class="pre">hash(scan_id,</span> <span class="pre">cell_label)</span></code> — a pure function of the scan’s
+raw bytes and the cell’s label. Identical input and configuration always
+mint identical uids, for any source and any tracked field. Runs recorded
+before v2 keep their stored uids (uids are minted once and never
+recomputed; every table scopes them by <code class="docutils literal notranslate"><span class="pre">run_id</span></code>). Cross-run comparisons
+join on <code class="docutils literal notranslate"><span class="pre">scan_id</span></code> + <code class="docutils literal notranslate"><span class="pre">cell_label</span></code>.</p>
+</section>
+<section id="how-consumers-resolve-the-field">
+<h2>How consumers resolve the field<a class="headerlink" href="#how-consumers-resolve-the-field" title="Link to this heading">#</a></h2>
+<p>Consumers never guess. The run’s provenance is the truth:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">client</span><span class="o">.</span><span class="n">run_config</span><span class="p">(</span><span class="n">run_id</span><span class="p">)</span>          <span class="c1"># full resolved config (dict)</span>
+<span class="n">client</span><span class="o">.</span><span class="n">run_tracking_field</span><span class="p">(</span><span class="n">run_id</span><span class="p">)</span>  <span class="c1"># the canonical tracked field</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">run_tracking_field</span></code> also understands pre-v2 provenance (runs that
+recorded <code class="docutils literal notranslate"><span class="pre">var_names.reflectivity</span></code>), so old stores stay readable. The
+dashboard backdrop, hover statistics, and the Target Selection Engine’s
+<code class="docutils literal notranslate"><span class="pre">CellSnapshot.field_max</span></code> all resolve through it.</p>
+</section>
+<section id="compatibility-notes">
+<h2>Compatibility notes<a class="headerlink" href="#compatibility-notes" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><strong>Existing stores</strong> remain readable unchanged; canonical names equal the
+names Adapt always used.</p></li>
+<li><p><strong>Changed field sets need a new collection</strong>: a collection’s product
+tables freeze their column set on first write, so a run whose
+<code class="docutils literal notranslate"><span class="pre">fields</span></code> / <code class="docutils literal notranslate"><span class="pre">field_map</span></code> / analyzer whitelist produces different columns
+is rejected by an existing collection (by design — create a new one).</p></li>
+<li><p><strong>Saved TSE YAML</strong>: the priority weight key <code class="docutils literal notranslate"><span class="pre">reflectivity:</span></code> is now
+<code class="docutils literal notranslate"><span class="pre">field:</span></code> (it weights the tracked field’s max). Old files fail loudly at
+load with a message naming the unknown key.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">cell_tracks.max_reflectivity</span></code></strong> (and <code class="docutils literal notranslate"><span class="pre">Track.max_reflectivity_dbz</span></code>,
+<code class="docutils literal notranslate"><span class="pre">FilterSpec.max_refl_*</span></code>): the value is the maximum of the run’s
+<em>tracked field</em>; the name is kept for store compatibility and only
+means dBZ for reflectivity-tracked runs.</p></li>
 </ul>
 </section>
-<hr class="docutils" />
-<section id="recommended-conda-forge">
-<h2>Recommended: conda-forge<a class="headerlink" href="#recommended-conda-forge" title="Link to this heading">#</a></h2>
-<p>Adapt is published on <a class="reference external" href="https://anaconda.org/conda-forge/arm-adapt">conda-forge</a> for macOS, Linux, and
-Windows. Installing from there keeps every compiled dependency (netCDF4, h5py, opencv, Py-ART) on
-conda-native builds, which avoids the binary conflicts described below:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_env<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
-conda<span class="w"> </span>activate<span class="w"> </span>adapt_env
-conda<span class="w"> </span>install<span class="w"> </span>conda-forge::arm-adapt
-</pre></div>
-</div>
-<p>Verify:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>--version
-adapt<span class="w"> </span>--help
-</pre></div>
-</div>
-<p><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">--version</span></code> prints the installed version and the path Adapt was installed to — useful for
-confirming which environment is active.</p>
-</section>
-<hr class="docutils" />
-<section id="alternative-pip">
-<h2>Alternative: pip<a class="headerlink" href="#alternative-pip" title="Link to this heading">#</a></h2>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
-</pre></div>
-</div>
-<p>The environment must be <strong>fresh</strong> — do not <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> into a conda environment that already has
-netCDF4, h5py, opencv, or Py-ART installed from conda-forge. Adapt’s compiled dependencies ship both
-conda and pip builds of the same native libraries, and mixing them fails at import with a DLL error —
-on Windows, <code class="docutils literal notranslate"><span class="pre">[WinError</span> <span class="pre">11]</span> <span class="pre">An</span> <span class="pre">attempt</span> <span class="pre">was</span> <span class="pre">made</span> <span class="pre">to</span> <span class="pre">load</span> <span class="pre">a</span> <span class="pre">program</span> <span class="pre">with</span> <span class="pre">an</span> <span class="pre">incorrect</span> <span class="pre">format</span></code>. On Windows,
-use 64-bit x86 Python: several of these dependencies publish no ARM64 wheels. This is a pip/conda
-mixing issue only — it does not apply to the conda-forge install above.</p>
-</section>
-<hr class="docutils" />
-<section id="developers-latest-source">
-<h2>Developers: latest source<a class="headerlink" href="#developers-latest-source" title="Link to this heading">#</a></h2>
-<p>To run the bleeding-edge version from <code class="docutils literal notranslate"><span class="pre">main</span></code> and have your edits take effect
-immediately, install the checkout in editable mode:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>adapt_dev<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span>-y
-conda<span class="w"> </span>activate<span class="w"> </span>adapt_dev
-git<span class="w"> </span>clone<span class="w"> </span>https://github.com/ARM-DOE/Adapt.git
-<span class="nb">cd</span><span class="w"> </span>Adapt
-pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
-</pre></div>
-</div>
-<p>Then generate a config, run the pipeline, and open the dashboard:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>adapt<span class="w"> </span>config<span class="w">                              </span><span class="c1"># writes config.yaml in the current directory</span>
-adapt<span class="w"> </span>run-nexrad<span class="w"> </span>--radar<span class="w"> </span>KLOT<span class="w">             </span><span class="c1"># Ctrl-C to stop</span>
-adapt<span class="w"> </span>dashboard<span class="w">                           </span><span class="c1"># in a second terminal</span>
-</pre></div>
-</div>
-<p><code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">config</span></code> with no argument writes <code class="docutils literal notranslate"><span class="pre">config.yaml</span></code> into the current directory
-and sets <code class="docutils literal notranslate"><span class="pre">base_dir</span></code> to that same directory, so the three commands above work
-together with no paths to pass.</p>
-<blockquote>
-<div><p>Use a fresh environment for the editable install too — the same pip/conda
-binary-mixing issue described above applies.</p>
-</div></blockquote>
-</section>
-<hr class="docutils" />
-<section id="optional-map-overlay-support">
-<h2>Optional: map overlay support<a class="headerlink" href="#optional-map-overlay-support" title="Link to this heading">#</a></h2>
-<p>By default Adapt installs without <code class="docutils literal notranslate"><span class="pre">contextily</span></code> and <code class="docutils literal notranslate"><span class="pre">pyproj</span></code>. The dashboard runs
-fully without them — radar data, cell tracking, and statistics all work. The
-basemap overlay (background map tiles) and coordinate display in the toolbar
-require the extra:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"arm-adapt[maps]"</span>
-</pre></div>
-</div>
-<blockquote>
-<div><p><strong>Note for conda users:</strong> install <code class="docutils literal notranslate"><span class="pre">pyproj</span></code> via conda-forge instead of pip to
-avoid PROJ database version conflicts:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
-conda<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span>pyproj<span class="w"> </span>contextily
-</pre></div>
-</div>
-</div></blockquote>
-</section>
-<hr class="docutils" />
-<section id="troubleshooting">
-<h2>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading">#</a></h2>
-<section id="adapt-command-not-found">
-<h3><code class="docutils literal notranslate"><span class="pre">adapt:</span> <span class="pre">command</span> <span class="pre">not</span> <span class="pre">found</span></code><a class="headerlink" href="#adapt-command-not-found" title="Link to this heading">#</a></h3>
-<p>Activate the environment first:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mamba<span class="w"> </span>activate<span class="w"> </span>adapt_env
-</pre></div>
-</div>
-</section>
-<section id="proj-database-version-errors">
-<h3>PROJ database version errors<a class="headerlink" href="#proj-database-version-errors" title="Link to this heading">#</a></h3>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">PROJ</span><span class="p">:</span> <span class="n">proj</span><span class="o">.</span><span class="n">db</span> <span class="n">contains</span> <span class="n">DATABASE</span><span class="o">.</span><span class="n">LAYOUT</span><span class="o">.</span><span class="n">VERSION</span><span class="o">.</span><span class="n">MINOR</span> <span class="o">=</span> <span class="mi">4</span> <span class="n">whereas</span> <span class="o">&gt;=</span> <span class="mi">6</span> <span class="ow">is</span> <span class="n">expected</span>
-</pre></div>
-</div>
-<p>pip-installed <code class="docutils literal notranslate"><span class="pre">pyproj</span></code> bundles an outdated PROJ database. Fix:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>uninstall<span class="w"> </span>pyproj<span class="w"> </span>-y
-conda<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span>pyproj
-</pre></div>
-</div>
-<p>Or uninstall pyproj entirely — the dashboard works without it (basemap
-and coordinate toolbar are disabled automatically).</p>
-</section>
-<section id="pyproj-network-warning">
-<h3>pyproj network warning<a class="headerlink" href="#pyproj-network-warning" title="Link to this heading">#</a></h3>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">UserWarning</span><span class="p">:</span> <span class="n">pyproj</span> <span class="n">unable</span> <span class="n">to</span> <span class="nb">set</span> <span class="n">PROJ</span> <span class="n">database</span> <span class="n">path</span><span class="o">.</span>
-</pre></div>
-</div>
-<p>Harmless. Suppress with:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>env<span class="w"> </span>config<span class="w"> </span>vars<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="nv">PROJ_NETWORK</span><span class="o">=</span>OFF<span class="w"> </span>-n<span class="w"> </span>adapt_env
-</pre></div>
-</div>
-</section>
-<section id="modulenotfounderror-on-dashboard-startup">
-<h3><code class="docutils literal notranslate"><span class="pre">ModuleNotFoundError</span></code> on dashboard startup<a class="headerlink" href="#modulenotfounderror-on-dashboard-startup" title="Link to this heading">#</a></h3>
-<p>Make sure you installed from PyPI and not just cloned the repository:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>arm-adapt
-</pre></div>
-</div>
-</section>
+<section id="onboarding-a-new-source-in-practice">
+<h2>Onboarding a new source, in practice<a class="headerlink" href="#onboarding-a-new-source-in-practice" title="Link to this heading">#</a></h2>
+<ol class="arabic simple">
+<li><p>Write (or reuse) an ingest path that reads the format.</p></li>
+<li><p>Add the source’s <code class="docutils literal notranslate"><span class="pre">reader.field_map</span></code> and an explicit <code class="docutils literal notranslate"><span class="pre">reader.fields</span></code>.</p></li>
+<li><p>Pick <code class="docutils literal notranslate"><span class="pre">global.tracking_field</span></code> and match <code class="docutils literal notranslate"><span class="pre">analyzer.radar_variables</span></code>.</p></li>
+<li><p>Run into a <strong>new collection</strong>.</p></li>
+</ol>
+<p>No detection, projection, tracking, persistence, api, or consumer code
+changes are required.</p>
 </section>
 </section>
 
@@ -626,20 +633,20 @@ and coordinate toolbar are disabled automatically).</p>
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="readme.html"
+       href="USAGE.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Adapt</p>
+        <p class="prev-next-title">User Guide</p>
       </div>
     </a>
     <a class="right-next"
-       href="USAGE.html"
+       href="dashboard_reference.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">User Guide</p>
+        <p class="prev-next-title">Adapt Dashboard — Reference</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -662,25 +669,20 @@ and coordinate toolbar are disabled automatically).</p>
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#requirements">Requirements</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#recommended-conda-forge">Recommended: conda-forge</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#alternative-pip">Alternative: pip</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#developers-latest-source">Developers: latest source</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#optional-map-overlay-support">Optional: map overlay support</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt-command-not-found"><code class="docutils literal notranslate"><span class="pre">adapt:</span> <span class="pre">command</span> <span class="pre">not</span> <span class="pre">found</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#proj-database-version-errors">PROJ database version errors</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pyproj-network-warning">pyproj network warning</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#modulenotfounderror-on-dashboard-startup"><code class="docutils literal notranslate"><span class="pre">ModuleNotFoundError</span></code> on dashboard startup</a></li>
-</ul>
-</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#canonical-names">Canonical names</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#renaming-source-variables-reader-field-map">Renaming source variables (<code class="docutils literal notranslate"><span class="pre">reader.field_map</span></code>)</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#choosing-the-tracked-field-global-tracking-field">Choosing the tracked field (<code class="docutils literal notranslate"><span class="pre">global.tracking_field</span></code>)</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cell-identity-uid-v2">Cell identity (uid v2)</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#how-consumers-resolve-the-field">How consumers resolve the field</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#compatibility-notes">Compatibility notes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#onboarding-a-new-source-in-practice">Onboarding a new source, in practice</a></li>
 </ul>
   </nav></div>
 
   <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
-    <a href="_sources/installation.md.txt">
+    <a href="_sources/variable_names.md.txt">
       <i class="fa-solid fa-file-lines"></i> Show Source
     </a>
   </div>

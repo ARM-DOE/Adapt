@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Runtime &#8212; Adapt 0.1.4 documentation</title>
+    <title>Runtime &#8212; Adapt 0.1.5 documentation</title>
   
   
   
@@ -27,18 +27,18 @@
   </noscript>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="../../_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
-<link href="../../_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+  <link href="../../_static/styles/theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
   
   <!-- So that users can add custom icons -->
-  <script defer src="../../_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="../../_static/scripts/fontawesome.js?digest=cb8930eaaf36d9849b67"></script>
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
-<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67" />
 
-    <script src="../../_static/documentation_options.js?v=fd825880"></script>
+    <script src="../../_static/documentation_options.js?v=59fadc99"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'api/internal/runtime';</script>
@@ -117,7 +117,7 @@
   
   
   
-    <p class="title logo__title">Adapt 0.1.4 documentation</p>
+    <p class="title logo__title">Adapt 0.1.5 documentation</p>
   
 </a></div>
     
@@ -146,6 +146,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="../../dashboard_reference.html">
     Adapt Dashboard — Reference
   </a>
@@ -158,13 +165,6 @@
   </a>
 </li>
 
-
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="../../license.html">
-    License
-  </a>
-</li>
-
             <li class="nav-item dropdown">
                 <button class="btn dropdown-toggle nav-item" type="button"
                 data-bs-toggle="dropdown" aria-expanded="false"
@@ -173,6 +173,13 @@
                 </button>
                 <ul id="pst-nav-more-links" class="dropdown-menu">
                     
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="../../license.html">
+    License
+  </a>
+</li>
+
+
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="../cli.html">
     Command-Line Interface
@@ -189,7 +196,7 @@
 
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="../client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -312,6 +319,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="../../dashboard_reference.html">
     Adapt Dashboard — Reference
   </a>
@@ -348,7 +362,7 @@
 
 <li class="nav-item ">
   <a class="nav-link nav-internal" href="../client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -485,269 +499,10 @@
                   
   <section id="runtime">
 <h1>Runtime<a class="headerlink" href="#runtime" title="Link to this heading">#</a></h1>
-<p>Orchestrates the two-thread pipeline (downloader + processor), manages the
-scan queue, and handles graceful shutdown.</p>
-<p id="module-adapt.runtime.file_tracker">SQLite-based file processing state tracker.</p>
-<p>Tracks radar files through pipeline stages (downloaded, regridded, analyzed, plotted).
-Enables idempotent processing with stop/restart, progress tracking, and failure recovery.</p>
-<dl class="py class">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker">
-<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">adapt.runtime.file_tracker.</span></span><span class="sig-name descname"><span class="pre">FileProcessingTracker</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker" title="Link to this definition">#</a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
-<p>Tracks file processing state and progress through pipeline stages.</p>
-<p>Records the processing lifecycle of each NEXRAD file as it moves through
-the pipeline: download → regridding → analysis → visualization. Enables
-resumable processing (stop and restart without reprocessing completed files).</p>
-<p><strong>Pipeline Stages:</strong></p>
-<ol class="arabic simple">
-<li><p><strong>Downloaded</strong>: Level-II file exists on disk (from AWS)</p></li>
-<li><p><strong>Regridded</strong>: NetCDF file created with Cartesian grid</p></li>
-<li><p><strong>Analyzed</strong>: Cell statistics extracted to SQLite database</p></li>
-<li><p><strong>Plotted</strong>: Visualization PNG generated</p></li>
-</ol>
-<p><strong>Database Schema:</strong></p>
-<p>SQLite table <cite>radar_file_processing</cite>:</p>
-<ul class="simple">
-<li><p>file_id: Unique filename (e.g., KDIX20250305_000310_V06)</p></li>
-<li><p>radar: Radar identifier (e.g., KDIX)</p></li>
-<li><p>scan_time: Scan timestamp (ISO format)</p></li>
-<li><p>Status: pending, processing, completed, failed</p></li>
-<li><p>Timestamps: When each stage completed (ISO format)</p></li>
-<li><p>File paths: nexrad_path, gridnc_path, analysis_path, plot_path</p></li>
-<li><p>Metadata: file_size_mb, num_cells, error_message</p></li>
-</ul>
-<p><strong>Resumability:</strong></p>
-<p>If pipeline stops/crashes after marking a stage complete, that stage is
-skipped on restart. Use <cite>reset_failed()</cite> to retry files marked as failed.
-Use <cite>cleanup_deleted_files()</cite> to reprocess files deleted from disk.</p>
-<p><strong>Thread Safety:</strong></p>
-<p>All methods are thread-safe via internal locking. Multiple threads can
-check status concurrently.</p>
-<p><strong>Typical Usage:</strong></p>
-<p>Called internally by orchestrator and processor. Advanced users can query
-for progress or manually reset failed files:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">tracker</span> <span class="o">=</span> <span class="n">FileProcessingTracker</span><span class="p">(</span><span class="n">db_path</span><span class="p">)</span>
-
-<span class="c1"># Check if file needs processing</span>
-<span class="k">if</span> <span class="n">tracker</span><span class="o">.</span><span class="n">should_process</span><span class="p">(</span><span class="n">file_id</span><span class="p">,</span> <span class="s2">&quot;analyzed&quot;</span><span class="p">):</span>
-    <span class="c1"># Process file</span>
-    <span class="o">...</span>
-    <span class="n">tracker</span><span class="o">.</span><span class="n">mark_stage_complete</span><span class="p">(</span><span class="n">file_id</span><span class="p">,</span> <span class="s2">&quot;analyzed&quot;</span><span class="p">,</span> <span class="n">num_cells</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
-
-<span class="c1"># Get stats</span>
-<span class="n">stats</span> <span class="o">=</span> <span class="n">tracker</span><span class="o">.</span><span class="n">get_statistics</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processed </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;completed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> files&quot;</span><span class="p">)</span>
-
-<span class="n">tracker</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</pre></div>
-</div>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>db_path</strong> (<em>Path</em><em> | </em><em>str</em>)</p>
-</dd>
-</dl>
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.cleanup_deleted_files">
-<span class="sig-name descname"><span class="pre">cleanup_deleted_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radar</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.cleanup_deleted_files" title="Link to this definition">#</a></dt>
-<dd><p>Remove database records for files deleted from disk.</p>
-<p>Useful after clearing output directories. On next run, these files
-will be re-downloaded and reprocessed.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>radar</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Filter to specific radar. If None, cleans all radars.</p>
-</dd>
-</dl>
-<p class="rubric">Notes</p>
-<p>Only checks NEXRAD Level-II paths. Does not verify gridded/analysis
-NetCDF or PNG files (those are considered intermediate).</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.close">
-<span class="sig-name descname"><span class="pre">close</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.close" title="Link to this definition">#</a></dt>
-<dd><p>Close database connection.</p>
-<p>Called automatically by orchestrator.stop(). Safe to call multiple times.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.get_file_status">
-<span class="sig-name descname"><span class="pre">get_file_status</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_id</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.get_file_status" title="Link to this definition">#</a></dt>
-<dd><p>Get complete processing status for a file.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>file_id</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – File identifier</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><p>Dict with file metadata and stage completion status:
-- <cite>file_id</cite>, <cite>radar</cite>, <cite>scan_time</cite>
-- <cite>status</cite>: ‘pending’, ‘processing’, ‘completed’, ‘failed’
-- <cite>error_message</cite>: Error details if failed
-- <cite>file_size_mb</cite>: Original NEXRAD file size
-- <cite>num_cells</cite>: Number of cells if analyzed
-- Timestamps: <cite>downloaded_at</cite>, <cite>regridded_at</cite>, <cite>analyzed_at</cite>, <cite>plotted_at</cite>
-- File paths: <cite>nexrad_path</cite>, <cite>gridnc_path</cite>, <cite>analysis_path</cite>, <cite>plot_path</cite></p>
-<p>None if file_id not found in database.</p>
-</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.get_pending_files">
-<span class="sig-name descname"><span class="pre">get_pending_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">radar</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">limit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.get_pending_files" title="Link to this definition">#</a></dt>
-<dd><p>Get files awaiting processing at a specific stage.</p>
-<p>Used by downloader/processor/plotter to find files needing work.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>stage</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – <p>Filter by processing stage:
-- ‘regridded’: files downloaded but not regridded
-- ‘analyzed’: files regridded but not analyzed
-- ‘plotted’: files analyzed but not plotted</p>
-<p>If None, returns files with any pending stage.</p>
-</p></li>
-<li><p><strong>radar</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Filter by radar ID (e.g., “KDIX”).</p></li>
-<li><p><strong>limit</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Max files to return (for batching). Default: None (all pending).</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>List of file records matching criteria, ordered by scan_time (oldest first).</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code>]</span></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.get_statistics">
-<span class="sig-name descname"><span class="pre">get_statistics</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radar</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.get_statistics" title="Link to this definition">#</a></dt>
-<dd><p>Get summary statistics for processing progress.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>radar</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Filter to specific radar. If None, returns all radars.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>Summary statistics:
-- <cite>total</cite>: Total files registered
-- <cite>completed</cite>: Files fully processed (through plotting)
-- <cite>pending</cite>: Files awaiting any stage
-- <cite>failed</cite>: Files with errors
-- <cite>total_cells</cite>: Sum of cells across all analyzed files
-- <cite>radar</cite>: Filtered radar (if specified)</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></span></p>
-</dd>
-</dl>
-<p class="rubric">Notes</p>
-<p>Used by orchestrator to log progress every 30 seconds.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.mark_stage_complete">
-<span class="sig-name descname"><span class="pre">mark_stage_complete</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_cells</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">error</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.mark_stage_complete" title="Link to this definition">#</a></dt>
-<dd><p>Mark a pipeline stage as complete or failed for a file.</p>
-<p>Called by downloader, processor, and plotter threads to record progress.
-Enables resumable processing: next run skips stages marked complete.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>file_id</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – File identifier (must be pre-registered via register_file).</p></li>
-<li><p><strong>stage</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – Pipeline stage: ‘downloaded’, ‘regridded’, ‘analyzed’, ‘plotted’.</p></li>
-<li><p><strong>path</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Path</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Path to output file created by this stage (for logging/debugging).
-- ‘downloaded’: NEXRAD Level-II path
-- ‘regridded’: Gridded NetCDF path
-- ‘analyzed’: Analysis NetCDF path
-- ‘plotted’: PNG plot path</p></li>
-<li><p><strong>num_cells</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Number of cells detected (for ‘analyzed’ stage).</p></li>
-<li><p><strong>error</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Error message if stage failed. If provided, status set to ‘failed’
-and future runs will retry this stage.</p></li>
-<li><p><strong>timings</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>float</em><em>] </em><em>| </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Raises<span class="colon">:</span></dt>
-<dd class="field-even"><p><strong>ValueError</strong> – If stage is not one of the valid pipeline stages.</p>
-</dd>
-</dl>
-<p class="rubric">Notes</p>
-<p>Thread-safe. If called multiple times for the same stage, uses the
-most recent timestamp. Error stages can be reset with reset_failed().</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.register_file">
-<span class="sig-name descname"><span class="pre">register_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">radar</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scan_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nexrad_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.register_file" title="Link to this definition">#</a></dt>
-<dd><p>Register a new file for tracking.</p>
-<p>Creates an initial database record for a newly discovered NEXRAD file.
-Called by downloader when a new file is discovered.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>file_id</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – Unique file identifier (e.g., KDIX20250305_000310_V06).
-Typically the Level-II filename without extension.</p></li>
-<li><p><strong>radar</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – Radar identifier (e.g., KDIX, KHTX).</p></li>
-<li><p><strong>scan_time</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">datetime</span></code></span>) – Scan timestamp (typically UTC). Used to filter historical ranges.</p></li>
-<li><p><strong>nexrad_path</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Path</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Path to original NEXRAD Level-II file on disk.
-Used to compute file size for logging.</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>True if file newly registered, False if already in database.
-Returning False does not indicate an error (file might be
-mid-processing or already complete).</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></span></p>
-</dd>
-</dl>
-<p class="rubric">Notes</p>
-<p>Safe to call multiple times with same file_id (returns False on duplicates).</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.reset_failed">
-<span class="sig-name descname"><span class="pre">reset_failed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radar</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.reset_failed" title="Link to this definition">#</a></dt>
-<dd><p>Reset all failed files to pending for retry.</p>
-<p>Useful for recovery after fixing errors (e.g., config changes, bug fixes).
-Clears error_message and marks status=’pending’ so files reprocess.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>radar</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> | <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span>) – Filter to specific radar. If None, resets all radars.</p>
-</dd>
-</dl>
-<p class="rubric">Notes</p>
-<p>Does not delete output files. On next run, stages will be skipped based
-on existing output files, not status. Use <cite>cleanup_deleted_files()</cite> if
-files were deleted and should be fully reprocessed.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="adapt.runtime.file_tracker.FileProcessingTracker.should_process">
-<span class="sig-name descname"><span class="pre">should_process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stage</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#adapt.runtime.file_tracker.FileProcessingTracker.should_process" title="Link to this definition">#</a></dt>
-<dd><p>Check if a file needs processing at a given stage.</p>
-<p>Used by processor/plotter threads to determine if a stage should be skipped.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>file_id</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – File identifier</p></li>
-<li><p><strong>stage</strong> (<span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></span>) – Stage to check: ‘regridded’, ‘analyzed’, ‘plotted’</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>True if file should be processed (stage incomplete), False if already done.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></span></p>
-</dd>
-</dl>
-</dd></dl>
-
-</dd></dl>
-
+<p>Composes the pipeline over the data store: the acquisition gateway mints scan
+identity at the source boundary, the processor drives the module graph per
+scan, the orchestrator manages run lifecycle in the store registry, and the
+post-processor runs after-the-fact modules into an existing store.</p>
 </section>
 
 
@@ -790,29 +545,6 @@ files were deleted and should be fully reprocessed.</p>
 
 
   <div class="sidebar-secondary-item">
-<div
-    id="pst-page-navigation-heading-2"
-    class="page-toc tocsection onthispage">
-    <i class="fa-solid fa-list"></i> On this page
-  </div>
-  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
-    <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.cleanup_deleted_files"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.cleanup_deleted_files()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.close"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.close()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.get_file_status"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.get_file_status()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.get_pending_files"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.get_pending_files()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.get_statistics"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.get_statistics()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.mark_stage_complete"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.mark_stage_complete()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.register_file"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.register_file()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.reset_failed"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.reset_failed()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.runtime.file_tracker.FileProcessingTracker.should_process"><code class="docutils literal notranslate"><span class="pre">FileProcessingTracker.should_process()</span></code></a></li>
-</ul>
-</li>
-</ul>
-  </nav></div>
-
-  <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
     <a href="../../_sources/api/internal/runtime.rst.txt">
@@ -834,8 +566,8 @@ files were deleted and should be fully reprocessed.</p>
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script defer src="../../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
-<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="../../_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67"></script>
 
   <footer class="bd-footer">
 <div class="bd-footer__inner bd-page-width">
@@ -869,7 +601,7 @@ files were deleted and should be fully reprocessed.</p>
         <div class="footer-item">
 <p class="theme-version">
   <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
-  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.21.0.
 </p></div>
       
     </div>

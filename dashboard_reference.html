@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Adapt Dashboard — Reference &#8212; Adapt 0.1.4 documentation</title>
+    <title>Adapt Dashboard — Reference &#8212; Adapt 0.1.5 documentation</title>
   
   
   
@@ -27,18 +27,18 @@
   </noscript>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
-<link href="_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+  <link href="_static/styles/theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
   
   <!-- So that users can add custom icons -->
-  <script defer src="_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="_static/scripts/fontawesome.js?digest=cb8930eaaf36d9849b67"></script>
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
-<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67" />
 
-    <script src="_static/documentation_options.js?v=fd825880"></script>
+    <script src="_static/documentation_options.js?v=59fadc99"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'dashboard_reference';</script>
@@ -46,7 +46,7 @@
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="CLI Reference" href="cli_reference.html" />
-    <link rel="prev" title="User Guide" href="USAGE.html" />
+    <link rel="prev" title="Variable Names and the Tracking Field" href="variable_names.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -117,7 +117,7 @@
   
   
   
-    <p class="title logo__title">Adapt 0.1.4 documentation</p>
+    <p class="title logo__title">Adapt 0.1.5 documentation</p>
   
 </a></div>
     
@@ -145,6 +145,13 @@
 </li>
 
 
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
 <li class="nav-item current active">
   <a class="nav-link nav-internal" href="#">
     Adapt Dashboard — Reference
@@ -158,13 +165,6 @@
   </a>
 </li>
 
-
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="license.html">
-    License
-  </a>
-</li>
-
             <li class="nav-item dropdown">
                 <button class="btn dropdown-toggle nav-item" type="button"
                 data-bs-toggle="dropdown" aria-expanded="false"
@@ -173,6 +173,13 @@
                 </button>
                 <ul id="pst-nav-more-links" class="dropdown-menu">
                     
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="license.html">
+    License
+  </a>
+</li>
+
+
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="api/cli.html">
     Command-Line Interface
@@ -189,7 +196,7 @@
 
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="api/client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -311,6 +318,13 @@
 </li>
 
 
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
 <li class="nav-item current active">
   <a class="nav-link nav-internal" href="#">
     Adapt Dashboard — Reference
@@ -348,7 +362,7 @@
 
 <li class="nav-item ">
   <a class="nav-link nav-internal" href="api/client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -486,7 +500,7 @@
 <section id="a-you-already-have-data-open-an-existing-repository">
 <h3>2a. You already have data — open an existing repository<a class="headerlink" href="#a-you-already-have-data-open-an-existing-repository" title="Link to this heading">#</a></h3>
 <p>Click <strong>Open an existing repository</strong>, browse to the folder that contains
-<code class="docutils literal notranslate"><span class="pre">adapt_registry.db</span></code> (the pipeline output directory), and click <strong>Open Repository</strong>.</p>
+<code class="docutils literal notranslate"><span class="pre">registry.db</span></code> (a store created by <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code>), and click <strong>Open Repository</strong>.</p>
 <p>The radar map and scan dropdowns populate automatically. Use the scan selector or
 <strong>Show Latest</strong> to display a scan. Click any cell on the map to plot its track
 history in the time-series panels on the right.</p>
@@ -585,21 +599,21 @@ dashboard and it will offer to reconnect to the running process.</p>
 <section id="repository-layout-pipeline-writes-this-dashboard-reads-it">
 <h2>Repository layout (pipeline writes this, dashboard reads it)<a class="headerlink" href="#repository-layout-pipeline-writes-this-dashboard-reads-it" title="Link to this heading">#</a></h2>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>{repo}/
-├── adapt_registry.db          # SQLite: run registry (radars + run metadata)
-├── adapt_registry.db-shm      # SQLite WAL shared-memory file
-├── adapt_registry.db-wal      # SQLite WAL log
-└── {RADAR_ID}/
-    ├── catalog.db             # SQLite: per-radar item registry (WAL mode)
-    └── analysis/
-        ├── {date}/
-        │   └── *_analysis.nc  # NetCDF scan files (one per scan)
-        └── analysis2d_*.parquet  # Cell statistics (parquet, one per run)
+├── registry.db                # SQLite: runs (with config), collections, events
+├── logs/                      # run log files
+└── collections/
+    └── {RADAR_ID}/
+        ├── catalog.db         # SQLite: scans, artifacts, checksums, lineage
+        ├── products.db        # SQLite: cell stats, tracks, module tables
+        └── objects/           # immutable NetCDF artifacts (content-addressed)
 </pre></div>
 </div>
-<p>The dashboard treats this entire tree as read-only. It reads <code class="docutils literal notranslate"><span class="pre">adapt_registry.db</span></code>
-to populate the radar and run dropdowns, reads <code class="docutils literal notranslate"><span class="pre">catalog.db</span></code> via <code class="docutils literal notranslate"><span class="pre">TrackStore</span></code> to
-load track histories, and opens the <code class="docutils literal notranslate"><span class="pre">.nc</span></code> files directly with xarray for
-rendering.</p>
+<p>The dashboard treats this entire tree as read-only and touches none of it
+directly: every read goes through the <code class="docutils literal notranslate"><span class="pre">StoreClient</span></code> API — runs and collections
+from <code class="docutils literal notranslate"><span class="pre">registry.db</span></code>, the scan timeline from the catalog, track histories and
+statistics from <code class="docutils literal notranslate"><span class="pre">products.db</span></code>, and scan rasters loaded fully into memory (no
+file handle stays open between redraws). An architecture test enforces that no
+dashboard code opens files or databases itself.</p>
 <p><strong>The dashboard will not touch this directory unless a pipeline is launched from
 the wizard.</strong> Even then, the pipeline process is responsible for all writes — the
 dashboard only redirects the pipeline’s stdout/stderr to <code class="docutils literal notranslate"><span class="pre">~/.adapt/pipeline.log</span></code>.</p>
@@ -641,13 +655,13 @@ The log is not rotated — it is always overwritten at the start of each new run
 <h3><code class="docutils literal notranslate"><span class="pre">user_dashboard.json</span></code><a class="headerlink" href="#user-dashboard-json" title="Link to this heading">#</a></h3>
 <p>Single JSON file that stores two independent sections:</p>
 <div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;recent_repos&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="s2">&quot;/path/to/most-recent-repo&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;/path/to/older-repo&quot;</span>
+<span class="w">  </span><span class="nt">"recent_repos"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">"/path/to/most-recent-repo"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"/path/to/older-repo"</span>
 <span class="w">  </span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;configs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;my_plot_setup&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
-<span class="w">    </span><span class="nt">&quot;another_preset&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="nt">"configs"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"my_plot_setup"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"another_preset"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </pre></div>
@@ -717,10 +731,10 @@ config.</p>
 </table>
 </div>
 <p>The <code class="docutils literal notranslate"><span class="pre">plot_groups</span></code> structure:</p>
-<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="nt">&quot;Area&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;variables&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;cell_area_sqkm&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;area_40dbz_km2&quot;</span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;styles&quot;</span><span class="p">:</span><span class="w">    </span><span class="p">[</span><span class="s2">&quot;solid&quot;</span><span class="p">,</span><span class="w">          </span><span class="s2">&quot;dashed&quot;</span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w">    </span><span class="p">[</span><span class="s2">&quot;Cell area (km²)&quot;</span><span class="p">,</span><span class="s2">&quot;Core area (km²)&quot;</span><span class="p">]</span>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="nt">"Area"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"variables"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"cell_area_sqkm"</span><span class="p">,</span><span class="w"> </span><span class="s2">"area_40dbz_km2"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"styles"</span><span class="p">:</span><span class="w">    </span><span class="p">[</span><span class="s2">"solid"</span><span class="p">,</span><span class="w">          </span><span class="s2">"dashed"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"labels"</span><span class="p">:</span><span class="w">    </span><span class="p">[</span><span class="s2">"Cell area (km²)"</span><span class="p">,</span><span class="s2">"Core area (km²)"</span><span class="p">]</span>
 <span class="p">}</span>
 </pre></div>
 </div>
@@ -841,27 +855,36 @@ slipped through mechanisms 1 or 2.</p>
 <h2>Auto-refresh and data loading<a class="headerlink" href="#auto-refresh-and-data-loading" title="Link to this heading">#</a></h2>
 <p>The dashboard auto-refreshes every 10 s (<code class="docutils literal notranslate"><span class="pre">POLL_MS</span></code>). Each cycle:</p>
 <ol class="arabic simple">
-<li><p>Calls <code class="docutils literal notranslate"><span class="pre">_get_nc_files(repo,</span> <span class="pre">radar)</span></code> — filesystem glob for <code class="docutils literal notranslate"><span class="pre">*_analysis.nc</span></code></p></li>
+<li><p>Asks the store for the run’s complete-scan timeline
+(<code class="docutils literal notranslate"><span class="pre">client.scan_timeline</span></code>) — never a filesystem glob</p></li>
 <li><p>Updates the scan selector dropdown</p></li>
-<li><p>If a new NC file appeared since the last render → re-renders in place
+<li><p>If a new complete scan appeared since the last render → re-renders in place
 (reuses the existing canvas, preserves zoom and cell selection)</p></li>
 <li><p>Updates the status bar: scan count, pipeline state</p></li>
 <li><p>Flushes the Log tab if it is visible</p></li>
 </ol>
-<p>Data is never pre-fetched. Each scan is opened with <code class="docutils literal notranslate"><span class="pre">xr.open_dataset()</span></code> on
-demand. Cell statistics are loaded once per run via <code class="docutils literal notranslate"><span class="pre">_load_cells_data()</span></code> and
-cached in <code class="docutils literal notranslate"><span class="pre">self._current_cell_df</span></code>.</p>
+<p>Data is never pre-fetched. Each scan raster is loaded fully into memory on
+demand through <code class="docutils literal notranslate"><span class="pre">client.open_scan_raster</span></code> and holds no file handle afterwards.
+Cell statistics are loaded once per run via <code class="docutils literal notranslate"><span class="pre">client.cells()</span></code> and cached.</p>
 </section>
 <hr class="docutils" />
 <section id="module-layout">
 <h2>Module layout<a class="headerlink" href="#module-layout" title="Link to this heading">#</a></h2>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>src/adapt/consumers/live/
-├── dashboard.py                  # Main Tk window; all UI logic
-├── _config.py                    # ~/.adapt/user_dashboard.json I/O only
-├── _utils.py                     # Pure helpers; PID file logic; no Tk
-├── _widgets.py                   # Custom Tk widgets (_CompactToolbar, _RangeSlider)
+├── dashboard.py                  # Main Tk window (shell): tabs, toolbar, pickers
+├── _context.py                   # AppContext: one cached StoreClient per store
+├── _scan_view.py                 # Latest Scan tab (ScanRef timeline)
+├── _tse_view.py                  # Target Selection replay tab
+├── _pipeline.py                  # Pipeline tab: launch wizard (runs adapt init)
+├── _renderer.py                  # Pure matplotlib scan rendering; add_basemap()
+├── _movie.py / _movie_dialog.py  # Save Movie: frame writer + dialog
+├── _targeting.py                 # TSE map drawing (pure, in-memory dataset)
+├── _volume_stats.py              # Volume-stats reads via StoreClient
+├── _lightning.py                 # Lightning table reads via StoreClient
 ├── _timeseries.py                # matplotlib time-series helpers; no Tk
-├── _renderer.py                  # RenderConfig dataclass; add_basemap()
+├── _widgets.py                   # Custom Tk widgets (_CompactToolbar, _RangeSlider)
+├── _utils.py                     # Pure helpers; store-root detection; PID file logic
+├── _config.py                    # ~/.adapt/user_dashboard.json I/O only
 └── dashboard_default_config.json # Bundled default plot configuration
 </pre></div>
 </div>
@@ -881,12 +904,12 @@ functions or dataclasses and are unit-tested without a display.</p>
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="USAGE.html"
+       href="variable_names.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">User Guide</p>
+        <p class="prev-next-title">Variable Names and the Tracking Field</p>
       </div>
     </a>
     <a class="right-next"
@@ -978,8 +1001,8 @@ functions or dataclasses and are unit-tested without a display.</p>
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script defer src="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
-<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67"></script>
 
   <footer class="bd-footer">
 <div class="bd-footer__inner bd-page-width">
@@ -1013,7 +1036,7 @@ functions or dataclasses and are unit-tested without a display.</p>
         <div class="footer-item">
 <p class="theme-version">
   <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
-  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.21.0.
 </p></div>
       
     </div>

@@ -7,13 +7,15 @@ outputs, and configuring the system. For installation see [Installation](install
 
 ## Quick start
 
-Make a directory and work inside it — that directory becomes the repository.
-`adapt config` writes `config.yaml` there with `base_dir` pointing at itself, and
-every other command reads it from the working directory, so there are no paths to
-pass:
+Make a directory, initialize it as a data store, and work inside it. `adapt init`
+creates the store layout (nothing else ever does — the pipeline refuses to run in
+an uninitialized directory). `adapt config` writes `config.yaml` there with
+`base_dir` pointing at itself, and every other command reads it from the working
+directory, so there are no paths to pass:
 
 ```bash
 mkdir my_case && cd my_case
+adapt init            # creates registry.db, logs/, collections/
 adapt config          # skip if you already have a config.yaml here
 ```
 
@@ -100,9 +102,11 @@ pre-populates that field:
 adapt dashboard --repo /data/radar
 ```
 
-A directory only counts as a repository once the pipeline has run in it and
-created `adapt_registry.db`. Start the dashboard before that and it falls back
-to your previous repository; use the selector, or just wait for the first scan.
+A directory counts as a repository once `adapt init` has created `registry.db`
+in it. Start the dashboard before the first scan is processed and the timeline
+is simply empty until data arrives. Pre-store repositories (marked by the old
+`adapt_registry.db`) are not readable — recreate them with `adapt init` and a
+rerun.
 
 The dashboard is **read-only** — it does not affect the pipeline.
 
@@ -128,43 +132,58 @@ internet and may take a few seconds.
 
 ---
 
-## Outputs
+## Outputs — the data store
 
-All pipeline artifacts are written under `base_dir` — the repository root,
-which is the working directory unless the config or `--base-dir` says otherwise:
+All pipeline artifacts live in the data store created by `adapt init` — the
+repository root, which is the working directory unless the config or
+`--base-dir` says otherwise:
 
 ```
 my_case/
-├── KLOT/
-│   ├── nexrad/                        # raw Level-II files from AWS
-│   ├── gridnc/
-│   │   └── 20250305/
-│   │       └── KLOT20250305_183210_V06.nc   # regridded Cartesian NetCDF
-│   └── analysis/
-│       ├── 20250305/
-│       │   └── KLOT_20250305_183210_analysis.nc  # per-scan analysis
-│       └── catalog.db                 # SQLite: cell records, tracking events
-├── adapt_registry.db                  # run registry
-└── runtime_config_<run-id>.json       # configuration snapshot for this run
+├── registry.db                # runs (with their full config), collections, events
+├── logs/                      # run log files
+└── collections/
+    └── KLOT/                  # one collection per radar
+        ├── catalog.db         # scans, artifacts, checksums, lineage
+        ├── products.db        # cell stats, tracks, module tables, annotations
+        └── objects/           # immutable NetCDF files, content-addressed
 ```
 
-### Analysis NetCDF
+Files in `objects/` are named by artifact ID, not by scan time — everything is
+discovered through the catalog, never by walking directories. Each scan is
+identified by `scan_id`, the first 16 hex digits of the SHA-256 of the raw
+Level-II file (verify externally with `sha256sum <raw file> | cut -c1-16`).
+Every derived file records its checksum and its lineage back to that raw
+volume, and every run records the exact configuration it ran with.
 
-Each scan produces one NetCDF file containing:
-- Regridded radar fields (reflectivity, ZDR, velocity, etc.)
-- Cell label mask
-- Projected future cell positions (optical flow)
+### Scan artifacts
 
-### Catalog database
+Each scan produces a gridded 3-D NetCDF and a 2-D segmentation NetCDF
+containing regridded radar fields, the cell label mask, and projected future
+cell positions (optical flow). A scan is listed as complete only once all of
+its required products exist, so readers never see half-written scans.
 
-`catalog.db` is a SQLite database with WAL journalling. Query it directly or
-use the [DataClient API](api/client.rst):
+### Querying — StoreClient
+
+Everything is queryable through the read-only [StoreClient API](api/client.rst):
 
 ```python
-from adapt.api import DataClient
+from adapt.api import StoreClient
 
-client = DataClient(".")  # or any repository path
-df = client.latest("cells_by_scan", radar="KLOT")
+client = StoreClient(".")  # or any store path
+run = client.latest_run("KLOT")
+
+cells = client.cells(run.run_id, "KLOT")            # all tracked cells
+history = client.track_history(run.run_id, cells.iloc[0]["cell_uid"], "KLOT")
+
+# Any module's table, with typed filters
+big = client.table("cell_tracks", "KLOT", run_id=run.run_id,
+                   filters={"max_reflectivity": {"op": "gt", "value": 50.0}})
+
+# Arbitrary read-only SQL over products.db (catalog attached as `catalog`)
+df = client.sql("SELECT COUNT(DISTINCT cell_uid) AS n FROM cells_by_scan", "KLOT")
+
+client.close()
 ```
 
 ---
@@ -176,10 +195,15 @@ df = client.latest("cells_by_scan", radar="KLOT")
 The first scan takes longer (regridding + initial cell detection). Wait
 30–60 seconds then click **Show Latest**.
 
-### `No *_analysis.nc for today`
+### `No Adapt store at ...: registry.db not found`
 
-The pipeline has not produced output yet. Check the **Log** tab in the dashboard
-for errors.
+Run `adapt init` in the directory first (the launch wizard in the dashboard
+does this for you when starting a new pipeline).
+
+### `... uses the obsolete pre-store layout (adapt_registry.db)`
+
+The directory holds output from a pre-store version of Adapt. Move the old
+data aside, run `adapt init`, and reprocess.
 
 ### Basemap not loading
 

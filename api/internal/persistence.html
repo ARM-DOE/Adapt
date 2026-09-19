@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Persistence &#8212; Adapt 0.1.4 documentation</title>
+    <title>Persistence &#8212; Adapt 0.1.5 documentation</title>
   
   
   
@@ -27,18 +27,18 @@
   </noscript>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="../../_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
-<link href="../../_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+  <link href="../../_static/styles/theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
   
   <!-- So that users can add custom icons -->
-  <script defer src="../../_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="../../_static/scripts/fontawesome.js?digest=cb8930eaaf36d9849b67"></script>
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
-<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67" />
 
-    <script src="../../_static/documentation_options.js?v=fd825880"></script>
+    <script src="../../_static/documentation_options.js?v=59fadc99"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'api/internal/persistence';</script>
@@ -117,7 +117,7 @@
   
   
   
-    <p class="title logo__title">Adapt 0.1.4 documentation</p>
+    <p class="title logo__title">Adapt 0.1.5 documentation</p>
   
 </a></div>
     
@@ -146,6 +146,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="../../dashboard_reference.html">
     Adapt Dashboard — Reference
   </a>
@@ -158,13 +165,6 @@
   </a>
 </li>
 
-
-<li class="nav-item ">
-  <a class="nav-link nav-internal" href="../../license.html">
-    License
-  </a>
-</li>
-
             <li class="nav-item dropdown">
                 <button class="btn dropdown-toggle nav-item" type="button"
                 data-bs-toggle="dropdown" aria-expanded="false"
@@ -173,6 +173,13 @@
                 </button>
                 <ul id="pst-nav-more-links" class="dropdown-menu">
                     
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="../../license.html">
+    License
+  </a>
+</li>
+
+
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="../cli.html">
     Command-Line Interface
@@ -189,7 +196,7 @@
 
 <li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="../client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -312,6 +319,13 @@
 
 
 <li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../variable_names.html">
+    Variable Names and the Tracking Field
+  </a>
+</li>
+
+
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="../../dashboard_reference.html">
     Adapt Dashboard — Reference
   </a>
@@ -348,7 +362,7 @@
 
 <li class="nav-item ">
   <a class="nav-link nav-internal" href="../client.html">
-    Repository Client API
+    Store Client API
   </a>
 </li>
 
@@ -485,8 +499,24 @@
                   
   <section id="persistence">
 <h1>Persistence<a class="headerlink" href="#persistence" title="Link to this heading">#</a></h1>
-<p>Two-tier SQLite registry (runs + radars) and per-radar catalog (items +
-progress). Provides read/write access to the output repository.</p>
+<p>The data store: root-level registry plus per-collection catalog, product
+tables, and immutable object store. Created only by <code class="docutils literal notranslate"><span class="pre">adapt</span> <span class="pre">init</span></code>; consumers
+read through <code class="xref py py-class docutils literal notranslate"><span class="pre">StoreClient</span></code>.</p>
+<p id="module-adapt.persistence.errors">Store-level exceptions, shared by every persistence component.</p>
+<dl class="py exception">
+<dt class="sig sig-object py" id="adapt.persistence.errors.AlreadyInitializedError">
+<span class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">adapt.persistence.errors.</span></span><span class="sig-name descname"><span class="pre">AlreadyInitializedError</span></span><a class="headerlink" href="#adapt.persistence.errors.AlreadyInitializedError" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#adapt.persistence.errors.StoreError" title="adapt.persistence.errors.StoreError"><code class="xref py py-class docutils literal notranslate"><span class="pre">StoreError</span></code></a></p>
+<p>The root already contains an initialized store.</p>
+</dd></dl>
+
+<dl class="py exception">
+<dt class="sig sig-object py" id="adapt.persistence.errors.StoreError">
+<span class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">adapt.persistence.errors.</span></span><span class="sig-name descname"><span class="pre">StoreError</span></span><a class="headerlink" href="#adapt.persistence.errors.StoreError" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Exception</span></code></p>
+<p>A store-level operation failed.</p>
+</dd></dl>
+
 </section>
 
 
@@ -529,6 +559,19 @@ progress). Provides read/write access to the output repository.</p>
 
 
   <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.persistence.errors.AlreadyInitializedError"><code class="docutils literal notranslate"><span class="pre">AlreadyInitializedError</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adapt.persistence.errors.StoreError"><code class="docutils literal notranslate"><span class="pre">StoreError</span></code></a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
     <a href="../../_sources/api/internal/persistence.rst.txt">
@@ -550,8 +593,8 @@ progress). Provides read/write access to the output repository.</p>
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script defer src="../../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
-<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="../../_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67"></script>
 
   <footer class="bd-footer">
 <div class="bd-footer__inner bd-page-width">
@@ -585,7 +628,7 @@ progress). Provides read/write access to the output repository.</p>
         <div class="footer-item">
 <p class="theme-version">
   <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
-  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.21.0.
 </p></div>
       
     </div>

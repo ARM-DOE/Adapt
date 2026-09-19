@@ -1,8 +1,10 @@
 Runtime
 =======
 
-Orchestrates the two-thread pipeline (downloader + processor), manages the
-scan queue, and handles graceful shutdown.
+Composes the pipeline over the data store: the acquisition gateway mints scan
+identity at the source boundary, the processor drives the module graph per
+scan, the orchestrator manages run lifecycle in the store registry, and the
+post-processor runs after-the-fact modules into an existing store.
 
 .. automodule:: adapt.runtime.orchestrator
    :members:
@@ -14,7 +16,12 @@ scan queue, and handles graceful shutdown.
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: adapt.runtime.file_tracker
+.. automodule:: adapt.runtime.acquire
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: adapt.runtime.postprocessor
    :members:
    :undoc-members:
    :show-inheritance:

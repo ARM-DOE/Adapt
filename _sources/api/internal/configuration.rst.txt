@@ -25,7 +25,7 @@ immutable runtime config (``InternalConfig``).
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: adapt.configuration.schemas.materialization
+.. automodule:: adapt.configuration.schemas.module_resolver
    :members:
    :undoc-members:
    :show-inheritance:

@@ -20,6 +20,15 @@ class TestInitCommand:
         assert {p.name for p in root.iterdir()} == {"registry.db", "logs", "collections"}
         assert str(root) in capsys.readouterr().out
 
+    def test_init_opens_with_the_attribution_banner(self, tmp_path, monkeypatch, capsys):
+        """`init` is a run-starting command, so it leads with the banner like
+        `run-nexrad` does — before the line reporting the new store."""
+        monkeypatch.setattr("sys.argv", ["adapt", "init", str(tmp_path / "repo")])
+
+        cli.main()
+
+        assert capsys.readouterr().out.startswith("ARM Adapt v")
+
     def test_init_twice_exits_nonzero_with_message(self, tmp_path, monkeypatch, capsys):
         root = tmp_path / "repo"
         monkeypatch.setattr("sys.argv", ["adapt", "init", str(root)])

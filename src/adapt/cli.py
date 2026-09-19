@@ -97,7 +97,11 @@ def _build_init_parser(sub: argparse.ArgumentParser) -> None:
 
 def _init_cmd(args: argparse.Namespace) -> None:
     """Initialize an empty Adapt data store."""
+    from adapt import __version__
     from adapt.persistence.store import StoreError, init_store
+    from adapt.runtime.run_reporter import format_banner
+
+    print(format_banner(__version__) + "\n")
 
     try:
         root = init_store(args.directory)

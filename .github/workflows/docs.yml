@@ -7,6 +7,9 @@ on:
 jobs:
   docs:
     runs-on: ubuntu-latest
+    # Forks carry no release tags, so setuptools_scm cannot resolve a version
+    # here — and a fork has no business publishing to its own gh-pages.
+    if: github.repository == 'ARM-DOE/Adapt'
     permissions:
       contents: write
 

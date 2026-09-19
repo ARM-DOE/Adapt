@@ -488,10 +488,76 @@
 <h1>Contributing<a class="headerlink" href="#contributing" title="Link to this heading">#</a></h1>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Contribution guidelines are coming soon.</p>
 <p>We are not accepting external Pull Requests at this time. Guidelines will be
 published after our first stable release.</p>
+<p>The workflow below is what the Adapt team follows, and what external
+contributions will be expected to follow once they open.</p>
 </div>
+<section id="setup-once">
+<h2>Setup, once<a class="headerlink" href="#setup-once" title="Link to this heading">#</a></h2>
+<p>Fork the repo on GitHub, then clone your fork and point it at the project:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/&lt;you&gt;/Adapt.git<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>Adapt
+git<span class="w"> </span>remote<span class="w"> </span>add<span class="w"> </span>upstream<span class="w"> </span>https://github.com/ARM-DOE/Adapt.git
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">origin</span></code> is now your fork, <code class="docutils literal notranslate"><span class="pre">upstream</span></code> is <code class="docutils literal notranslate"><span class="pre">ARM-DOE/Adapt</span></code>.</p>
+<p>Then install the pre-commit hooks. The repository ships the config; the hooks
+run on every <code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">commit</span></code> and refuse the commit if a check fails.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pre-commit<span class="w"> </span>install
+</pre></div>
+</div>
+</section>
+<section id="per-change">
+<h2>Per change<a class="headerlink" href="#per-change" title="Link to this heading">#</a></h2>
+<ol class="arabic">
+<li><p><strong>Open an issue and discuss it</strong> before you start working.</p></li>
+<li><p><strong>Branch off the current <code class="docutils literal notranslate"><span class="pre">main</span></code>.</strong> Never commit to <code class="docutils literal notranslate"><span class="pre">main</span></code> itself.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>fetch<span class="w"> </span>upstream
+git<span class="w"> </span>switch<span class="w"> </span>-c<span class="w"> </span>fix/short-name<span class="w"> </span>upstream/main
+</pre></div>
+</div>
+</li>
+<li><p><strong>One branch per logical change</strong>, named for it: <code class="docutils literal notranslate"><span class="pre">fix/registry-fd-leak</span></code>,
+<code class="docutils literal notranslate"><span class="pre">feat/segmenter3D</span></code>. Not <code class="docutils literal notranslate"><span class="pre">wip</span></code>, not <code class="docutils literal notranslate"><span class="pre">my-changes</span></code>.</p></li>
+<li><p><strong>Small, focused commits.</strong></p></li>
+<li><p><strong>Run the checks locally before pushing.</strong> Green CI is the contributor’s job,
+not the reviewer’s.</p></li>
+<li><p><strong>Push to your fork and open the PR against <code class="docutils literal notranslate"><span class="pre">upstream/main</span></code>.</strong> Link the issue
+(<code class="docutils literal notranslate"><span class="pre">Closes</span> <span class="pre">#123</span></code>), say what and why, and how you tested it. Open it as a draft
+early if you want direction before investing more.</p></li>
+<li><p><strong>Respond to review with new commits</strong> on the same branch. Don’t force-push
+over commits already reviewed — it destroys the reviewer’s place in the diff.</p></li>
+</ol>
+<p>After it merges, delete your branch and start the next one from step 2 — the
+<code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">fetch</span> <span class="pre">upstream</span></code> there is what keeps you current.</p>
+</section>
+<section id="keeping-current-while-the-pr-is-open">
+<h2>Keeping current while the PR is open<a class="headerlink" href="#keeping-current-while-the-pr-is-open" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>Rebase only while the branch is private and unreviewed.</p></li>
+<li><p>Once it’s pushed and under review, merge <code class="docutils literal notranslate"><span class="pre">upstream/main</span></code> in instead.</p></li>
+</ul>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>fetch<span class="w"> </span>upstream<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>merge<span class="w"> </span>upstream/main
+</pre></div>
+</div>
+</section>
+<section id="the-checks-step-5">
+<h2>The checks (step 5)<a class="headerlink" href="#the-checks-step-5" title="Link to this heading">#</a></h2>
+<p>The pre-commit hooks cover ruff, ruff-format, mypy, import-linter and the
+repository’s own checks, and block the commit when one fails. Run the full set
+against everything before you push:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pre-commit<span class="w"> </span>run<span class="w"> </span>--all-files
+pytest
+</pre></div>
+</div>
+<p>Fix failures — never suppress them. Don’t commit with <code class="docutils literal notranslate"><span class="pre">--no-verify</span></code>: it skips
+the hooks, and CI runs them anyway.</p>
+<p>Integration tests are opt-in and excluded from a bare <code class="docutils literal notranslate"><span class="pre">pytest</span></code>: run them with
+<code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">-m</span> <span class="pre">integration</span></code>.</p>
+<p>Commit titles use the repository’s prefixes — <code class="docutils literal notranslate"><span class="pre">ENH:</span></code>, <code class="docutils literal notranslate"><span class="pre">FIX:</span></code>, <code class="docutils literal notranslate"><span class="pre">TEST:</span></code>,
+<code class="docutils literal notranslate"><span class="pre">REF:</span></code>, <code class="docutils literal notranslate"><span class="pre">DOCS:</span></code>, <code class="docutils literal notranslate"><span class="pre">CLEAN:</span></code> — followed by a short imperative summary.
+Fill in <code class="docutils literal notranslate"><span class="pre">.github/pull_request_template.md</span></code> when you open the PR.</p>
+</section>
 </section>
 
 
@@ -523,6 +589,21 @@ published after our first stable release.</p>
                 <dialog id="pst-secondary-sidebar-modal"></dialog>
                 <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
 
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#setup-once">Setup, once</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#per-change">Per change</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#keeping-current-while-the-pr-is-open">Keeping current while the PR is open</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-checks-step-5">The checks (step 5)</a></li>
+</ul>
+  </nav></div>
 
   <div class="sidebar-secondary-item">
 

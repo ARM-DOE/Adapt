@@ -13,7 +13,7 @@ import sqlite3
 import pandas as pd
 import pytest
 
-from adapt.contracts import SqliteTable
+from adapt.contracts import ProductTableWrite
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.runtime.processor import RadarProcessor
@@ -30,31 +30,30 @@ class _ProbeEnrichModule(BaseModule):
     inputs = ["run_id", "scan_time"]
     outputs = ["enrich_probe_rows"]
     persistence = (
-        SqliteTable(
+        ProductTableWrite(
             key="enrich_probe_rows",
             table="enrich_probe",
-            primary_key=("run_id", "scan_time", "cell_uid"),
-            index_columns=("scan_time", "cell_uid"),
+            primary_key=("run_id", "scan_id", "cell_uid"),
+            index_columns=("cell_uid",),
         ),
     )
 
     def run(self, context: dict) -> dict:
-        return {
-            "enrich_probe_rows": pd.DataFrame(
-                [{"run_id": "R1", "scan_time": "2024-01-01T00:00:00", "cell_uid": "a", "v": 1.0}]
-            )
-        }
+        # Identity columns are stamped by the store writer — never module-supplied.
+        return {"enrich_probe_rows": pd.DataFrame([{"cell_uid": "a", "v": 1.0}])}
 
 
 @pytest.fixture
-def proc_with_enrich(pipeline_config, pipeline_output_dirs, test_repository):
+def proc_with_enrich(pipeline_config, store_env):
     registry.register(_ProbeEnrichModule)
     try:
         proc = RadarProcessor(
             queue.Queue(),
             pipeline_config,
-            pipeline_output_dirs,
-            repository=test_repository,
+            collection=store_env.collection,
+            registry=store_env.registry,
+            run_id=store_env.run_id,
+            history=store_env.history,
         )
         yield proc
     finally:
@@ -85,21 +84,35 @@ class TestEnrichUidGuard:
 
 
 class TestEnrichWrite:
-    def test_enrich_results_routed_to_declared_table(self, proc_with_enrich, test_repository):
-        from adapt.contracts import PersistenceMeta
+    def test_enrich_results_routed_to_declared_table(self, proc_with_enrich, store_env):
+        from datetime import UTC, datetime
 
+        from adapt.contracts import PersistenceMeta
+        from adapt.contracts.persistence import ScanRecord
+
+        store_env.collection.catalog.register_scan(
+            ScanRecord(
+                run_id=store_env.run_id,
+                scan_id="sid-test",
+                scan_time=datetime(2024, 1, 1, tzinfo=UTC),
+                source_file_name="probe",
+            )
+        )
         ext_result = _ProbeEnrichModule().run({})
         meta = PersistenceMeta(
-            scan_time=None,
-            run_id=test_repository.run_id,
+            scan_time=datetime(2024, 1, 1, tzinfo=UTC),
+            scan_id="sid-test",
+            run_id=store_env.run_id,
             source_file="",
-            dataset_id=test_repository.radar,
+            collection_id="TEST_RADAR",
         )
         proc_with_enrich._router.persist(proc_with_enrich._post_modules, ext_result, meta)
 
-        conn = sqlite3.connect(str(test_repository.catalog.db_path))
+        conn = sqlite3.connect(str(store_env.collection.products_path))
         try:
-            rows = conn.execute("SELECT run_id, cell_uid, v FROM enrich_probe").fetchall()
+            rows = conn.execute("SELECT run_id, scan_id, cell_uid, v FROM enrich_probe").fetchall()
         finally:
             conn.close()
-        assert rows == [("R1", "a", 1.0)]
+        # The writer stamped run and scan identity from PersistenceMeta — enrich
+        # modules never supply them.
+        assert rows == [(store_env.run_id, "sid-test", "a", 1.0)]

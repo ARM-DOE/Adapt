@@ -32,6 +32,20 @@ class ReaderConfig(AdaptBaseModel):
     """Radar file reader configuration."""
 
     file_format: Literal["nexrad_archive"] = "nexrad_archive"
+    field_map: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Source-to-canonical variable renames applied once at ingest, "
+            "e.g. {corrected_reflectivity: reflectivity}. Empty = no renames."
+        ),
+    )
+    fields: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Canonical variable names to keep (post-rename). Empty = keep "
+            "every field the source file provides."
+        ),
+    )
 
 
 class DownloaderConfig(AdaptBaseModel):
@@ -64,10 +78,6 @@ class RegridderConfig(AdaptBaseModel):
     roi_func: Literal["dist_beam", "dist"] = "dist_beam"
     min_radius: float = Field(1750.0, gt=0)
     weighting_function: Literal["cressman", "barnes", "nearest"] = "cressman"
-    save_netcdf: bool = True
-    netcdf_save_retries: int = Field(
-        3, ge=1, description="NetCDF write attempts before raising (when save_netcdf is set)"
-    )
 
 
 class SegmenterConfig(AdaptBaseModel):
@@ -105,13 +115,6 @@ class SegmenterConfig(AdaptBaseModel):
     )
 
 
-class VarNamesConfig(AdaptBaseModel):
-    """Variable name mappings."""
-
-    reflectivity: str = "reflectivity"
-    cell_labels: str = "cell_labels"
-
-
 class CoordNamesConfig(AdaptBaseModel):
     """Coordinate name mappings."""
 
@@ -125,7 +128,14 @@ class GlobalConfig(AdaptBaseModel):
     """Global pipeline settings."""
 
     z_level: float = Field(2000.0, description="Analysis altitude in meters")
-    var_names: VarNamesConfig = Field(default_factory=VarNamesConfig)  # type: ignore[arg-type]
+    tracking_field: str = Field(
+        "reflectivity",
+        description=(
+            "Canonical field that drives detection, projection, and "
+            "tracking. Any canonical variable present after ingest "
+            "(see reader.field_map/fields) is valid."
+        ),
+    )
     coord_names: CoordNamesConfig = Field(default_factory=CoordNamesConfig)  # type: ignore[arg-type]
 
     @field_validator("z_level", mode="before")
@@ -218,11 +228,13 @@ class TrackerConfig(AdaptBaseModel):
     """Cell tracking configuration."""
 
     class CellUidConfig(AdaptBaseModel):
-        """Track ID generation configuration."""
+        """Track ID generation configuration.
 
-        time_step_s: int = Field(10, ge=1)
-        latlon_step_deg: float = Field(0.1, gt=0.0)
-        area_step_km2: float = Field(5.0, gt=0.0)
+        v2 uids hash (scan_id, cell_label) — deterministic and
+        collision-free by construction; only the token width/alphabet
+        remain configurable.
+        """
+
         width: int = Field(10, ge=1)
         alphabet: Literal["base36_upper"] = "base36_upper"
 

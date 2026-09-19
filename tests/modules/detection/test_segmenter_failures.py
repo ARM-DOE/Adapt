@@ -4,17 +4,19 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from adapt.contracts import ContractViolation
 from adapt.modules.detection.module import RadarCellSegmenter
 
 pytestmark = pytest.mark.unit
 
 
 def test_missing_reflectivity_var(detection_module_config):
-    """Segmenter fails gracefully when reflectivity variable missing."""
+    """Missing tracking field raises a ContractViolation naming the config
+    keys that control it (not a bare KeyError)."""
     ds = xr.Dataset({"wrong_var": (("y", "x"), np.ones((3, 3)))})
 
     seg = RadarCellSegmenter(detection_module_config)
-    with pytest.raises(KeyError):
+    with pytest.raises(ContractViolation, match="tracking_field"):
         seg.segment(ds)
 
 

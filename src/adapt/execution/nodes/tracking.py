@@ -2,6 +2,7 @@
 # See LICENSE for terms and disclaimer.
 
 from adapt.contracts import (
+    CELL_LABELS_VAR,
     NetcdfArtifact,
     TrackTablesWrite,
     check_cell_events,
@@ -48,7 +49,7 @@ class TrackingModule(BaseModule):
     summary = "link cells across scans"
     required_history = 2
     pipeline_phase = 0
-    inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time"]
+    inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time", "scan_id"]
     outputs = ["tracked_cells", "cell_events", "analysis_ds"]
     input_contracts = {"projected_ds": check_projected_ds}
     output_contracts = {
@@ -80,12 +81,9 @@ class TrackingModule(BaseModule):
         return TrackingConfig(
             split_overlap=cfg.tracker.split_overlap_threshold,
             core_field_threshold=cfg.tracker.core_field_threshold,
-            uid_time_step_s=cfg.tracker.cell_uid.time_step_s,
-            uid_latlon_step_deg=cfg.tracker.cell_uid.latlon_step_deg,
-            uid_area_step_km2=cfg.tracker.cell_uid.area_step_km2,
             uid_width=cfg.tracker.cell_uid.width,
-            field_var=cfg.global_.var_names.reflectivity,
-            labels_var=cfg.global_.var_names.cell_labels,
+            field_var=cfg.global_.tracking_field,
+            labels_var=CELL_LABELS_VAR,
             max_tracking_gap_minutes=cfg.tracker.max_tracking_gap_minutes,
             max_speed_ms=cfg.tracker.max_speed_ms,
             max_speed_multiplier=cfg.tracker.max_speed_multiplier,
@@ -114,6 +112,7 @@ class TrackingModule(BaseModule):
         tracked_cells, cell_events = self._tracker.track(
             ds_projected=ds_2d,
             cell_stats_df=cell_stats,
+            scan_id=context["scan_id"],
         )
 
         analysis_ds = attach_cell_uid_lut(ds_2d, tracked_cells)

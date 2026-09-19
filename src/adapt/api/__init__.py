@@ -1,17 +1,29 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Adapt API layer — read-only access to pipeline outputs."""
+"""Adapt API layer — read-only access to the data store."""
 
-from adapt.api.client import RepositoryClient
-from adapt.api.domain import Run, Scan, ScanBundle, Track
+from adapt.api.domain import (
+    Collection,
+    Run,
+    Scan,
+    ScanBundle,
+    ScanRaster,
+    ScanRef,
+    Track,
+)
 from adapt.api.selection import FilterSpec
+from adapt.api.store_client import StoreClient, TrackGraph
 
 __all__ = [
-    "RepositoryClient",
+    "Collection",
     "FilterSpec",
     "Run",
-    "Track",
     "Scan",
     "ScanBundle",
+    "ScanRaster",
+    "ScanRef",
+    "StoreClient",
+    "Track",
+    "TrackGraph",
 ]

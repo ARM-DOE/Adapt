@@ -15,7 +15,7 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_availability_check_warns_when_radar_explicitly_not_found(caplog, temp_dir):
+def test_availability_check_warns_when_radar_explicitly_not_found(caplog, fake_gateway):
     """Warn when availability check succeeds but radar not found."""
     config = MagicMock()
     config.downloader.radar = "KOHX"
@@ -31,7 +31,7 @@ def test_availability_check_warns_when_radar_explicitly_not_found(caplog, temp_d
 
     downloader = AwsNexradDownloader(
         config=config,
-        output_dir=temp_dir,
+        acquire=fake_gateway,
         conn=fake_conn,
     )
 
@@ -45,7 +45,7 @@ def test_availability_check_warns_when_radar_explicitly_not_found(caplog, temp_d
     assert any("Radar KOHX not found in AWS" in record.message for record in caplog.records)
 
 
-def test_availability_check_does_not_warn_when_check_fails(caplog, temp_dir):
+def test_availability_check_does_not_warn_when_check_fails(caplog, fake_gateway):
     """Do NOT warn when availability check fails (exception or all failures)."""
     config = MagicMock()
     config.downloader.radar = "KOHX"
@@ -61,7 +61,7 @@ def test_availability_check_does_not_warn_when_check_fails(caplog, temp_dir):
 
     downloader = AwsNexradDownloader(
         config=config,
-        output_dir=temp_dir,
+        acquire=fake_gateway,
         conn=fake_conn,
     )
 
@@ -75,7 +75,7 @@ def test_availability_check_does_not_warn_when_check_fails(caplog, temp_dir):
     assert not any("Radar KOHX not found in AWS" in record.message for record in caplog.records)
 
 
-def test_availability_check_does_not_warn_when_radar_found(caplog, temp_dir):
+def test_availability_check_does_not_warn_when_radar_found(caplog, fake_gateway):
     """Do NOT warn when radar is found in availability check."""
     config = MagicMock()
     config.downloader.radar = "KOHX"
@@ -95,7 +95,7 @@ def test_availability_check_does_not_warn_when_radar_found(caplog, temp_dir):
 
     downloader = AwsNexradDownloader(
         config=config,
-        output_dir=temp_dir,
+        acquire=fake_gateway,
         conn=fake_conn,
     )
 

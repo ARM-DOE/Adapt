@@ -6,29 +6,35 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_init_custom_config(make_config, radar_output_dirs):
+def test_init_custom_config(make_config, fake_gateway):
     """Downloader initializes with custom config."""
     from adapt.configuration.schemas.user import UserDownloaderConfig
 
     config = make_config(
         downloader=UserDownloaderConfig(radar="KDIX", latest_files=5, latest_minutes=60)
     )
-    d = AwsNexradDownloader(config, radar_output_dirs["nexrad"])
+    d = AwsNexradDownloader(config, acquire=fake_gateway)
 
     assert d.config.downloader.radar == "KDIX"
     assert d.config.downloader.latest_files == 5
     assert d.config.downloader.latest_minutes == 60
 
 
-def test_stop_sets_event(radar_config, radar_output_dirs):
+def test_init_requires_acquisition_gateway(radar_config):
+    """Constructing without the acquisition gateway fails loudly."""
+    with pytest.raises(ValueError, match="gateway"):
+        AwsNexradDownloader(radar_config)
+
+
+def test_stop_sets_event(radar_config, fake_gateway):
     """Stop event prevents downloader from polling."""
-    d = AwsNexradDownloader(radar_config, radar_output_dirs["nexrad"])
+    d = AwsNexradDownloader(radar_config, acquire=fake_gateway)
     assert not d.stopped()
     d.stop()
     assert d.stopped()
 
 
-def test_historical_mode_from_config(make_config, radar_output_dirs):
+def test_historical_mode_from_config(make_config, fake_gateway):
     """Downloader detects historical mode from config.downloader.mode."""
     from adapt.configuration.schemas.user import UserDownloaderConfig
 
@@ -38,15 +44,15 @@ def test_historical_mode_from_config(make_config, radar_output_dirs):
             end_time="2024-01-01T01:00:00Z",
         )
     )
-    d = AwsNexradDownloader(config, radar_output_dirs["nexrad"])
+    d = AwsNexradDownloader(config, acquire=fake_gateway)
     # Mode is decided by schema, not by is_historical_mode() method
     assert d.config.downloader.mode == "historical"
 
-    d2 = AwsNexradDownloader(make_config(), radar_output_dirs["nexrad"])
+    d2 = AwsNexradDownloader(make_config(), acquire=fake_gateway)
     assert d2.config.downloader.mode == "realtime"
 
 
-def test_parse_time_range(make_config, radar_output_dirs):
+def test_parse_time_range(make_config, fake_gateway):
     """Downloader parses time range correctly."""
     from adapt.configuration.schemas.user import UserDownloaderConfig
 
@@ -56,7 +62,7 @@ def test_parse_time_range(make_config, radar_output_dirs):
             end_time="2024-01-01T01:00:00Z",
         )
     )
-    d = AwsNexradDownloader(config, radar_output_dirs["nexrad"])
+    d = AwsNexradDownloader(config, acquire=fake_gateway)
 
     start, end = d._parse_time_range()
 
@@ -65,62 +71,27 @@ def test_parse_time_range(make_config, radar_output_dirs):
     assert (end - start).total_seconds() == 3600
 
 
-def test_file_exists_rejects_small_files(tmp_path, radar_config, radar_output_dirs):
-    """Downloader rejects files below minimum size."""
-    d = AwsNexradDownloader(radar_config, tmp_path)
+def test_download_scan_rejects_small_files(fake_scan, radar_config, fake_gateway):
+    """Downloaded files below minimum size are discarded (None returned)."""
 
-    p = tmp_path / "tiny"
-    p.write_bytes(b"x")
+    class TinyFileConn:
+        def download(self, scans, target_dir, keep_aws_folders=False):
+            class Result:
+                def __init__(self, path):
+                    self.filepath = path
 
-    assert not d._file_exists(p)
+            results = []
+            for scan in scans:
+                path = target_dir / scan.key
+                path.write_bytes(b"x")  # below min_file_size
+                results.append(Result(path))
 
+            class DownloadResults:
+                def iter_success(self):
+                    return results
 
-def test_file_exists_true(tmp_path, radar_config, radar_output_dirs):
-    """Downloader accepts files above minimum size."""
-    d = AwsNexradDownloader(radar_config, radar_output_dirs["nexrad"])
-    p = tmp_path / "f"
-    p.write_bytes(b"x" * 2048)
-    assert d._file_exists(p)
+            return DownloadResults()
 
+    d = AwsNexradDownloader(radar_config, acquire=fake_gateway, conn=TinyFileConn())
 
-from datetime import datetime  # noqa: E402
-
-
-def test_get_local_path(make_config, radar_output_dirs):
-    """Downloader generates correct local file paths with new structure."""
-
-    class FakeScan:
-        key = "foo/bar/testfile"
-        scan_time = datetime(2024, 1, 1)
-
-    from adapt.configuration.schemas.user import UserDownloaderConfig
-
-    config = make_config(downloader=UserDownloaderConfig(radar="KDIX"))
-    # Use output_dirs for new path structure (RADAR_ID/nexrad/YYYYMMDD/)
-    d = AwsNexradDownloader(config, output_dirs=radar_output_dirs)
-
-    path = d._get_local_path(FakeScan())
-    assert "20240101" in str(path)
-    assert "KDIX" in str(path)
-    assert path.name == "testfile"
-    # New structure: base/KDIX/nexrad/20240101/testfile
-    assert "KDIX/nexrad/20240101" in str(path) or "KDIX\\nexrad\\20240101" in str(path)
-
-
-def test_get_local_path_legacy(make_config, radar_output_dirs):
-    """Downloader generates correct local file paths with legacy output_dir."""
-
-    class FakeScan:
-        key = "foo/bar/testfile"
-        scan_time = datetime(2024, 1, 1)
-
-    from adapt.configuration.schemas.user import UserDownloaderConfig
-
-    config = make_config(downloader=UserDownloaderConfig(radar="KDIX"))
-    # Use legacy output_dir parameter
-    d = AwsNexradDownloader(config, output_dir=radar_output_dirs["nexrad"])
-
-    path = d._get_local_path(FakeScan())
-    assert "20240101" in str(path)
-    assert "KDIX" in str(path)
-    assert path.name == "testfile"
+    assert d._download_scan(fake_scan("tiny")) is None

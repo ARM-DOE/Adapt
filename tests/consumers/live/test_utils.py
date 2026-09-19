@@ -27,11 +27,12 @@ pytestmark = pytest.mark.unit
 def _run(run_id: str, start: datetime | None) -> Run:
     return Run(
         run_id=run_id,
-        radar_id="KHGX",
-        start_time=start,  # type: ignore[arg-type]
-        end_time=None,
+        collection_id="KHGX",
         status="running",
-        mode="realtime",
+        started_at=start,  # type: ignore[arg-type]
+        ended_at=None,
+        config_hash="",
+        pipeline_version="",
     )
 
 
@@ -102,9 +103,9 @@ def test_suppress_osx_stderr_restores_the_stream_it_borrowed():
 
 
 def _repo(path):
-    """A directory carrying the marker that makes it an Adapt repository root."""
+    """A directory carrying the marker that makes it an Adapt store root."""
     path.mkdir(parents=True, exist_ok=True)
-    (path / "adapt_registry.db").touch()
+    (path / "registry.db").touch()
     return path
 
 
@@ -138,3 +139,13 @@ def test_startup_repo_returns_none_with_nothing_to_open(tmp_path):
 def test_a_plain_directory_is_not_a_repository(tmp_path):
     assert is_repository(tmp_path) is False
     assert is_repository(_repo(tmp_path / "repo")) is True
+
+
+def test_legacy_root_is_detected_but_not_a_store(tmp_path):
+    from adapt.consumers.live._utils import is_legacy_repository
+
+    legacy = tmp_path / "old"
+    legacy.mkdir()
+    (legacy / "adapt_registry.db").touch()
+    assert is_repository(legacy) is False
+    assert is_legacy_repository(legacy) is True

@@ -45,7 +45,7 @@ class _FakeTracker:
     def __init__(self, results):
         self._results = list(results)
 
-    def track(self, ds_projected, cell_stats_df):
+    def track(self, ds_projected, cell_stats_df, *, scan_id):
         return self._results.pop(0)
 
 
@@ -57,6 +57,7 @@ def _run_module(module, tracked_per_scan):
             module.run(
                 {
                     "tracking_config": None,
+                    "scan_id": "abc123def4567890",
                     "projected_ds": _projected_ds(),
                     "cell_stats": pd.DataFrame({"cell_label": [1]}),
                 }
@@ -110,6 +111,7 @@ def test_input_projected_ds_not_mutated():
     out = module.run(
         {
             "tracking_config": None,
+            "scan_id": "abc123def4567890",
             "projected_ds": ds,
             "cell_stats": pd.DataFrame({"cell_label": [1]}),
         }

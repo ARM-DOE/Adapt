@@ -23,7 +23,6 @@ class TestRoundTrip:
             "mode": "realtime",
             "threshold": 30.0,
             "max_cellsize_gridpoint": None,
-            "save_netcdf": True,
             "grid_shape": (41, 301, 301),
             "grid_limits": ((0.0, 20000.0), (-150000.0, 150000.0)),
             "radar_variables": ["reflectivity", "velocity"],
@@ -103,3 +102,25 @@ class TestCommentedSequence:
     def test_plain_list_without_dict_desc_stays_inline(self):
         out = dump({"xs": [1, 2, 3]}, {"xs": "numbers"})
         assert "xs: [1, 2, 3]" in out
+
+
+def test_dict_keys_with_yaml_significant_chars_round_trip():
+    # Unquoted keys break YAML when a source field name carries ': ' or '#'
+    # — the same defect class as the double-quoted-Windows-path incident.
+    data = {"m": {"weird: key": "v", "has#hash": "w"}}
+    out = dump(data)
+    assert yaml.safe_load(out) == data
+
+
+def test_empty_dict_round_trips_as_empty_dict():
+    # A bare 'key:' reloads as None and fails pydantic validation downstream.
+    data = {"field_map": {}}
+    out = dump(data)
+    assert yaml.safe_load(out) == {"field_map": {}}
+
+
+def test_list_of_dicts_is_rejected_loudly():
+    # Today the writer silently emits only the dict keys — corrupted output
+    # is worse than no output.
+    with pytest.raises(ValueError, match="list of dicts"):
+        dump({"rows": [{"a": 1}]})

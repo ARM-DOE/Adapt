@@ -24,7 +24,7 @@ def make_cell(
         lat=lat,
         lon=lon,
         area_sqkm=area,
-        reflectivity_max=refl,
+        field_max=refl,
         age_seconds=age,
         growth_rate_sqkm_per_min=growth,
         trajectory=trajectory,
@@ -54,7 +54,7 @@ def make_config(
             },
             "priority": {
                 "weights": {
-                    "reflectivity": w_reflectivity,
+                    "field": w_reflectivity,
                     "area": w_area,
                     "growth_rate": w_growth,
                 }

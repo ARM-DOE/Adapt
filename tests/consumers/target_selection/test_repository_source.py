@@ -1,103 +1,133 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""build_snapshot against a synthetic on-disk repository.
+"""build_snapshot against a synthetic on-disk store.
 
-Extends the shared synthetic repo test-locally (ALTER TABLE + inserts);
-the shared helper itself is never modified.
+The tracking rows are written through the real TrackStore (frozen first-frame
+schema — the projection columns freeze with the first stats frame), and read
+back through the real StoreClient. No hand-copied DDL.
 """
 
-import sqlite3
 from datetime import UTC, datetime
 
+import pandas as pd
 import pytest
 
-from adapt.api.client import RepositoryClient
+from adapt.api.store_client import StoreClient
 from adapt.consumers.target_selection.repository_source import build_snapshot
-from tests.api.synthetic_repo import build_synthetic_repo
+from adapt.persistence.errors import StoreError
+from adapt.persistence.products import SchemaLedger
+from adapt.persistence.store import Store, init_store
+from adapt.persistence.store_registry import RunStart, StoreRegistry
+from adapt.persistence.track_store import TrackStore
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 RUN_ID = "2024JUN01-1200-KDIX"
-RADAR = "KDIX"
-T0 = "2024-06-01T12:00:00Z"
-T1 = "2024-06-01T14:00:00Z"  # 120 min after T0
+COLLECTION = "KDIX"
+T0 = datetime(2024, 6, 1, 12, 0, tzinfo=UTC)
+T1 = datetime(2024, 6, 1, 14, 0, tzinfo=UTC)  # 120 min after T0
 
-# Real catalog schema: forward projections are 1-indexed (index 0 is the
-# registration centroid, stored separately) — projection{k} = k intervals ahead.
-_CBS_INSERT = (
-    "INSERT INTO cells_by_scan (run_id, scan_time, cell_label, cell_uid, "
-    "cell_area_sqkm, cell_centroid_mass_lat, cell_centroid_mass_lon, "
-    "radar_reflectivity_max, age_seconds, "
-    "cell_centroid_projection1_lat, cell_centroid_projection1_lon, "
-    "cell_centroid_projection2_lat, cell_centroid_projection2_lon) "
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
-)
-
-_TRACK_INSERT = (
-    "INSERT INTO cell_tracks (run_id, cell_uid, first_seen_time, last_seen_time, "
-    "n_scans, origin_type, duration_seconds) VALUES (?,?,?,?,?,?,?)"
-)
+_STATS_COLUMNS = [
+    "cell_label",
+    "cell_area_sqkm",
+    "cell_centroid_mass_lat",
+    "cell_centroid_mass_lon",
+    "radar_reflectivity_max",
+    "cell_centroid_projection1_lat",
+    "cell_centroid_projection1_lon",
+    "cell_centroid_projection2_lat",
+    "cell_centroid_projection2_lon",
+]
 
 
-def _extend_catalog(db_path):
-    conn = sqlite3.connect(str(db_path))
-    for k in (1, 2):
-        for ax in ("lat", "lon"):
-            conn.execute(
-                f"ALTER TABLE cells_by_scan ADD COLUMN cell_centroid_projection{k}_{ax} REAL"
-            )
-    # uid_beta: two scans (area 100 -> 160), projections at T1.
-    conn.execute(
-        _CBS_INSERT,
-        (RUN_ID, T0, 2, "uid_beta", 100.0, 35.0, -97.0, 48.1, 0.0, None, None, None, None),
+def _stats(rows) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=_STATS_COLUMNS)
+
+
+def _tracked(pairs) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "cell_label": [label for label, _ in pairs],
+            "cell_uid": [uid for _, uid in pairs],
+            "area": [1.0] * len(pairs),
+            "max_reflectivity": [40.0] * len(pairs),
+        }
     )
-    conn.execute(
-        _CBS_INSERT,
-        (RUN_ID, T1, 2, "uid_beta", 160.0, 35.05, -97.0, 55.0, 7200.0, 35.1, -97.0, 35.2, -97.0),
+
+
+def _build_store(tmp_path):
+    root = init_store(tmp_path / "store")
+    store = Store.open(root)
+    collection = store.collection(COLLECTION)
+    registry = StoreRegistry.get_instance(root)
+    registry.register_collection(COLLECTION, source_kind="nexrad")
+    registry.begin_run(
+        RunStart(
+            run_id=RUN_ID,
+            collection_id=COLLECTION,
+            config_hash="h",
+            config_json='{"global_": {"tracking_field": "reflectivity"}}',
+            pipeline_version="0",
+            environment_json="{}",
+        )
     )
-    # uid_gamma: first seen at T1, no projections.
-    conn.execute(
-        _CBS_INSERT,
-        (RUN_ID, T1, 3, "uid_gamma", 50.0, 34.9, -97.2, 30.0, 0.0, None, None, None, None),
+    ledger = SchemaLedger(collection.products_path, collection.catalog)
+    no_adjacency = pd.DataFrame(
+        columns=["cell_label_a", "cell_label_b", "touching_boundary_pixels"]
     )
-    conn.execute(_TRACK_INSERT, (RUN_ID, "uid_gamma", T1, T1, 1, "INITIATION", 0.0))
-    # uid_delta: seen only at T0, WITH projections — at T0 the run has a single
-    # scan time, so lead times are underivable (the first-scan realtime case).
-    conn.execute(
-        _CBS_INSERT,
-        (RUN_ID, T0, 4, "uid_delta", 60.0, 35.2, -97.1, 40.0, 0.0, 35.25, -97.1, 35.3, -97.1),
-    )
-    conn.execute(_TRACK_INSERT, (RUN_ID, "uid_delta", T0, T0, 1, "INITIATION", 0.0))
-    conn.commit()
-    conn.close()
+
+    with TrackStore(collection.products_path, ledger=ledger) as ts:
+        # T0: alpha (no projections), beta (area 100), delta (projections, only scan)
+        ts.write_scan(
+            run_id=RUN_ID,
+            scan_time=T0,
+            cell_stats_df=_stats(
+                [
+                    (1, 30.0, 34.8, -97.3, 42.0, None, None, None, None),
+                    (2, 100.0, 35.0, -97.0, 48.1, None, None, None, None),
+                    (4, 60.0, 35.2, -97.1, 40.0, 35.25, -97.1, 35.3, -97.1),
+                ]
+            ),
+            tracked_cells_df=_tracked([(1, "uid_alpha"), (2, "uid_beta"), (4, "uid_delta")]),
+            cell_events_df=pd.DataFrame(),
+            cell_adjacency_df=no_adjacency,
+            scan_id="sid-t0",
+        )
+        # T1: beta grew to 160 with projections; gamma is new, no projections.
+        ts.write_scan(
+            run_id=RUN_ID,
+            scan_time=T1,
+            cell_stats_df=_stats(
+                [
+                    (2, 160.0, 35.05, -97.0, 55.0, 35.1, -97.0, 35.2, -97.0),
+                    (3, 50.0, 34.9, -97.2, 30.0, None, None, None, None),
+                ]
+            ),
+            tracked_cells_df=_tracked([(2, "uid_beta"), (3, "uid_gamma")]),
+            cell_events_df=pd.DataFrame(),
+            cell_adjacency_df=no_adjacency,
+            scan_id="sid-t1",
+        )
+    store.close()
+    return root
 
 
 @pytest.fixture
-def make_client():
-    """Build RepositoryClients and release every one at teardown.
-
-    A client holds catalog connections open; left unclosed they pin the
-    repository files, which on Windows blocks tmp_path cleanup.
-    """
-    clients = []
-
-    def _make(root):
-        client = RepositoryClient(root)
-        clients.append(client)
-        return client
-
-    yield _make
-    for client in clients:
-        client.close()
+def store_root(tmp_path):
+    return _build_store(tmp_path)
 
 
 @pytest.fixture
-def snapshot(tmp_path, make_client):
-    root = build_synthetic_repo(tmp_path)
-    _extend_catalog(root / RADAR / "catalog.db")
-    client = make_client(root)
-    return build_snapshot(client, RUN_ID, RADAR, growth_window_scans=4)
+def client(store_root):
+    c = StoreClient(store_root)
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def snapshot(client):
+    return build_snapshot(client, RUN_ID, COLLECTION, growth_window_scans=4)
 
 
 def _cell(snapshot, uid):
@@ -105,8 +135,8 @@ def _cell(snapshot, uid):
 
 
 def test_latest_scan_only(snapshot):
-    assert snapshot.scan_time == datetime(2024, 6, 1, 14, 0, tzinfo=UTC)
-    # uid_alpha exists only at T0 and must not appear.
+    assert snapshot.scan_time == T1
+    # uid_alpha and uid_delta exist only at T0 and must not appear.
     assert {c.uid for c in snapshot.cells} == {"uid_beta", "uid_gamma"}
 
 
@@ -122,7 +152,7 @@ def test_trajectory_lead_seconds(snapshot):
 
 
 def test_values_include_track_columns(snapshot):
-    assert _cell(snapshot, "uid_beta").values["n_scans"] == 6
+    assert _cell(snapshot, "uid_beta").values["n_scans"] == 2
 
 
 def test_null_projections_empty_trajectory(snapshot):
@@ -133,57 +163,37 @@ def test_single_scan_growth_zero(snapshot):
     assert _cell(snapshot, "uid_gamma").growth_rate_sqkm_per_min == 0.0
 
 
-def test_no_rows_raises(tmp_path, make_client):
-    root = build_synthetic_repo(tmp_path)
-    client = make_client(root)
-    with pytest.raises(ValueError, match="bogus"):
-        build_snapshot(client, "bogus", RADAR, growth_window_scans=4)
+def test_no_rows_raises(client):
+    # Unknown runs now fail at the provenance lookup (StoreError), before
+    # any cells read — still loud, still names the run.
+    with pytest.raises(StoreError, match="bogus"):
+        build_snapshot(client, "bogus", COLLECTION, growth_window_scans=4)
 
 
-def test_at_replays_earlier_scan(tmp_path, make_client):
-    root = build_synthetic_repo(tmp_path)
-    _extend_catalog(root / RADAR / "catalog.db")
-    client = make_client(root)
-    snap = build_snapshot(
-        client,
-        RUN_ID,
-        RADAR,
-        growth_window_scans=4,
-        at=datetime(2024, 6, 1, 12, 0, tzinfo=UTC),
-    )
-    assert snap.scan_time == datetime(2024, 6, 1, 12, 0, tzinfo=UTC)
-    # uid_gamma does not exist yet at T0; uid_alpha does.
+def test_at_replays_earlier_scan(client):
+    snap = build_snapshot(client, RUN_ID, COLLECTION, growth_window_scans=4, at=T0)
+
+    assert snap.scan_time == T0
+    # uid_gamma does not exist yet at T0; alpha and delta do.
     assert {c.uid for c in snap.cells} == {"uid_alpha", "uid_beta", "uid_delta"}
     beta = _cell(snap, "uid_beta")
     assert beta.growth_rate_sqkm_per_min == 0.0  # single scan of history at T0
     assert beta.trajectory == ()
 
 
-def test_first_scan_projections_have_no_lead_times(tmp_path, make_client):
+def test_first_scan_projections_have_no_lead_times(client):
     # At the first scan of a run, projections exist but no scan cadence does:
     # the trajectory is empty (defined condition), not an error.
-    root = build_synthetic_repo(tmp_path)
-    _extend_catalog(root / RADAR / "catalog.db")
-    client = make_client(root)
-    snap = build_snapshot(
-        client,
-        RUN_ID,
-        RADAR,
-        growth_window_scans=4,
-        at=datetime(2024, 6, 1, 12, 0, tzinfo=UTC),
-    )
+    snap = build_snapshot(client, RUN_ID, COLLECTION, growth_window_scans=4, at=T0)
     assert _cell(snap, "uid_delta").trajectory == ()
 
 
-def test_at_before_first_scan_raises(tmp_path, make_client):
-    root = build_synthetic_repo(tmp_path)
-    _extend_catalog(root / RADAR / "catalog.db")
-    client = make_client(root)
-    with pytest.raises(ValueError, match="2024-05-01"):
+def test_at_before_first_scan_raises(client):
+    with pytest.raises(ValueError, match="No scans at or before"):
         build_snapshot(
             client,
             RUN_ID,
-            RADAR,
+            COLLECTION,
             growth_window_scans=4,
-            at=datetime(2024, 5, 1, 0, 0, tzinfo=UTC),
+            at=datetime(2024, 6, 1, 11, 0, tzinfo=UTC),
         )

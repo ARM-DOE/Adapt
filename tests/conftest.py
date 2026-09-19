@@ -17,7 +17,7 @@ from adapt.execution.nodes.detection import DetectModule
 from adapt.execution.nodes.ingest import LoadModule
 from adapt.execution.nodes.projection import ProjectionModule
 from adapt.execution.nodes.tracking import TrackingModule
-from adapt.persistence.registry import RepositoryRegistry
+from adapt.persistence.store_registry import StoreRegistry
 
 # =============================================================================
 # Resource isolation
@@ -28,14 +28,14 @@ from adapt.persistence.registry import RepositoryRegistry
 def _reset_repository_registry():
     """Release the process-global registry cache after every test.
 
-    ``RepositoryRegistry.get_instance`` caches one WAL connection per repository
-    root for the process lifetime. Each test uses a fresh root, so without this
-    reset the cache accumulates open descriptors across the suite and exhausts a
-    low ``ulimit -n`` (macOS default 256). Closing per test keeps descriptors
-    flat and isolates registry state between tests.
+    ``StoreRegistry.get_instance`` caches one WAL connection per store root for
+    the process lifetime. Each test uses a fresh root, so without this reset
+    the cache accumulates open descriptors across the suite and exhausts a low
+    ``ulimit -n`` (macOS default 256). Closing per test keeps descriptors flat
+    and isolates registry state between tests.
     """
     yield
-    RepositoryRegistry.close_all()
+    StoreRegistry.close_all()
 
 
 # =============================================================================
@@ -198,25 +198,3 @@ def make_ingest_config(make_config):
         return LoadModule.build_config(make_config(**kw))
 
     return _make
-
-
-@pytest.fixture
-def output_dirs(temp_dir):
-    """Standard Adapt output directory structure.
-
-    Returns dict with keys: nexrad, gridnc, analysis, plots, logs
-    All directories are created and cleaned up automatically.
-    """
-    dirs = {
-        "nexrad": temp_dir / "nexrad",
-        "gridded": temp_dir / "gridded",
-        "gridnc": temp_dir / "gridnc",  # Alias for gridded
-        "analysis": temp_dir / "analysis",
-        "plots": temp_dir / "plots",
-        "logs": temp_dir / "logs",
-    }
-
-    for d in dirs.values():
-        d.mkdir(parents=True, exist_ok=True)
-
-    return dirs

@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from adapt.contracts import stat_column
 from adapt.modules.tracking.events import (
     build_cell_events_dataframe,
     event_continue,
@@ -51,7 +52,7 @@ from adapt.modules.tracking.events import (
 from adapt.modules.tracking.graph import TrackingGraph
 from adapt.modules.tracking.identity import (
     _cell_uid_from_signature,
-    _track_signature_from_birth,
+    track_signature_v2,
 )
 from adapt.modules.tracking.matching.assignment import AssignmentGraph, ConstraintPropagator
 from adapt.modules.tracking.matching.candidate import CandidateGenerator
@@ -87,7 +88,7 @@ __all__ = [
     "CellTracker",
     "TrackingGraph",
     "_cell_uid_from_signature",
-    "_track_signature_from_birth",
+    "track_signature_v2",
 ]
 
 logger = logging.getLogger(__name__)
@@ -128,9 +129,6 @@ class CellTracker:
         self.core_threshold = config.core_field_threshold
         self.field_var = config.field_var  # generic field; not assumed to be reflectivity
         self.labels_var = config.labels_var
-        self.uid_time_step_s = config.uid_time_step_s
-        self.uid_latlon_step_deg = config.uid_latlon_step_deg
-        self.uid_area_step_km2 = config.uid_area_step_km2
         self.uid_width = config.uid_width
 
         self.buffer_km = config.projected_hull_buffer_km
@@ -170,13 +168,21 @@ class CellTracker:
         self,
         ds_projected: xr.Dataset,
         cell_stats_df: pd.DataFrame,
+        *,
+        scan_id: str,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Process one scan.
+
+        ``scan_id`` (sha256 of the raw scan bytes) is the birth-identity
+        input for cell uids minted in this scan.
 
         Returns scan-local outputs:
         - tracked_cells_df: one row per cell observation in this scan
         - cell_events_df: explicit lineage/events (continue/split/merge/initiation/termination)
         """
+        if not scan_id:
+            raise ValueError("CellTracker.track: scan_id is required")
+        self._scan_id = str(scan_id)
         current_time = normalize_time_scalar(ds_projected.time.values)
         cells_current = self._extract_cells_from_analyzer(ds_projected, cell_stats_df)
 
@@ -287,18 +293,31 @@ class CellTracker:
         labels = ds[self.labels_var].values
         field = ds[self.field_var].values
 
+        # Stats for the CONFIGURED field, via the one authoritative minting
+        # convention. Guarded for the zero-cell case: the analyzer's empty
+        # structural stub carries no stat columns, and this runs every scan.
+        mean_col = stat_column(self.field_var, "mean")
+        max_col = stat_column(self.field_var, "max")
+        if not cell_stats_df.empty and (
+            mean_col not in cell_stats_df.columns or max_col not in cell_stats_df.columns
+        ):
+            raise ValueError(
+                f"Tracking: cell_stats is missing {mean_col!r}/{max_col!r} for "
+                f"the configured tracking field {self.field_var!r}. The analyzer "
+                "whitelist (analyzer.radar_variables) must include it."
+            )
+
         cell_props_map: dict[int, dict] = {}
         for _, row in cell_stats_df.iterrows():
             lbl = int(row["cell_label"])
             cell_props_map[lbl] = {
                 "area": float(row["cell_area_sqkm"]),
-                "mean_reflectivity": float(row["radar_reflectivity_mean"]),
-                "max_reflectivity": float(row["radar_reflectivity_max"]),
+                # role keys: "…reflectivity" = the tracked field, whatever it is
+                "mean_reflectivity": float(row[mean_col]),
+                "max_reflectivity": float(row[max_col]),
                 "time_volume_start": row["time_volume_start"],
                 "centroid_mass_lat": float(row["cell_centroid_mass_lat"]),
                 "centroid_mass_lon": float(row["cell_centroid_mass_lon"]),
-                "max_zdr": float(row["radar_differential_reflectivity_max"]),
-                "area_40dbz_km2": float(row["area_40dbz_km2"]),
             }
 
         x_coords = np.asarray(ds.x.values, dtype=float)
@@ -333,27 +352,12 @@ class CellTracker:
                     "time_volume_start": props["time_volume_start"],
                     "centroid_mass_lat": props["centroid_mass_lat"],
                     "centroid_mass_lon": props["centroid_mass_lon"],
-                    "max_zdr": props["max_zdr"],
-                    "area_40dbz_km2": props["area_40dbz_km2"],
                 }
             )
         return cells
 
     def _new_cell_identity(self, cell: dict) -> tuple[str, str]:
-        max_zdr = float(cell["max_zdr"])
-        if max_zdr < 0:
-            max_zdr = 0.0
-        signature = _track_signature_from_birth(
-            scan_start_time_epoch_s=self._to_epoch_seconds(cell["time_volume_start"]),
-            centroid_lat_deg=float(cell["centroid_mass_lat"]),
-            centroid_lon_deg=float(cell["centroid_mass_lon"]),
-            max_dbz=float(cell["max_reflectivity"]),
-            max_zdr=max_zdr,
-            area40_km2=float(cell["area_40dbz_km2"]),
-            time_step_s=self.uid_time_step_s,
-            latlon_step_deg=self.uid_latlon_step_deg,
-            area_step_km2=self.uid_area_step_km2,
-        )
+        signature = track_signature_v2(self._scan_id, cell["cell_id"])
         cell_uid = _cell_uid_from_signature(signature, width=self.uid_width)
         return cell_uid, signature
 

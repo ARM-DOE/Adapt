@@ -9,7 +9,6 @@ processor queue. AwsNexradDownloader (download) and LocalDirectorySource
 """
 
 import queue
-from pathlib import Path
 
 import pytest
 
@@ -66,7 +65,7 @@ class TestSourceRegistry:
 
 
 class TestLocalDirectorySource:
-    def test_queues_files_in_chronological_order(self, tmp_path):
+    def test_queues_files_in_chronological_order(self, tmp_path, store_env):
         from adapt.runtime.sources import LocalDirectorySource
 
         src_dir = tmp_path / "incoming"
@@ -77,17 +76,18 @@ class TestLocalDirectorySource:
 
         cfg = _config(tmp_path, source="local_directory", source_dir=str(src_dir))
         q: queue.Queue = queue.Queue()
-        src = LocalDirectorySource(
-            config=cfg, output_dirs={"base": str(tmp_path)}, result_queue=q, file_tracker=None
-        )
+        src = LocalDirectorySource(config=cfg, result_queue=q, acquire=store_env.acquirer)
         src.run()
 
         queued = []
         while not q.empty():
-            item = q.get()
-            queued.append(item["path"] if isinstance(item, dict) else item)
+            queued.append(q.get())
 
-        assert [Path(p).name for p in queued] == [
+        names = [
+            store_env.collection.catalog.get_artifact(m["artifact_id"])["original_filename"]
+            for m in queued
+        ]
+        assert names == [
             "KLOT20240101_120000_V06",
             "KLOT20240101_120500_V06",
         ]
@@ -99,6 +99,4 @@ class TestLocalDirectorySource:
 
         cfg = _config(tmp_path, source="local_directory")  # source_dir is None
         with pytest.raises(ValueError, match="source_dir"):
-            LocalDirectorySource(
-                config=cfg, output_dirs={"base": str(tmp_path)}, result_queue=queue.Queue()
-            )
+            LocalDirectorySource(config=cfg, result_queue=queue.Queue(), acquire=object())

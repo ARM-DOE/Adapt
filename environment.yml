@@ -12,7 +12,6 @@ dependencies:
   - matplotlib
   - cartopy>=0.21
   - netCDF4
-  - tqdm
   - h5py
   - proj
   - hdf5
@@ -26,8 +25,7 @@ dependencies:
   - networkx
   - pyproj
   - contextily
-  - pyarrow
-  - duckdb
+  - cmweather
   - boto3
   - pydata-sphinx-theme
   - pydantic

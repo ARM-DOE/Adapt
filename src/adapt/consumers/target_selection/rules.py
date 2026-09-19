@@ -60,9 +60,25 @@ def is_candidate(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
 
 
 def priority_score(cell: CellSnapshot, weights: PriorityWeights) -> float:
-    """Priority rule: weighted sum of reflectivity, area, growth rate."""
+    """Priority rule: weighted sum of tracked-field max, area, growth rate.
+
+    NaN components must never rank: 0 * NaN is still NaN, and a NaN score
+    makes ``select_best`` pick an arbitrary cell silently.
+    """
+    components = {
+        "field_max": cell.field_max,
+        "area_sqkm": cell.area_sqkm,
+        "growth_rate_sqkm_per_min": cell.growth_rate_sqkm_per_min,
+    }
+    bad = [name for name, value in components.items() if math.isnan(value)]
+    if bad:
+        raise ValueError(
+            f"priority_score: cell {cell.uid!r} has NaN {', '.join(bad)} — "
+            "refusing to rank on undefined values (check that the run "
+            "produced these statistics)"
+        )
     return (
-        weights.reflectivity * cell.reflectivity_max
+        weights.field * cell.field_max
         + weights.area * cell.area_sqkm
         + weights.growth_rate * cell.growth_rate_sqkm_per_min
     )

@@ -328,3 +328,25 @@ class TestCheckTimeNormalized:
         # Both should pass without raising
         assert_time_normalized(ds)
         check_time_normalized(ds)
+
+
+class TestGridContractIsStructural:
+    def test_grid_2d_contract_accepts_any_field_name(self):
+        # The bound contract is structural (x/y + non-empty): WHICH field
+        # must exist depends on config (global_.tracking_field) and is
+        # validated at the detection module boundary, not here.
+        ds = xr.Dataset(
+            {"pressure": (("y", "x"), np.zeros((4, 4)))},
+            coords={"y": np.arange(4.0), "x": np.arange(4.0)},
+        )
+        check_grid_ds_2d(ds)  # must NOT raise
+
+    def test_grid_2d_contract_still_requires_coords(self):
+        ds = xr.Dataset({"pressure": (("a", "b"), np.zeros((4, 4)))})
+        with pytest.raises(ContractViolation):
+            check_grid_ds_2d(ds)
+
+    def test_grid_2d_contract_rejects_empty_dataset(self):
+        ds = xr.Dataset(coords={"y": np.arange(4.0), "x": np.arange(4.0)})
+        with pytest.raises(ContractViolation):
+            check_grid_ds_2d(ds)

@@ -281,9 +281,7 @@ class CellVolumeStatsAlgorithm:
             da = da.isel({d: 0 for d in extra})
         return da.transpose(c.z_coord, c.y_coord, c.x_coord).values
 
-    def compute_cell(
-        self, grid_ds, cell_labels_2d, cell_label, run_id, scan_time, cell_uid
-    ) -> dict:
+    def compute_cell(self, grid_ds, cell_labels_2d, cell_label, cell_uid) -> dict:
         c = self._c
         mask_2d = np.asarray(cell_labels_2d) == cell_label
         npixels = int(mask_2d.sum())
@@ -293,8 +291,6 @@ class CellVolumeStatsAlgorithm:
         dy_m = float(np.diff(grid_ds.coords[c.y_coord].values).mean())
 
         row = {
-            "run_id": run_id,
-            "scan_time": scan_time,
             "cell_uid": cell_uid,
             "cell_label": int(cell_label),
         }

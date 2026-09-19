@@ -4,7 +4,6 @@
 """Time-series axis helpers for the dashboard — no Tk, no self references."""
 
 import matplotlib.dates as mdates
-import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 
@@ -119,21 +118,4 @@ def draw_scan_marker(axes, cur_t) -> None:
             linestyle="-",
             alpha=0.7,
             zorder=8,
-        )
-
-
-def make_style_legend(ax, group: dict) -> None:
-    """Add a line-style legend (dark gray) for the variable lines in an axis group."""
-    style_handles = [
-        mlines.Line2D([], [], color="#555555", linestyle=sty, linewidth=1.2, label=lbl)
-        for sty, lbl in zip(group.get("styles", []), group.get("labels", []), strict=False)
-    ]
-    if style_handles:
-        ax.legend(
-            handles=style_handles,
-            loc="lower right",
-            fontsize=6,
-            framealpha=0.6,
-            handlelength=1.5,
-            labelcolor="#444444",
         )

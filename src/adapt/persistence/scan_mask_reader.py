@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Read cell-mask geometry from the analysis NetCDFs of a repository.
+"""Read cell-mask geometry from the analysis NetCDFs of a collection's run.
 
 Post-process modules cannot import persistence (architectural boundary), so the
 PostProcessor reads the masks here and injects them. ``read_minute_masks``
@@ -16,13 +16,14 @@ modules never decide which geometry represents a cell at a given time.
 import logging
 
 import pandas as pd
+import xarray as xr
 
-from adapt.persistence.repository import DataRepository, ProductType
+from adapt.persistence.store import Collection
 
 logger = logging.getLogger(__name__)
 
 
-def read_minute_masks(repository: DataRepository) -> list[dict]:
+def read_minute_masks(collection: Collection, run_id: str) -> list[dict]:
     """Return one mask record per whole minute covered by the run, ascending.
 
     Each record: ``{minute_time, cell_labels, x, y, cell_uid_lut,
@@ -34,15 +35,17 @@ def read_minute_masks(repository: DataRepository) -> list[dict]:
     minutes. Raises if an analysis file lacks the ``cell_uid`` lookup.
     """
     by_minute: dict[pd.Timestamp, dict] = {}
-    for artifact in repository.query(product_type=ProductType.ANALYSIS_NC):
-        ds = repository.open_dataset(artifact["artifact_id"])
+    for artifact in collection.catalog.list_artifacts(
+        run_id=run_id, artifact_type="segmentation2d"
+    ):
+        ds = xr.open_dataset(collection.objects_dir / artifact["object_name"])
         try:
             if "cell_uid" not in ds:
                 raise ValueError(
                     f"Analysis artifact {artifact['artifact_id']} has no 'cell_uid' "
                     "lookup; cannot attribute observations without it."
                 )
-            scan_time = pd.Timestamp(artifact["scan_time"]).tz_localize(None)
+            scan_time = pd.Timestamp(artifact["observation_time"]).tz_localize(None)
             x = ds["x"].values
             y = ds["y"].values
 
@@ -91,7 +94,7 @@ def read_minute_masks(repository: DataRepository) -> list[dict]:
     return [by_minute[m] for m in sorted(by_minute)]
 
 
-def read_projection_minute_masks(repository: DataRepository) -> list[dict]:
+def read_projection_minute_masks(collection: Collection, run_id: str) -> list[dict]:
     """Return one forward-projection mask record per future minute, ascending.
 
     Each record: ``{minute_time, cell_labels, x, y, cell_uid_lut,
@@ -104,8 +107,10 @@ def read_projection_minute_masks(repository: DataRepository) -> list[dict]:
     ``projection_minutes`` but lacks the ``cell_uid`` lookup.
     """
     by_minute: dict[pd.Timestamp, dict] = {}
-    for artifact in repository.query(product_type=ProductType.ANALYSIS_NC):
-        ds = repository.open_dataset(artifact["artifact_id"])
+    for artifact in collection.catalog.list_artifacts(
+        run_id=run_id, artifact_type="segmentation2d"
+    ):
+        ds = xr.open_dataset(collection.objects_dir / artifact["object_name"])
         try:
             if "projection_minutes" not in ds:
                 continue

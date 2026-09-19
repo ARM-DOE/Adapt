@@ -35,9 +35,7 @@ class TestBaseModulePersistence:
     def test_persisting_modules_declare_specs(self):
         from adapt.contracts import (
             NetcdfArtifact,
-            ParquetArtifact,
-            RegisterFileArtifact,
-            SqliteTable,
+            ProductTableWrite,
             TrackTablesWrite,
         )
         from adapt.execution.nodes.analysis import AnalysisModule
@@ -45,7 +43,12 @@ class TestBaseModulePersistence:
         from adapt.execution.nodes.ingest import LoadModule
         from adapt.execution.nodes.tracking import TrackingModule
 
-        assert {type(s) for s in LoadModule.persistence} == {RegisterFileArtifact}
-        assert {type(s) for s in AnalysisModule.persistence} == {ParquetArtifact}
+        assert {type(s) for s in LoadModule.persistence} == {NetcdfArtifact}
+        assert {type(s) for s in AnalysisModule.persistence} == {ProductTableWrite}
+        stats, adjacency = AnalysisModule.persistence
+        assert stats.table == "cell_stats"
+        assert stats.primary_key == ("run_id", "scan_id", "cell_label")
+        assert adjacency.table == "cell_adjacency"
+        assert adjacency.primary_key == ("run_id", "scan_id", "cell_label_a", "cell_label_b")
         assert {type(s) for s in TrackingModule.persistence} == {NetcdfArtifact, TrackTablesWrite}
-        assert {type(s) for s in CellVolumeStatsModule.persistence} == {SqliteTable}
+        assert {type(s) for s in CellVolumeStatsModule.persistence} == {ProductTableWrite}

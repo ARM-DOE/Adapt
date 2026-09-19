@@ -23,7 +23,7 @@ def _cell(uid: str = "a") -> CellSnapshot:
         lat=35.0,
         lon=-97.0,
         area_sqkm=100.0,
-        reflectivity_max=50.0,
+        field_max=50.0,
         age_seconds=600.0,
         growth_rate_sqkm_per_min=0.5,
         trajectory=(TrajectoryPoint(lat=35.1, lon=-97.0, lead_seconds=300.0),),

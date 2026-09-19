@@ -7,8 +7,7 @@ Synthetic inputs, analytically known outputs — no Tk, no repository, no
 stored fixtures. Matplotlib runs on the Agg backend (no display).
 """
 
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import UTC, datetime
 
 import matplotlib
 import numpy as np
@@ -19,13 +18,10 @@ import xarray as xr
 from adapt.consumers.live._targeting import (
     build_tse_config,
     discover_numeric_columns,
-    draw_reflectivity_backdrop,
+    draw_field_backdrop,
     draw_target_overlay,
     draw_tse_map,
-    filter_nc_paths_by_run,
-    find_nc_for_scan,
     format_rationale,
-    nc_index_by_scan,
 )
 from adapt.consumers.target_selection import (
     CellSnapshot,
@@ -107,41 +103,9 @@ def test_build_config_no_rules_gives_empty_gates():
     assert cfg.candidate.gates == ()
 
 
-# ── nc_index_by_scan ────────────────────────────────────────────────────────
-
-
-# Real pipeline filenames: RADAR<YYYYMMDD>_<HHMMSS>_V06_<run_id>_analysis.nc
-_P1 = Path("/repo/KLOT/analysis/20260705/KLOT20260705_182600_V06_2026JUL04-1454-KLOT_analysis.nc")
-_P2 = Path("/repo/KLOT/analysis/20260705/KLOT20260705_183130_V06_2026JUL04-1454-KLOT_analysis.nc")
-_P_OLD = Path(
-    "/repo/KLOT/analysis/20260703/KLOT20260703_040116_V06_2026JUL02-2319-KLOT_analysis.nc"
-)
-
-
-def test_nc_index_parses_timestamps():
-    index = nc_index_by_scan([_P1, _P2])
-    assert set(index) == {
-        datetime(2026, 7, 5, 18, 26, 0, tzinfo=UTC),
-        datetime(2026, 7, 5, 18, 31, 30, tzinfo=UTC),
-    }
-    assert index[datetime(2026, 7, 5, 18, 26, 0, tzinfo=UTC)] == _P1
-
-
-def test_nc_index_ignores_unparseable():
-    assert nc_index_by_scan([Path("/repo/KLOT/analysis/notes.nc")]) == {}
-
-
-def test_filter_nc_paths_by_run():
-    kept = filter_nc_paths_by_run([_P1, _P2, _P_OLD], "2026JUL04-1454-KLOT")
-    assert kept == [_P1, _P2]
-
-
-def test_filter_nc_paths_by_run_none_keeps_all():
-    paths = [_P1, _P_OLD]
-    assert filter_nc_paths_by_run(paths, None) == paths
-
-
 # ── drawing helpers (Agg; assert artists, not pixels) ───────────────────────
+
+_T26 = datetime(2026, 7, 5, 18, 26, 0, tzinfo=UTC)
 
 
 def _grid():
@@ -173,7 +137,7 @@ def _cell(uid, *, mass=(50, 50), proj=None, area=30.0, refl=50.0, growth=0.0):
         lat=41.0,
         lon=-88.0,
         area_sqkm=area,
-        reflectivity_max=refl,
+        field_max=refl,
         age_seconds=600.0,
         growth_rate_sqkm_per_min=growth,
         trajectory=(),
@@ -195,7 +159,7 @@ def _selection(uid, reason=SelectionReason.NEW_TARGET, score=100.0):
 
 def test_backdrop_adds_a_mesh():
     fig, ax = plt.subplots()
-    draw_reflectivity_backdrop(ax, _ds(), "reflectivity", alpha=0.8)
+    draw_field_backdrop(ax, _ds(), "reflectivity", alpha=0.8)
     assert len(ax.collections) >= 1
     plt.close(fig)
 
@@ -256,33 +220,14 @@ def test_overlay_has_three_entry_legend():
     plt.close(fig)
 
 
-# ── find_nc_for_scan ────────────────────────────────────────────────────────
-
-_T26 = datetime(2026, 7, 5, 18, 26, 0, tzinfo=UTC)
-_T31 = datetime(2026, 7, 5, 18, 31, 30, tzinfo=UTC)
-
-
-def test_find_nc_for_scan_picks_nearest_within_tolerance():
-    index = {_T26: _P1, _T31: _P2}
-    assert find_nc_for_scan(index, _T26 + timedelta(seconds=30)) == _P1
-    assert find_nc_for_scan(index, _T31 - timedelta(seconds=60)) == _P2
-
-
-def test_find_nc_for_scan_none_beyond_tolerance():
-    index = {_T26: _P1}
-    assert find_nc_for_scan(index, _T26 + timedelta(minutes=10)) is None
-    assert find_nc_for_scan({}, _T26) is None
-
-
 # ── draw_tse_map (shared by live tab and movie frames) ──────────────────────
 
 
 def test_draw_tse_map_draws_backdrop_overlay_and_title(tmp_path):
-    nc_path = tmp_path / "scan.nc"
-    _ds().to_netcdf(nc_path)
+    ds = _ds()
     snap = Snapshot(scan_time=_T26, cells=(_cell("sel", mass=(50, 50)),))
     fig, ax = plt.subplots()
-    draw_tse_map(ax, _T26, nc_path, snap, _selection("sel"), {"sel"})
+    draw_tse_map(ax, _T26, ds, snap, _selection("sel"), {"sel"}, backdrop_var="reflectivity")
     meshes = [c for c in ax.collections if type(c).__name__ == "QuadMesh"]
     assert meshes  # reflectivity backdrop
     assert ax.get_legend() is not None
@@ -293,7 +238,7 @@ def test_draw_tse_map_draws_backdrop_overlay_and_title(tmp_path):
 def test_draw_tse_map_without_raster_shows_placeholder():
     snap = Snapshot(scan_time=_T26, cells=())
     fig, ax = plt.subplots()
-    draw_tse_map(ax, _T26, None, snap, None, set())
+    draw_tse_map(ax, _T26, None, snap, None, set(), backdrop_var="reflectivity")
     assert ax.get_title().endswith("(no scan raster)")
     assert any("no scan raster" in t.get_text() for t in ax.texts)
     meshes = [c for c in ax.collections if type(c).__name__ == "QuadMesh"]
@@ -328,7 +273,7 @@ def test_rationale_selected_block_has_reason_score_and_terms():
     assert "CONTINUATION" in text
     assert "55" in text
     # score terms and the gate summary
-    assert "reflectivity_max" in text and "area_sqkm" in text and "growth" in text
+    assert "field_max" in text and "area_sqkm" in text and "growth" in text
     assert "cell_area_sqkm" in text  # gate summary field
 
 

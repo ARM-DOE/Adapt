@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from adapt.contracts import ContractViolation
 from adapt.modules.detection.module import RadarCellSegmenter
 
 pytestmark = pytest.mark.unit
@@ -62,3 +63,13 @@ def test__multiple_cells(large_multi_cell_ds, make_detection_config):
 
     # Expect four distinct cells
     assert labels.max() == 4
+
+
+def test_detection_raises_naming_config_when_field_missing(simple_2d_ds, make_detection_config):
+    # The module boundary owns the "is my configured field present" check
+    # (the executor-bound grid contract is structural only).
+    ds = simple_2d_ds.rename({"reflectivity": "pressure"})
+    seg = RadarCellSegmenter(make_detection_config())
+
+    with pytest.raises(ContractViolation, match="tracking field"):
+        seg.segment(ds)

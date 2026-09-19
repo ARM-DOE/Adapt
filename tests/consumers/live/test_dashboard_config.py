@@ -60,7 +60,7 @@ def test_load_default_config_has_lightning_group():
     groups = cfg["plot_groups"]
 
     assert "Lightning" in groups
-    assert set(groups["Lightning"]["variables"]) == {"flash_count", "source_count"}
+    assert set(groups["Lightning"]["variables"]) == {"flash_count", "lightning_source_count"}
     assert len(groups["Lightning"]["styles"]) == len(groups["Lightning"]["variables"])
     assert len(groups["Lightning"]["labels"]) == len(groups["Lightning"]["variables"])
 

@@ -154,8 +154,10 @@ class TestTrackerEdgeCases:
         tracker_a = CellTracker(tracking_module_config)
         tracker_b = CellTracker(tracking_module_config)
 
-        tracked_a, _ = tracker_a.track(ds1, stats1)
-        tracked_b, _ = tracker_b.track(ds1, stats1)
+        # Same scan (same bytes -> same scan_id) through two independent
+        # trackers must mint the identical uid: v2 = hash(scan_id, label).
+        tracked_a, _ = tracker_a.track(ds1, stats1, scan_id="same0001scan")
+        tracked_b, _ = tracker_b.track(ds1, stats1, scan_id="same0001scan")
         assert tracked_a.iloc[0]["cell_uid"] == tracked_b.iloc[0]["cell_uid"]
 
     def test_tracker_handles_large_time_gap(self, tracker):
@@ -168,8 +170,8 @@ class TestTrackerEdgeCases:
         ds2 = self._make_ds(labels, t2)
         stats1 = self._stats(1, t1)
         stats2 = self._stats(1, t2)
-        tracked1, events1 = tracker.track(ds1, stats1)
-        tracked2, events2 = tracker.track(ds2, stats2)
+        tracked1, events1 = tracker.track(ds1, stats1, scan_id="site003scan")
+        tracked2, events2 = tracker.track(ds2, stats2, scan_id="site004scan")
         # Both frames produce valid tracked output — gap handling does not crash
         assert not tracked1.empty
         assert not tracked2.empty

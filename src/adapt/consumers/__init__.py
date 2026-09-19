@@ -4,7 +4,7 @@
 """Adapt consumer applications.
 
 Consumers are the GUI and analysis applications that sit above the
-RepositoryClient API. They must not import from adapt.persistence,
+StoreClient API. They must not import from adapt.persistence,
 adapt.runtime, or adapt.execution directly.
 
 Available consumers

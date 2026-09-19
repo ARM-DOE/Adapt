@@ -4,8 +4,8 @@
 """cell_volume_stats — post-persistence enrichment node (pipeline_phase = 3).
 
 Computes per-cell 3D statistics from the stored gridded volume and writes one row
-per (run_id, scan_time, cell_uid) to the cell_volume_stats table, joinable to
-cells_by_scan. Requires regridder.save_netcdf: true so grid_ds_3d is available.
+per (run_id, scan_id, cell_uid) to the cell_volume_stats table, joinable to
+cells_by_scan. The 3D grid arrives in-memory as grid_ds_3d from the processor.
 
 Output columns (authoritative — documented here, schema inferred from the frame):
   run_id, scan_time, cell_uid, cell_label                     : index
@@ -22,7 +22,7 @@ import logging
 
 import pandas as pd
 
-from adapt.contracts import SqliteTable, check_cell_volume_stats
+from adapt.contracts import CELL_LABELS_VAR, ProductTableWrite, check_cell_volume_stats
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class CellVolumeStatsModule(BaseModule):
     name = "cell_volume_stats"
-    summary = "3D volume stats (cloud-top height); needs regridder.save_netcdf"
+    summary = "3D volume stats (cloud-top height) from the in-memory grid"
     pipeline_phase = 3
     required_history = 1
     config_class = CellVolumeStatsConfig
@@ -48,28 +48,26 @@ class CellVolumeStatsModule(BaseModule):
         "grid_ds_3d",
         "segmented_ds",
         "tracked_cells",
-        "run_id",
-        "scan_time",
     ]
     outputs = ["cell_volume_stats_rows"]
     output_contracts = {"cell_volume_stats_rows": check_cell_volume_stats}
     persistence = (
-        SqliteTable(
+        ProductTableWrite(
             key="cell_volume_stats_rows",
             table="cell_volume_stats",
-            primary_key=("run_id", "scan_time", "cell_uid"),
+            primary_key=("run_id", "scan_id", "cell_uid"),
             index_columns=("scan_time", "cell_uid"),
         ),
     )
 
     @classmethod
     def build_config(cls, cfg) -> CellVolumeStatsConfig:
-        # Only inject names that exist in the canonical global var_names; polarimetric
+        # Only inject the global tracking_field + fixed labels name; polarimetric
         # var names fall back to config defaults (or user module_params).
         params = cfg.module_params.get("cell_volume_stats", {})
         return CellVolumeStatsConfig(
-            reflectivity_var=cfg.global_.var_names.reflectivity,
-            labels_var=cfg.global_.var_names.cell_labels,
+            reflectivity_var=cfg.global_.tracking_field,
+            labels_var=CELL_LABELS_VAR,
             z_coord=cfg.global_.coord_names.z,
             y_coord=cfg.global_.coord_names.y,
             x_coord=cfg.global_.coord_names.x,
@@ -85,7 +83,7 @@ class CellVolumeStatsModule(BaseModule):
 
         if grid_3d is None:
             logger.warning(
-                "cell_volume_stats: grid_ds_3d unavailable — set regridder.save_netcdf: true"
+                "cell_volume_stats: grid_ds_3d unavailable — ingest did not produce grid_ds"
             )
             return {"cell_volume_stats_rows": pd.DataFrame()}
         if segmented is None or tracked is None or tracked.empty:
@@ -98,8 +96,6 @@ class CellVolumeStatsModule(BaseModule):
                 grid_3d,
                 cell_labels_2d,
                 r.cell_label,
-                context["run_id"],
-                context["scan_time"],
                 r.cell_uid,
             )
             for _, r in tracked.iterrows()

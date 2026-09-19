@@ -14,7 +14,7 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_realtime_availability_check_uses_start_and_end_dates(temp_dir):
+def test_realtime_availability_check_uses_start_and_end_dates(fake_gateway):
     config = MagicMock()
     config.downloader.mode = "realtime"
     config.downloader.radar = "KPOE"
@@ -34,7 +34,7 @@ def test_realtime_availability_check_uses_start_and_end_dates(temp_dir):
 
     downloader = AwsNexradDownloader(
         config=config,
-        output_dir=temp_dir,
+        acquire=fake_gateway,
         conn=fake_conn,
         clock=lambda: now,
     )

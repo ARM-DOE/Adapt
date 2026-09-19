@@ -34,14 +34,13 @@ dependencies = [
     "networkx",
     "h5py",
     "netCDF4",
-    "tqdm",
     "pydantic>=2.0",
     "pyyaml",
     "arm_pyart",
     "opencv-python",
     "boto3",
-    "pyarrow",
-    "duckdb",
+    "cmweather",
+    "pyproj",
 ]
 
 [project.urls]
@@ -68,7 +67,6 @@ docs = [
 ]
 maps = [
     "contextily",
-    "pyproj",
 ]
 
 [tool.setuptools]
@@ -80,16 +78,16 @@ where = ["src"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"adapt.data" = ["user_config.py"]
+"adapt.configuration" = ["*.yaml"]
 "adapt.configuration.schemas" = ["*.sql"]
-"adapt.config" = ["*.yaml"]
 
 [tool.setuptools_scm]
 version_scheme = "post-release"
 local_scheme = "dirty-tag"
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-markers"
+# Integration tests (live AWS, real data) are opt-in: pytest -m integration
+addopts = "-ra --strict-markers -m 'not integration'"
 testpaths = ["tests"]
 minversion = "7.0"
 markers = [

@@ -17,6 +17,7 @@ Key capabilities:
 Author: Bhupendra Raut
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -78,8 +79,7 @@ class RadarDataLoader:
     ...     "regridder": {"grid_shape": (41, 201, 201), "min_radius": 1750.0}
     ... }
     >>> loader = RadarDataLoader(config)
-    >>> ds = loader.load_and_regrid("20250305_KLOT.gz", save_netcdf=True,
-    ...                              output_dir="./grids")
+    >>> ds = loader.load_and_regrid("20250305_KLOT.gz")
     >>> print(ds.data_vars)  # reflectivity, velocity, etc.
     """
 
@@ -104,13 +104,13 @@ class RadarDataLoader:
         >>> loader = RadarDataLoader(config)
         """
         self.file_format = config.file_format
+        self.field_map = dict(config.field_map)
+        self.fields = tuple(config.fields)
         self.grid_shape = config.grid_shape
         self.grid_limits = config.grid_limits
         self.roi_func = config.roi_func
         self.min_radius = config.min_radius
         self.weighting_function = config.weighting_function
-        self.save_netcdf = config.save_netcdf
-        self.netcdf_save_retries = config.netcdf_save_retries
 
     def read(self, filepath: Path | str) -> object:
         """Read a NEXRAD archive file into a Py-ART Radar object.
@@ -165,8 +165,6 @@ class RadarDataLoader:
         self,
         radar: Any,
         grid_kwargs: dict | None = None,
-        output_dir: str | None = None,
-        source_filepath: str | None = None,
     ) -> xr.Dataset | None:
         """Transform a Py-ART Radar object from polar to Cartesian grid.
 
@@ -199,40 +197,24 @@ class RadarDataLoader:
             - `weighting_function` : str
                 Interpolation algorithm ("cressman", "barnes", "linear")
 
-        output_dir : str, optional
-            Directory to save intermediate NetCDF file. If None and
-            save_netcdf=True in caller, uses current directory.
-
-        source_filepath : str, optional
-            Original file path for naming NetCDF output. If provided,
-            output file is named {stem}.nc
-
         Returns
         -------
         xr.Dataset or None
             Cartesian grid xarray.Dataset with dimensions (z, y, x) and
             variables (reflectivity, velocity, etc.) if successful.
-            Returns None if regridding or NetCDF save fails.
 
         Notes
         -----
         - Regridding is CPU-intensive: 5-15 seconds per file
         - Grid defaults from config are merged with grid_kwargs overrides
-        - NetCDF files are compressed (zlib, level 9) for storage efficiency
         - Radar location attributes (latitude, longitude, altitude) are added
           to dataset.attrs for metadata tracking
-        - Fails gracefully: logs exception and returns None
 
         Examples
         --------
         >>> loader = RadarDataLoader(config)
         >>> radar = loader.read("20250305_KLOT.gz")
-        >>> ds = loader.regrid(
-        ...     radar,
-        ...     grid_kwargs={"grid_shape": (50, 250, 250)},
-        ...     output_dir="./grids",
-        ...     source_filepath="20250305_KLOT.gz"
-        ... )
+        >>> ds = loader.regrid(radar, grid_kwargs={"grid_shape": (50, 250, 250)})
         >>> print(ds.reflectivity.shape)  # (50, 250, 250)
         """
 
@@ -252,62 +234,49 @@ class RadarDataLoader:
         ds = grid.to_xarray()
         logger.debug("Success: regrid to xarray.Dataset")
 
+        ds = self._canonicalize_fields(ds)
+
         ds.attrs["radar_latitude"] = float(radar.latitude["data"][0])
         ds.attrs["radar_longitude"] = float(radar.longitude["data"][0])
         ds.attrs["radar_altitude"] = float(radar.altitude["data"][0])
 
-        # When requested, the NetCDF file is a downstream input (registered as a
-        # gridded3d artifact), so a persistent write failure must raise.
-        self._write_netcdf(ds, output_dir, source_filepath)
         return ds
 
-    def _write_netcdf(self, ds, output_dir, source_filepath):
-        """Write the regridded grid to NetCDF, retrying then raising on failure.
+    def _canonicalize_fields(self, ds: xr.Dataset) -> xr.Dataset:
+        """Source names -> canonical names, once, at the boundary.
 
-        The saved file is a real downstream input (the ingest node registers it
-        as a ``gridded3d`` artifact and ``cell_volume_stats`` reads it), so a
-        persistent write failure raises rather than being swallowed — a missing
-        file must never be reported as produced. Retries ``netcdf_save_retries``
-        times before re-raising.
+        Renames per config field_map (entries whose source variable is
+        absent are ignored — the fields check below decides whether that
+        is an error), then drops variables not in the explicit fields
+        list. Records which source field produced each canonical variable
+        in attrs["source_fields_json"].
         """
-        if output_dir is None:
-            output_dir = "."
+        applied = {src: canon for src, canon in self.field_map.items() if src in ds.data_vars}
+        if applied:
+            ds = ds.rename(applied)
 
-        output_dir_path = Path(output_dir)
-        output_dir_path.mkdir(parents=True, exist_ok=True)
+        if self.fields:
+            missing = [f for f in self.fields if f not in ds.data_vars]
+            if missing:
+                raise ValueError(
+                    f"Ingest field selection failed: canonical field(s) "
+                    f"{', '.join(missing)} not present after applying "
+                    f"reader.field_map. Available: "
+                    f"{sorted(str(v) for v in ds.data_vars)}. Fix "
+                    "reader.field_map / reader.fields in the run "
+                    "configuration."
+                )
+            ds = ds[list(self.fields)]
 
-        nc_path = output_dir_path / (Path(source_filepath).stem + ".nc")
-        encoding = {var: {"zlib": True, "complevel": 9} for var in ds.data_vars}
-
-        for attempt in range(1, self.netcdf_save_retries + 1):
-            try:
-                ds.to_netcdf(nc_path, encoding=encoding, compute=True)
-                logger.info("Saved regridded NetCDF: %s", nc_path)
-                return
-            except Exception as e:
-                if attempt < self.netcdf_save_retries:
-                    logger.warning(
-                        "NetCDF save attempt %d/%d failed for %s: %s; retrying",
-                        attempt,
-                        self.netcdf_save_retries,
-                        nc_path,
-                        e,
-                    )
-                else:
-                    logger.error(
-                        "NetCDF save failed after %d attempts for %s: %s",
-                        self.netcdf_save_retries,
-                        nc_path,
-                        e,
-                    )
-                    raise
+        ds.attrs["source_fields_json"] = json.dumps(
+            {canon: src for src, canon in applied.items()}, sort_keys=True
+        )
+        return ds
 
     def load_and_regrid(
         self,
         filepath: Path | str,
         grid_kwargs: dict | None = None,
-        save_netcdf: bool = True,
-        output_dir: str | None = None,
     ) -> xr.Dataset | None:
         """Read and regrid a NEXRAD file in one call (convenience method).
 
@@ -323,14 +292,6 @@ class RadarDataLoader:
         grid_kwargs : dict, optional
             Regridding parameter overrides. Passed to regrid().
 
-        save_netcdf : bool, default True
-            Whether to save the intermediate regridded NetCDF file.
-            If True, uses output_dir parameter.
-
-        output_dir : str, optional
-            Directory for NetCDF output. Only used if save_netcdf=True.
-            If None, uses current directory.
-
         Returns
         -------
         xr.Dataset or None
@@ -338,40 +299,20 @@ class RadarDataLoader:
             - File does not exist or cannot be read
             - Regridding fails
 
-        Raises
-        ------
-        Exception
-            If save_netcdf=True and the NetCDF write fails on every attempt
-            (after netcdf_save_retries). An enabled save must succeed because the
-            file is a registered downstream artifact.
-
         Notes
         -----
         - Preferred method over separate read() + regrid() calls
-        - Set save_netcdf=False for memory-only processing (avoids disk I/O);
-          when set, the write is mandatory and raises on persistent failure
-        - Returns same xarray.Dataset regardless of save_netcdf setting
 
         Examples
         --------
         >>> loader = RadarDataLoader(config)
-        >>> ds = loader.load_and_regrid(
-        ...     "20250305_KLOT.gz",
-        ...     save_netcdf=True,
-        ...     output_dir="./grids"
-        ... )
+        >>> ds = loader.load_and_regrid("20250305_KLOT.gz")
         >>> if ds is not None:
         ...     print(f"Grid shape: {ds.reflectivity.shape}")
         ...     cells = segment_cells(ds)  # Downstream processing
         """
         radar = self.read(filepath)
-        ds = self.regrid(
-            radar,
-            grid_kwargs=grid_kwargs,
-            output_dir=output_dir if save_netcdf else None,
-            source_filepath=str(filepath),
-        )
-        return ds
+        return self.regrid(radar, grid_kwargs=grid_kwargs)
 
 
 if __name__ == "__main__":

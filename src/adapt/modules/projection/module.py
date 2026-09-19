@@ -102,8 +102,8 @@ class RadarCellProjector:
             Gaussian standard deviation
 
     - `global` : dict, optional
-        - `var_names` : dict
-            - `reflectivity` : str, reflectivity variable name (default: "reflectivity")
+        - `tracking_field` : str
+            Canonical field driving the optical flow (default: "reflectivity")
 
     Notes
     -----

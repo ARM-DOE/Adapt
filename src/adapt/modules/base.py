@@ -3,7 +3,8 @@
 
 """Base interface for all Adapt execution nodes.
 
-Every node in the system — whether in execution/nodes/ or extensions/ — must
+Every node in the system — built-in (execution/nodes/) or loaded via the
+config's ``extensions:`` list of dotted import paths — must
 declare its name, inputs, outputs, and optionally input/output contracts.
 The graph engine uses these declarations to build the execution DAG automatically.
 

@@ -41,5 +41,13 @@ def assert_gridded(ds: xr.Dataset, reflectivity_var: str) -> None:
 
 
 def check_grid_ds_2d(ds: xr.Dataset) -> None:
-    """Bound contract for the standard 2D grid output (reflectivity variable name fixed)."""
-    assert_gridded(ds, "reflectivity")
+    """Bound contract for the standard 2D grid output.
+
+    Structural only: x/y present, dataset non-empty. Which FIELD must be
+    present depends on config (global_.tracking_field) and is validated by
+    the detection module at its own boundary — bound contracts have no
+    config access by design.
+    """
+    require("x" in ds.coords, "Grid contract violated: missing 'x' coordinate")
+    require("y" in ds.coords, "Grid contract violated: missing 'y' coordinate")
+    require(len(ds.data_vars) > 0, "Grid contract violated: no data variables")

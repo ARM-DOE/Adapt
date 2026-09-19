@@ -151,8 +151,8 @@ class TestScientistCanTrackStorms:
         ds2 = _labeled_ds(labels, t2)
         stats1 = pd.DataFrame([_cell_stats_row(1, t1, cx=3.5, cy=3.5)])
         stats2 = pd.DataFrame([_cell_stats_row(1, t2, cx=3.5, cy=3.5)])
-        tracked1, events1 = tracker.track(ds1, stats1)
-        tracked2, events2 = tracker.track(ds2, stats2)
+        tracked1, events1 = tracker.track(ds1, stats1, scan_id="site001scan")
+        tracked2, events2 = tracker.track(ds2, stats2, scan_id="site002scan")
         assert tracked1.iloc[0]["cell_uid"] == tracked2.iloc[0]["cell_uid"]
         assert events1["event_type"].iloc[0] == "INITIATION"
         assert events2["event_type"].iloc[0] == "CONTINUE"
@@ -183,8 +183,8 @@ class TestScientistCanTrackStorms:
                 "radar_differential_reflectivity_max",
             ]
         )
-        tracked1, events1 = tracker.track(ds1, stats_empty)
-        tracked2, events2 = tracker.track(ds2, stats_empty)
+        tracked1, events1 = tracker.track(ds1, stats_empty, scan_id="site003scan")
+        tracked2, events2 = tracker.track(ds2, stats_empty, scan_id="site004scan")
         assert tracked1.empty
         assert tracked2.empty
 
@@ -198,7 +198,7 @@ class TestScientistCanTrackStorms:
         labels[2:4, 2:4] = 1
         ds1 = _labeled_ds(labels, t1)
         stats1 = pd.DataFrame([_cell_stats_row(1, t1)])
-        tracked, events = tracker.track(ds1, stats1)
+        tracked, events = tracker.track(ds1, stats1, scan_id="site005scan")
         initiations = events[events["event_type"] == "INITIATION"]
         assert len(initiations) == 1
         assert initiations.iloc[0]["target_cell_uid"] is not None

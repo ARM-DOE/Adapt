@@ -32,6 +32,8 @@ class InternalReaderConfig(AdaptBaseModel):
     """Runtime reader configuration."""
 
     file_format: Literal["nexrad_archive"]
+    field_map: dict[str, str]
+    fields: list[str]
 
 
 class InternalDownloaderConfig(AdaptBaseModel):
@@ -57,8 +59,6 @@ class InternalRegridderConfig(AdaptBaseModel):
     roi_func: Literal["dist_beam", "dist"]
     min_radius: float
     weighting_function: Literal["cressman", "barnes", "nearest"]
-    save_netcdf: bool
-    netcdf_save_retries: int
 
 
 class InternalSegmenterConfig(AdaptBaseModel):
@@ -105,13 +105,6 @@ class InternalSegmenterConfig(AdaptBaseModel):
         return data
 
 
-class InternalVarNamesConfig(AdaptBaseModel):
-    """Runtime variable name mappings."""
-
-    reflectivity: str
-    cell_labels: str
-
-
 class InternalCoordNamesConfig(AdaptBaseModel):
     """Runtime coordinate name mappings."""
 
@@ -125,7 +118,7 @@ class InternalGlobalConfig(AdaptBaseModel):
     """Runtime global settings."""
 
     z_level: float
-    var_names: InternalVarNamesConfig
+    tracking_field: str
     coord_names: InternalCoordNamesConfig
 
 
@@ -169,9 +162,6 @@ class InternalTrackerConfig(AdaptBaseModel):
     class InternalCellUidConfig(AdaptBaseModel):
         """Runtime cell UID configuration."""
 
-        time_step_s: int = Field(ge=1)
-        latlon_step_deg: float = Field(gt=0.0)
-        area_step_km2: float = Field(gt=0.0)
         width: int = Field(ge=1)
         alphabet: Literal["base36_upper"]
 

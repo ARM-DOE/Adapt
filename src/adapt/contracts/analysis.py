@@ -18,9 +18,6 @@ _REQUIRED_STATS_COLS = [
     "time_volume_start",
     "cell_centroid_mass_lat",
     "cell_centroid_mass_lon",
-    "radar_reflectivity_max",
-    "radar_differential_reflectivity_max",
-    "area_40dbz_km2",
 ]
 
 _REQUIRED_ADJACENCY_COLS = [

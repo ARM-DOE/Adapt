@@ -26,7 +26,8 @@ from adapt.consumers.live._renderer import (
 
 pytestmark = pytest.mark.unit
 
-_SCAN_TS = pd.Timestamp("2024-01-01T12:00:00")
+_SCAN_TS = pd.Timestamp("2024-01-01T12:00:00Z")
+_SID = "sid-render-scan"
 
 
 def _make_ds(*, with_projections=False, with_flow=False):
@@ -54,15 +55,18 @@ def _make_ds(*, with_projections=False, with_flow=False):
         coords={
             "x": np.arange(n) * 1000.0,
             "y": np.arange(n) * 1000.0,
-            "time": _SCAN_TS.to_numpy(),
+            # A different clock than the stamped scan_time — identity must
+            # come from attrs, never from this coordinate.
+            "time": (_SCAN_TS + pd.Timedelta(seconds=7)).to_numpy(),
         },
-        attrs={"radar": "TEST"},
+        attrs={"radar": "TEST", "scan_id": _SID, "scan_time": "2024-01-01T12:00:00Z"},
     )
 
 
 def _view(**overrides):
     base = {
         "var_name": "reflectivity",
+        "backdrop_var": "reflectivity",
         "vmin": 10.0,
         "vmax": 60.0,
         "bg_alpha": 0.35,
@@ -87,6 +91,7 @@ def _cell_df(uid="u1"):
     return pd.DataFrame(
         {
             "run_id": ["r"] * 3,
+            "scan_id": ["sid-1150", "sid-1155", _SID],
             "scan_time": ["2024-01-01T11:50:00Z", "2024-01-01T11:55:00Z", "2024-01-01T12:00:00Z"],
             "cell_uid": [uid] * 3,
             "cell_label": [1, 1, 1],
@@ -251,6 +256,41 @@ def test_add_basemap_reuses_cached_tiles_for_unchanged_extent(monkeypatch):
     assert len(ax.images) == 1  # basemap still present on the redrawn frame
 
 
+def test_add_basemap_does_not_retry_a_failed_fetch_for_unchanged_extent(monkeypatch):
+    """An offline fetch failure must be cached like a success: the 500 ms loop
+    redraws the same extent every frame, and re-attempting the network each
+    time stalls the UI for the connect timeout. A changed extent retries."""
+    import adapt.consumers.live._renderer as renderer_mod
+
+    class _OfflineCtx:
+        class providers:
+            class OpenStreetMap:
+                Mapnik = "osm"
+
+        attempts = 0
+
+        @classmethod
+        def add_basemap(cls, ax, **kw):
+            cls.attempts += 1
+            raise ConnectionError("network unreachable")
+
+    monkeypatch.setattr(renderer_mod, "HAS_CTX", True)
+    monkeypatch.setattr(renderer_mod, "ctx", _OfflineCtx)
+
+    _, ax, _ = _fig_axes()
+    x_km = np.arange(10.0)
+    y_km = np.arange(10.0)
+    ds = _located_ds()
+
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)
+    ax.clear()
+    renderer_mod.add_basemap(ax, ds, x_km, y_km)  # same extent: no retry
+    assert _OfflineCtx.attempts == 1
+
+    renderer_mod.add_basemap(ax, ds, np.arange(5.0), np.arange(5.0))  # zoom: retry
+    assert _OfflineCtx.attempts == 2
+
+
 def test_add_basemap_refetches_when_extent_changes(monkeypatch):
     """A zoom (new extent) must fetch fresh tiles — the cache is keyed on extent,
     so a changed view is never served stale tiles."""
@@ -315,3 +355,85 @@ def test_cached_basemap_replay_preserves_axes_aspect(monkeypatch):
     renderer_mod.add_basemap(ax, ds, x_km, y_km)  # cached replay
 
     assert ax.get_aspect() == aspect_after_fetch
+
+
+# ── Scan identity from artifact attrs (never the time coordinate) ────────────
+
+
+def test_render_scan_result_carries_identity_from_attrs():
+    _, ax, cbar_ax = _fig_axes()
+    res = render_scan(ax, cbar_ax, _make_ds(), _view(), _NO_OVERLAYS)
+    assert res.scan_id == _SID
+    assert res.scan_ts == _SCAN_TS  # stamped scan_time, not the shifted time coord
+    assert res.scan_ts.tzinfo is not None  # always tz-aware UTC — consumers rely on it
+    assert "2024-01-01 12:00:00" in ax.get_title()
+
+
+def test_missing_identity_attrs_raises_recreate():
+    _, ax, cbar_ax = _fig_axes()
+    ds = _make_ds()
+    del ds.attrs["scan_id"], ds.attrs["scan_time"]
+    with pytest.raises(ValueError, match="Recreate the repository"):
+        render_scan(ax, cbar_ax, ds, _view(), _NO_OVERLAYS)
+
+
+def test_draw_track_overlays_keys_on_attrs_scan_id():
+    # The star resolves through the scan_id identity join even though the
+    # dataset's time coordinate is a different clock (+7 s here).
+    _, ax, _ = _fig_axes()
+    overlays = OverlayData(cell_df=_cell_df(), track_histories={})
+    result = draw_overlays_fn(ax, _make_ds(), _view(selected_cells={"u1": 0}), overlays)
+    assert len(result["u1"]) == 3  # line + dots + current-scan star
+
+
+def test_no_star_when_rows_belong_to_another_scan():
+    # Rows from other scans never match — no window, no nearest-time rescue.
+    _, ax, _ = _fig_axes()
+    df = _cell_df()
+    df["scan_id"] = ["sid-1150", "sid-1155", "sid-other"]
+    overlays = OverlayData(cell_df=df, track_histories={})
+    result = draw_overlays_fn(ax, _make_ds(), _view(selected_cells={"u1": 0}), overlays)
+    assert len(result["u1"]) == 2  # track line + dots only
+
+
+class TestFieldGenericRendering:
+    def test_renders_a_pressure_only_scan(self):
+        # A non-reflectivity run: backdrop and overlay both come from the
+        # run's tracking field — no reflectivity variable anywhere.
+        ds = _make_ds().rename({"reflectivity": "pressure"})
+        fig, ax, cbar_ax = _fig_axes()
+        res = render_scan(
+            ax,
+            cbar_ax,
+            ds,
+            _view(var_name="pressure", backdrop_var="pressure"),
+            OverlayData(cell_df=None, track_histories={}),
+        )
+        assert res.scan_id == _SID
+        assert len(res.cell_contours) == 1
+
+    def test_absent_overlay_variable_is_not_silently_substituted(self):
+        ds = _make_ds()  # has reflectivity + cell_labels only
+        fig, ax, cbar_ax = _fig_axes()
+        render_scan(
+            ax,
+            cbar_ax,
+            ds,
+            _view(var_name="differential_reflectivity"),
+            OverlayData(cell_df=None, track_histories={}),
+        )
+        assert "not present in this scan" in ax.get_title()
+
+    def test_missing_backdrop_variable_raises(self):
+        # The backdrop var comes from run provenance; if the scan lacks it,
+        # something is deeply wrong — never substitute.
+        ds = _make_ds()
+        fig, ax, cbar_ax = _fig_axes()
+        with pytest.raises(KeyError):
+            render_scan(
+                ax,
+                cbar_ax,
+                ds,
+                _view(backdrop_var="pressure"),
+                OverlayData(cell_df=None, track_histories={}),
+            )

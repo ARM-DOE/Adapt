@@ -16,9 +16,6 @@ class TrackingConfig(BaseModel):
 
     split_overlap: float
     core_field_threshold: float
-    uid_time_step_s: int
-    uid_latlon_step_deg: float
-    uid_area_step_km2: float
     uid_width: int
     field_var: str
     labels_var: str

@@ -76,11 +76,14 @@ class TestUserConfigAliases:
         assert config.downloader.radar == "KDIX"
 
     def test_reflectivity_var_alias(self):
-        """reflectivity_var alias maps to global var_names."""
+        """reflectivity_var means "my file calls reflectivity <name>" — it
+        becomes an ingest rename to the canonical name; the core still
+        tracks the canonical 'reflectivity'."""
         user = UserConfig(reflectivity_var="dbz", base_dir="/tmp", radar="KHTX")
         config = resolve_config(ParamConfig(), user, None)
 
-        assert config.global_.var_names.reflectivity == "dbz"
+        assert config.reader.field_map == {"dbz": "reflectivity"}
+        assert config.global_.tracking_field == "reflectivity"
 
     def test_max_projection_steps_alias(self):
         """max_projection_steps alias maps to projector.max_projection_steps."""
@@ -240,7 +243,6 @@ class TestDefaultValues:
 
         assert config.regridder.grid_shape is not None
         assert len(config.regridder.grid_shape) == 3
-        assert config.regridder.save_netcdf is True
 
 
 class TestConfigValidation:
@@ -319,7 +321,8 @@ class TestIntegration:
         config = resolve_config(ParamConfig(), user, None)
 
         assert config.downloader.radar == "KLTX"
-        assert config.global_.var_names.reflectivity == "reflectivity_dbz"
+        assert config.reader.field_map == {"reflectivity_dbz": "reflectivity"}
+        assert config.global_.tracking_field == "reflectivity"
         assert config.segmenter.min_cellsize_gridpoint == 20
 
     def test_nested_config_complex_flow_params(self):

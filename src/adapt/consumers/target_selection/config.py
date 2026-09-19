@@ -47,7 +47,7 @@ class PriorityWeights(BaseModel):
 
     model_config = _FROZEN
 
-    reflectivity: float
+    field: float
     area: float
     growth_rate: float
 

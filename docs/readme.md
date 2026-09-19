@@ -7,6 +7,7 @@
 
 installation
 USAGE
+variable_names
 dashboard_reference
 cli_reference
 vision

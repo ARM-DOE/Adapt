@@ -56,5 +56,5 @@ class TestDetectModuleBuildConfig:
 
         cfg = DetectModule.build_config(internal_config)
         assert cfg.z_level == internal_config.global_.z_level
-        assert cfg.reflectivity_var == internal_config.global_.var_names.reflectivity
-        assert cfg.labels_var == internal_config.global_.var_names.cell_labels
+        assert cfg.reflectivity_var == internal_config.global_.tracking_field
+        assert cfg.labels_var == "cell_labels"

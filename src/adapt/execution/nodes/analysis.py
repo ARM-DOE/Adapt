@@ -1,7 +1,12 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from adapt.contracts import ParquetArtifact, check_cell_adjacency, check_cell_stats
+from adapt.contracts import (
+    CELL_LABELS_VAR,
+    ProductTableWrite,
+    check_cell_adjacency,
+    check_cell_stats,
+)
 from adapt.execution.module_registry import registry
 from adapt.modules.analysis.config import AnalysisConfig
 from adapt.modules.analysis.module import RadarCellAnalyzer
@@ -44,8 +49,17 @@ class AnalysisModule(BaseModule):
     }
     config_class = AnalysisConfig
     persistence = (
-        ParquetArtifact(key="cell_stats", product_type="analysis2d", producer="analysis"),
-        ParquetArtifact(key="cell_adjacency", product_type="analysis2d", producer="cell_adjacency"),
+        ProductTableWrite(
+            key="cell_stats",
+            table="cell_stats",
+            primary_key=("run_id", "scan_id", "cell_label"),
+            index_columns=("cell_label",),
+        ),
+        ProductTableWrite(
+            key="cell_adjacency",
+            table="cell_adjacency",
+            primary_key=("run_id", "scan_id", "cell_label_a", "cell_label_b"),
+        ),
     )
 
     @classmethod
@@ -55,8 +69,8 @@ class AnalysisModule(BaseModule):
             exclude_fields=tuple(cfg.analyzer.exclude_fields),
             adjacency_min_touching=cfg.analyzer.adjacency_min_touching_boundary_pixels,
             max_projection_steps=cfg.projector.max_projection_steps,
-            reflectivity_var=cfg.global_.var_names.reflectivity,
-            labels_var=cfg.global_.var_names.cell_labels,
+            reflectivity_var=cfg.global_.tracking_field,
+            labels_var=CELL_LABELS_VAR,
             z_level=cfg.global_.z_level,
         )
 

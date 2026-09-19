@@ -14,7 +14,7 @@ class CellVolumeStatsConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # Variable names. reflectivity/labels are injected from global; the polarimetric
-    # names are not part of the canonical var_names, so they default here.
+    # names are module-owned (not a global knob), so they default here.
     reflectivity_var: str = "reflectivity"
     zdr_var: str = "differential_reflectivity"
     kdp_var: str = "specific_differential_phase"

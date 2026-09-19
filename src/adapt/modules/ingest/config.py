@@ -14,13 +14,13 @@ class IngestConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     file_format: str
+    field_map: dict[str, str]
+    fields: tuple[str, ...]
     grid_shape: tuple[int, int, int]
     grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
     roi_func: str
     min_radius: float
     weighting_function: str
-    save_netcdf: bool
-    netcdf_save_retries: int
     radar: str
     z_level: float
     z_coord: str

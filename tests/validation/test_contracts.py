@@ -275,3 +275,20 @@ class TestContractViolationException:
         msg = str(exc_info.value)
         assert "contract violated" in msg.lower()
         assert "cell_labels" in msg
+
+
+def test_stats_without_field_specific_columns_pass_structural_contract():
+    # ZDR/reflectivity stat columns are field- and source-dependent; the
+    # analysis contract validates structure/identity only. Non-dual-pol
+    # sources and non-reflectivity tracking fields must pass.
+    df = pd.DataFrame(
+        {
+            "cell_label": [1],
+            "cell_area_sqkm": [12.5],
+            "time": [pd.Timestamp("2026-08-13T17:31:58Z")],
+            "time_volume_start": [pd.Timestamp("2026-08-13T17:31:58Z")],
+            "cell_centroid_mass_lat": [41.0],
+            "cell_centroid_mass_lon": [-88.0],
+        }
+    )
+    assert_analysis_output(df)  # must NOT raise

@@ -7,7 +7,7 @@ Entry point: adapt dashboard [--repo /path/to/repo]
 
 Layout
 ------
-- Toolbar: repo browser, radar/run selection, refresh, pipeline start/stop
+- Toolbar: repo browser, collection/run selection, refresh, pipeline start/stop
 - Tab 0 "Latest Scan": matplotlib canvas (left) + cell-info panel (right)
                         + quick-filter strip (bottom)
 - Tab 1 "Target Selection": rule builder + live engine replay on a reflectivity map
@@ -24,7 +24,6 @@ convenience.
 import contextlib
 import logging
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +64,7 @@ def _ensure_tkagg_backend() -> None:
 
 
 # ── Repository access (Ring 2 consumer via the public API) ───────────────────
-from adapt.api.client import RepositoryClient  # noqa: E402
+from adapt.api.store_client import StoreClient  # noqa: E402
 from adapt.consumers.live._config import (  # noqa: E402, I001
     POLL_MS,
     _list_user_configs,
@@ -80,10 +79,11 @@ from adapt.consumers.live._movie_dialog import MovieDialog  # noqa: E402
 from adapt.consumers.live._pipeline import PipelineController  # noqa: E402
 from adapt.consumers.live._timers import AfterHandles  # noqa: E402
 from adapt.consumers.live._utils import (  # noqa: E402
-    _list_radars,
+    _list_collections,
     _list_runs,
     _pipeline_running,
     _suppress_osx_stderr,
+    is_repository,
     startup_repo,
 )
 
@@ -96,6 +96,7 @@ class AdaptDashboard(tk.Tk):
         self.title("Adapt Radar Dashboard")
         self.geometry("1400x900")
         self.minsize(1000, 680)
+        self._last_refresh_error: str | None = None
 
         self._repo_root = tk.StringVar(value=repo or "")
         self._radar = tk.StringVar(value="")
@@ -110,7 +111,7 @@ class AdaptDashboard(tk.Tk):
         # Session facts shared with tabs — tabs depend on this, never on the shell
         self._ctx = AppContext(
             get_repo=self._repo_root.get,
-            get_radar=self._radar.get,
+            get_collection=self._radar.get,
             get_run_sel=self._run_sel.get,
             get_cfg=lambda: self._cfg,
             report_scan_time=self._report_scan_time,
@@ -165,7 +166,7 @@ class AdaptDashboard(tk.Tk):
         toolbar = ttk.Frame(self, padding=(6, 4))
         toolbar.pack(side="top", fill="x")
 
-        ttk.Label(toolbar, text="Radar:").pack(side="left")
+        ttk.Label(toolbar, text="Collection:").pack(side="left")
         self.radar_cb = ttk.Combobox(toolbar, textvariable=self._radar, width=8, state="readonly")
         self.radar_cb.pack(side="left", padx=(2, 10))
         self.radar_cb.bind("<<ComboboxSelected>>", lambda _: self._on_radar_changed())
@@ -370,34 +371,33 @@ class AdaptDashboard(tk.Tk):
 
     def _on_repo_changed(self):
         repo = Path(self._repo_root.get().strip())
-        radars = _list_radars(repo)
-        self.radar_cb["values"] = radars
+        collections = _list_collections(repo)
+        self.radar_cb["values"] = collections
 
-        # Select radar with most recent run activity
-        latest_radar = None
-        if radars and repo.exists():
-            with contextlib.closing(RepositoryClient(repo)) as client:
-                runs_all = client.runs()
-            if runs_all:
-                latest = max(runs_all, key=lambda r: r.start_time or datetime.min)
-                if latest.radar_id in radars:
-                    latest_radar = latest.radar_id
+        # Select the collection with the most recent run activity (runs() is
+        # newest-first by contract, so the first run's collection wins).
+        latest_collection = None
+        if collections and repo.exists():
+            with contextlib.closing(StoreClient(repo)) as client:
+                latest = client.latest_run()
+            if latest is not None and latest.collection_id in collections:
+                latest_collection = latest.collection_id
 
-        if latest_radar:
-            self._radar.set(latest_radar)
-        elif radars:
-            self._radar.set(radars[0])
+        if latest_collection:
+            self._radar.set(latest_collection)
+        elif collections:
+            self._radar.set(collections[0])
         else:
             self._radar.set("")
 
         self._on_radar_changed()
 
     def _on_radar_changed(self):
-        self._scan_view.on_run_changed()  # reset zoom when radar/run changes
+        self._scan_view.on_run_changed()  # reset zoom when collection/run changes
         repo = Path(self._repo_root.get().strip())
         radar = self._radar.get().strip().upper()
-        # Pass radar to filter runs by the selected radar
-        runs = _list_runs(repo, radar=radar if radar else None)
+        # Filter runs by the selected collection
+        runs = _list_runs(repo, collection=radar if radar else None)
         self.run_cb["values"] = runs
         if runs:
             self._run_sel.set(runs[0])  # Select most recent run (first in list)
@@ -455,8 +455,8 @@ class AdaptDashboard(tk.Tk):
         ttk.Label(
             win,
             text=(
-                "Select the output folder from a previous or currently running\n"
-                "Adapt pipeline run (must contain adapt_registry.db)."
+                "Select an initialized Adapt store (created by `adapt init`;\n"
+                "must contain registry.db)."
             ),
             justify="center",
             foreground="#555555",
@@ -510,8 +510,9 @@ class AdaptDashboard(tk.Tk):
         """Select repo_dir in the toolbar and re-scan it as the registry appears."""
         self._repo_root.set(repo_dir)
         self._record_recent_repo(repo_dir)
-        # adapt_registry.db is created by the pipeline on first run, so retry
-        # until it appears (3 s, 8 s, 15 s, 25 s after launch).
+        # registry.db exists once `adapt init` ran; run/collection rows appear
+        # shortly after pipeline launch, so retry (3, 5, 7, and 10 s; a slower
+        # start is picked up by _refresh_all's self-heal on the recurring poll).
         for delay_ms in (3000, 5000, 7000, 10000):
             self._timers.oneshot(delay_ms, self._on_repo_changed)
 
@@ -542,9 +543,33 @@ class AdaptDashboard(tk.Tk):
     # ── Auto-refresh ──────────────────────────────────────────────────────────
 
     def _schedule_refresh(self):
-        if self._auto_refresh_var.get():
-            self._refresh_all()
-        self._timers.recurring("refresh", POLL_MS, self._schedule_refresh)
+        # The re-arm lives in `finally`: one failing refresh (pre-identity repo,
+        # transient sqlite lock while the pipeline writes) must never silently
+        # kill auto-refresh for the rest of the session.
+        try:
+            if self._auto_refresh_var.get():
+                self._refresh_all()
+        except Exception as exc:
+            self._surface_refresh_error(exc)
+        finally:
+            self._timers.recurring("refresh", POLL_MS, self._schedule_refresh)
+
+    def report_callback_exception(self, exc_type, exc, tb):  # noqa: N802 (Tk hook name)
+        """Errors in direct Tk handlers (shortcuts, comboboxes, menus) surface
+        to the user instead of dying invisibly on stderr — the identity
+        contract's loud failures must reach the person at the screen."""
+        logger.error("Unhandled Tk callback error", exc_info=(exc_type, exc, tb))
+        messagebox.showerror("Dashboard error", str(exc), parent=self)
+
+    def _surface_refresh_error(self, exc: Exception) -> None:
+        """Show a refresh failure once per distinct message; keep polling."""
+        message = str(exc)
+        self._status_base = f"Error: {message[:80]}"
+        self._next_refresh_at = time.time() + POLL_MS / 1000
+        if message != getattr(self, "_last_refresh_error", None):
+            self._last_refresh_error = message
+            logger.exception("Dashboard refresh failed")
+            messagebox.showerror("Refresh failed", message, parent=self)
 
     def _status_tick(self):
         """Update status bar every second: scan time + countdown to next check."""
@@ -560,13 +585,18 @@ class AdaptDashboard(tk.Tk):
 
     def _refresh_all(self):
         repo = self._ctx.repo()
-        radar = self._ctx.radar()
+        radar = self._ctx.collection()
+        if repo and not radar and is_repository(Path(repo)):
+            # Self-heal: the registry appeared after the adoption retries ended
+            # (slow pipeline startup) — populate the collection/run selectors now.
+            self._on_repo_changed()
+            radar = self._ctx.collection()
         if not repo or not radar:
             return
 
         n_scans = self._scan_view.refresh()
         state = "Running" if self._pipeline.is_running() else ("Idle" if not n_scans else "Done")
-        self._status_base = f"{state}  |  Radar: {radar}  |  Scans: {n_scans}"
+        self._status_base = f"{state}  |  Collection: {radar}  |  Scans: {n_scans}"
         self._next_refresh_at = time.time() + POLL_MS / 1000
 
         self._tse_view.refresh()

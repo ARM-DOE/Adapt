@@ -82,6 +82,32 @@ def _remove_pid() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sub-command: init
+# ---------------------------------------------------------------------------
+
+
+def _build_init_parser(sub: argparse.ArgumentParser) -> None:
+    sub.add_argument(
+        "directory",
+        nargs="?",
+        default=".",
+        help="Root directory for the new store (default: current directory).",
+    )
+
+
+def _init_cmd(args: argparse.Namespace) -> None:
+    """Initialize an empty Adapt data store."""
+    from adapt.persistence.store import StoreError, init_store
+
+    try:
+        root = init_store(args.directory)
+    except StoreError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    print(f"Initialized empty Adapt store at {root}")
+
+
+# ---------------------------------------------------------------------------
 # Sub-command: run-nexrad
 # ---------------------------------------------------------------------------
 
@@ -116,15 +142,11 @@ def _build_run_nexrad_parser(sub: argparse.ArgumentParser) -> None:
         help="Max runtime in minutes (realtime mode only)",
     )
     sub.add_argument(
-        "--rerun",
-        action="store_true",
-        help="Delete output directories before running",
-    )
-    sub.add_argument(
-        "--no-plot",
-        dest="no_plot",
-        action="store_true",
-        help="Disable plot consumer thread",
+        "--plot-dir",
+        dest="plot_dir",
+        default=None,
+        help="Directory for live plots (outside the store). Plotting is enabled "
+        "only when this is provided.",
     )
     sub.add_argument(
         "--plot-interval",
@@ -182,7 +204,7 @@ def _run_nexrad(args: argparse.Namespace) -> None:
     config = init_runtime_config(args)
     orchestrator = PipelineOrchestrator(
         config,
-        close_repository_on_stop=bool(args.no_plot),
+        close_repository_on_stop=not bool(args.plot_dir),
     )
 
     stop_event = threading.Event()
@@ -205,9 +227,6 @@ def _run_nexrad(args: argparse.Namespace) -> None:
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    if args.no_plot:
-        print("Starting pipeline (plotting disabled)...")
-
     orchestrator_thread = threading.Thread(
         target=_run_orchestrator,
         args=(orchestrator, args.max_runtime, stop_event),
@@ -222,16 +241,14 @@ def _run_nexrad(args: argparse.Namespace) -> None:
         # block (PID file removal, repository close).
         time.sleep(2)
 
-        if not args.no_plot and orchestrator.repository is not None:
+        if args.plot_dir and orchestrator.collection is not None:
             from adapt.visualization.plotter import PlotConsumer
 
-            radar = args.radar or config.downloader.radar
-            assert config.output_dirs is not None
-            plot_output_dir = Path(config.output_dirs["base"]) / radar / "plots"
             plot_consumer = PlotConsumer(
-                repository=orchestrator.repository,
+                collection=orchestrator.collection,
+                run_id=config.run_id or "",
                 stop_event=stop_event,
-                output_dir=plot_output_dir,
+                output_dir=Path(args.plot_dir),
                 config=config,
                 poll_interval=args.plot_interval,
                 show_live=args.show_plots,
@@ -264,7 +281,7 @@ def _run_nexrad(args: argparse.Namespace) -> None:
             plot_consumer.join(timeout=10)
             if plot_consumer.is_alive():
                 print("Warning: Plot consumer did not stop cleanly")
-        orchestrator.close_repository()
+        orchestrator.close_store()
         _remove_pid()
         print("Pipeline shutdown complete.")
 
@@ -400,30 +417,38 @@ def _build_postprocess_parser(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("-v", "--verbose", action="store_true", help="Verbose logging.")
 
 
-def _open_repository(repo_root: str, config_path: str | None):
-    """Discover the latest run in an existing repository and load its config.
+def _open_store(repo_root: str, config_path: str | None):
+    """Discover the latest run in an existing store and reload its config.
 
-    Returns ``(DataRepository, InternalConfig)``. Reuses the existing root
-    registry for run/radar discovery and the single ``init_runtime_config``
-    entrypoint (continuation fast-path) to reload the saved runtime config.
+    Returns ``(collection, registry, run_id, InternalConfig)``. The run's
+    exact config comes from the registry's run record; an explicit
+    ``--config`` file overrides module params on top of it.
     """
-    from types import SimpleNamespace
+    from adapt.configuration.schemas.internal import InternalConfig
+    from adapt.persistence.store import Store
+    from adapt.persistence.store_registry import StoreRegistry
 
-    from adapt.configuration.schemas.initialization import init_runtime_config
-    from adapt.persistence import DataRepository
-    from adapt.persistence.registry import RepositoryRegistry
-
-    root = Path(repo_root).resolve()
-    run = RepositoryRegistry.get_instance(root).get_latest_run()
+    store = Store.open(repo_root)
+    registry = StoreRegistry.get_instance(store.root)
+    run = registry.latest_run()
     if run is None:
-        raise ValueError(f"No runs found in repository: {root}")
-    run_id, radar = run["run_id"], run["radar"]
+        raise ValueError(f"No runs found in store: {store.root}")
+    run_id = run["run_id"]
+    collection = store.collection(run["collection_id"])
 
-    config = init_runtime_config(
-        SimpleNamespace(run_id=run_id, base_dir=str(root), config=config_path)
-    )
-    repository = DataRepository(run_id=run_id, base_dir=root, radar=radar, config=config)
-    return repository, config
+    config = InternalConfig.model_validate_json(run["config_json"])
+    if config_path:
+        from adapt.configuration.schemas.errors import validated
+        from adapt.configuration.schemas.initialization import _load_user_config_dict
+        from adapt.configuration.schemas.param import ParamConfig
+        from adapt.configuration.schemas.resolve import resolve_config
+        from adapt.configuration.schemas.user import UserConfig
+
+        user_cfg = validated(UserConfig, _load_user_config_dict(config_path), source=config_path)
+        merged = resolve_config(ParamConfig(), user_cfg, None).model_dump()
+        merged["run_id"] = run_id
+        config = InternalConfig.model_validate(merged)
+    return collection, registry, run_id, config
 
 
 def _postprocess_cmd(args: argparse.Namespace) -> None:
@@ -435,7 +460,7 @@ def _postprocess_cmd(args: argparse.Namespace) -> None:
     if not args.module:
         raise ValueError("Specify at least one module to run, e.g. --module xlma_stat.")
 
-    repository, config = _open_repository(args.repository, args.config)
+    collection, registry, run_id, config = _open_store(args.repository, args.config)
 
     if args.input_dir:
         merged = dict(config.module_params)
@@ -443,7 +468,7 @@ def _postprocess_cmd(args: argparse.Namespace) -> None:
             merged[name] = {**merged.get(name, {}), "input_dir": args.input_dir}
         config = config.model_copy(update={"module_params": merged})
 
-    PostProcessor(repository, config).run(modules=args.module)
+    PostProcessor(collection, registry, run_id, config).run(modules=args.module)
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +496,14 @@ def main() -> None:
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     subparsers.required = True
+
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Initialize an empty Adapt data store.",
+        description="Create the store layout: registry.db, logs/, collections/.",
+    )
+    _build_init_parser(init_parser)
+    init_parser.set_defaults(func=_init_cmd)
 
     run_nexrad_parser = subparsers.add_parser(
         "run-nexrad",

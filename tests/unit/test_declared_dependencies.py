@@ -43,6 +43,7 @@ _IMPORT_TO_DIST = {
 # Shrink-only: add an entry only with a reason the import cannot exist.
 _DECLARED_NOT_IMPORTED = {
     "netcdf4": "xarray NetCDF backend, loaded via entry point, never imported",
+    "certifi": "Required by the runtime SSL stack; no direct src import exists",
 }
 
 _LOCAL = {"adapt"}

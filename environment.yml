@@ -29,6 +29,9 @@ dependencies:
   - boto3
   - pydata-sphinx-theme
   - pydantic
+  - certifi>=2026.10.19
+  - ca-certificates>=2026.10.19
+  - pip>=26.2.2
   - pip:
       - sphinx-autodoc-typehints
       - myst-parser>=2.0

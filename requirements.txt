@@ -4,6 +4,7 @@ xarray
 pandas
 pydantic>=2.0
 scipy
+certifi>=2026.10.19
 
 # NEXRAD & Radar
 arm_pyart

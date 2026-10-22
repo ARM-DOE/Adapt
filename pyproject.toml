@@ -41,6 +41,7 @@ dependencies = [
     "boto3",
     "cmweather",
     "pyproj",
+    "certifi>=2026.10.19",
 ]
 
 [project.urls]

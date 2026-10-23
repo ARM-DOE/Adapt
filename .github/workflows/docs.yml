@@ -44,6 +44,14 @@ jobs:
 
       - name: Install doc dependencies
         run: |
+
+          if [ -f requirements.txt ]; then
+            echo "Found requirements.txt — installing project dependencies"
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found, skipping"
+          fi
+
           python -m pip install --upgrade "pip>=26.2.2" "certifi>=2026.10.19"
           pip install sphinx>=7.0 pydata-sphinx-theme>=0.15 \
                       sphinx-autodoc-typehints myst-parser>=2.0

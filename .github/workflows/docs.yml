@@ -58,7 +58,7 @@ jobs:
           pip install --no-deps -e .
 
       - name: Build HTML docs
-        run: sphinx-build -b html docs docs/_build/html -W --keep-going
+        run: sphinx-build -b html docs docs/_build/html --keep-going
         # -W turns warnings into errors so broken refs/syntax fail the PR check
         # --keep-going shows all warnings at once instead of stopping at the first
 

@@ -47,9 +47,7 @@ class TestRoundTrip:
             internal.segmenter.threshold_params.threshold
             == defaults.segmenter.threshold_params.threshold
         )
-        assert (
-            internal.tracker.minimum_candidate_overlap == defaults.tracker.minimum_candidate_overlap
-        )
+        assert internal.tracker.max_overlap_mismatch == defaults.tracker.max_overlap_mismatch
         assert (
             internal.analyzer.adjacency_min_touching_boundary_pixels
             == defaults.analyzer.adjacency_min_touching_boundary_pixels

@@ -16,12 +16,14 @@ from collections.abc import Iterable
 from datetime import datetime
 
 from adapt.contracts import (
+    DecisionTableWrite,
     NetcdfArtifact,
     PersistenceMeta,
     PersistenceSpec,
     ProductTableWrite,
     TrackTablesWrite,
 )
+from adapt.persistence.decision_store import DecisionStore
 from adapt.persistence.errors import StoreError
 from adapt.persistence.objects import ArtifactMeta, ObjectStore
 from adapt.persistence.products import SchemaLedger, TableWriter
@@ -80,8 +82,22 @@ class StoreOutputRouter:
                 self._write_table(module_name, spec, result, meta)
             case TrackTablesWrite():
                 self._write_tracking(module_name, spec, result, meta)
+            case DecisionTableWrite():
+                self._write_decisions(spec, result, meta)
             case _:
                 raise TypeError(f"{module_name}: unknown persistence spec {type(spec).__name__}")
+
+    def _write_decisions(
+        self, spec: DecisionTableWrite, result: dict, meta: PersistenceMeta
+    ) -> None:
+        """Analysis-only decision log: never a scan product, so no catalog link.
+
+        One connection per scan, as for the tracking tables.
+        """
+        if spec.key not in result:
+            return
+        with DecisionStore(self._collection.decisions_path) as store:
+            store.write(result[spec.key], meta)
 
     def _write_netcdf(
         self, module_name: str, spec: NetcdfArtifact, result: dict, meta: PersistenceMeta

@@ -66,7 +66,15 @@ class ProductTableWrite:
     index_columns: tuple[str, ...] = ()
 
 
-PersistenceSpec = NetcdfArtifact | TrackTablesWrite | ProductTableWrite
+@dataclass(frozen=True)
+class DecisionTableWrite:
+    """Write a decision bundle (context key) to the collection's analysis-only
+    decisions.db. Never a scan product: no catalog link, no API exposure."""
+
+    key: str
+
+
+PersistenceSpec = NetcdfArtifact | TrackTablesWrite | ProductTableWrite | DecisionTableWrite
 
 
 @dataclass(frozen=True)

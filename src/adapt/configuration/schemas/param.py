@@ -64,6 +64,26 @@ class DownloaderConfig(AdaptBaseModel):
     min_file_size: int = Field(
         1024, ge=1, description="Minimum file size in bytes to consider valid"
     )
+    max_queue_size: int = Field(
+        100,
+        ge=1,
+        description=(
+            "Scans the downloader may run ahead of the processor. Each queued item is a "
+            "small message (the volume itself is already committed to the store), so this "
+            "costs disk for the downloaded volumes only, ~10 MB each. When the queue "
+            "reaches this many items the downloader pauses; processing never pauses."
+        ),
+    )
+    queue_resume_fraction: float = Field(
+        0.10,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "The downloader resumes once the queue has drained to this fraction of "
+            "max_queue_size (at least 1 item). The gap between the two levels stops the "
+            "downloader flapping on every consumed scan."
+        ),
+    )
 
 
 class RegridderConfig(AdaptBaseModel):
@@ -102,9 +122,43 @@ class SegmenterConfig(AdaptBaseModel):
     # Shared labeling-backend parameters (applied to every method's mask)
     min_cellsize_gridpoint: int = Field(5, ge=1)
     max_cellsize_gridpoint: int | None = Field(None, ge=1)
-    closing_kernel: tuple[int, int] = (1, 1)
+    closing_radius: int = Field(
+        2,
+        ge=0,
+        description=(
+            "Radius (grid points) of the disk used to close the convective mask: a "
+            "dilation followed by an erosion with the same disk. Fills gaps and "
+            "indentations narrower than ~2r and rounds the boundary without changing "
+            "the extent of large features. 0 disables it."
+        ),
+    )
     filter_by_size: bool = True
     h_maxima: float = Field(5.0, gt=0, description="h-maxima height for cell seeding (dBZ)")
+    # Previous-frame seeding: the projection module's one-step-ahead labels
+    # become extra watershed markers (union with h-maxima seeds, never a
+    # replacement). Off by default; off is byte-identical to no seeding.
+    seed_carry_frames: int = Field(
+        1,
+        ge=0,
+        description="How many consecutive frames a core may be carried without independent "
+        "detection. 0 disables the carry entirely; 1 carries only from the immediately "
+        "preceding frame (a core not re-detected next frame is dropped); N allows N frames",
+    )
+    carried_exempt_size_filter: bool = Field(
+        False,
+        description="Spare carried-seed cells from min_cellsize_gridpoint. Off by default: "
+        "on KHTX 2021-05-04 the spared basins (1-4 px) sat wholly inside the parent's "
+        "projected hull (Opc 1.0) but covered ~4% of it, so the (v1) tracker's "
+        "projected-overlap gate rejected them anyway — 60 of 63 became one-scan "
+        "orphan tracks and 3 continued. The rescue moved from the size filter to the "
+        "tracking gate rather than succeeding. Kept as an option for study arms",
+    )
+    seed_carry_min_separation: int = Field(
+        5,
+        ge=1,
+        description="Minimum pixel distance from any h-maxima seed for a carried core "
+        "to be admitted",
+    )
     # Per-method scientific parameters (one block per method; defaults = algorithm defaults)
     threshold_params: ThresholdParams = Field(default_factory=ThresholdParams)  # type: ignore[arg-type]
     conv_strat_raut_params: ConvStratRautParams = Field(default_factory=ConvStratRautParams)  # type: ignore[arg-type]
@@ -128,6 +182,16 @@ class GlobalConfig(AdaptBaseModel):
     """Global pipeline settings."""
 
     z_level: float = Field(2000.0, description="Analysis altitude in meters")
+    max_scan_gap_minutes: float = Field(
+        10.0,
+        gt=0.0,
+        description=(
+            "The one scan-gap bound, shared by every stage that pairs frames. Beyond it "
+            "no seed is carried, no projection is computed and tracking resets. Set it to "
+            "roughly twice the nominal scan cadence; a single value keeps the stages from "
+            "disagreeing about whether a gap is crossable"
+        ),
+    )
     tracking_field: str = Field(
         "reflectivity",
         description=(
@@ -161,11 +225,10 @@ class ProjectorConfig(AdaptBaseModel):
     """Cell projection configuration."""
 
     method: Literal["adapt_default"] = "adapt_default"
-    max_time_interval_minutes: int = Field(30, ge=1)
     max_projection_steps: int = Field(3, ge=1, le=10)
     nan_fill_value: float = 0.0
     flow_params: FlowParamsConfig = Field(default_factory=FlowParamsConfig)  # type: ignore[arg-type]
-    min_motion_threshold: float = Field(0.5, ge=0)
+    min_motion_threshold: float = Field(1.0, ge=0)
     max_flow_magnitude: float = Field(
         20.0,
         gt=0,
@@ -238,69 +301,90 @@ class TrackerConfig(AdaptBaseModel):
         width: int = Field(10, ge=1)
         alphabet: Literal["base36_upper"] = "base36_upper"
 
-    split_overlap_threshold: float = Field(
-        0.8,
+    cell_threshold: float = Field(
+        30.0,
+        description="Intensity at the cell edge (field units). The excess e = polarity·(f − "
+        "cell_threshold)₊ weights the cell centre (by e²) and the identity score",
+    )
+    polarity: Literal[1, -1] = Field(
+        1,
+        description="+1 when cells are above the threshold (reflectivity), −1 when below "
+        "(brightness temperature)",
+    )
+    growth_max_km: float = Field(
+        2.0,
         ge=0.0,
+        description="Growth r_max (km) of the smallest footprints and cells: "
+        "r = r_max·(1 − √A/ℓ0)₊ evens out the one-grid-cell registration error across cell sizes",
+    )
+    growth_size_km: float = Field(
+        12.0, gt=0.0, description="Size ℓ0 (km, √area) at and above which cells are not grown"
+    )
+    max_overlap_mismatch: float = Field(
+        0.6,
+        gt=0.0,
         le=1.0,
-        description=(
-            "Min fraction of projected hull area overlapping born/surviving cell "
-            "to confirm SPLIT or MERGE"
-        ),
+        description="Curved overlap gate u_max: a pair is a candidate when u = 1 − √(O^c·O^h) "
+        "on the grown shapes is at most this",
+    )
+    max_link_cost: float = Field(
+        1.8,
+        gt=0.0,
+        description="Cost ceiling c_max: the cost of leaving a cell unlinked; a link is accepted "
+        "only if its cost c = u + w_d·d + h is at most this",
+    )
+    residual_weight: float = Field(
+        0.25,
+        ge=0.0,
+        description="w_d on the shape-aware centre residual d; 0.25 makes w_d·d the displacement "
+        "over the diameter for a round cell",
+    )
+    heading_weight: float = Field(
+        1.0,
+        ge=0.0,
+        description="w_h on the heading term w_h·(1 − cos Δθ)/2, applied when both steps exceed "
+        "two grid lengths",
+    )
+    max_speed_ms: float = Field(40.0, gt=0.0, description="Hard speed cap v_max (m/s) of any link")
+    max_acceleration_ms2: float = Field(
+        0.04,
+        ge=0.0,
+        description="a_max (m/s²) in the additive speed-change gate "
+        "v ≤ v_prev + a_max·Δt + 2√2·σ_x/Δt (σ_x = one grid length)",
+    )
+    split_overlap_threshold: float = Field(
+        0.65,
+        gt=0.0,
+        le=1.0,
+        description="τ_s: an orphan is a split child when a continuing parent's grown footprint "
+        "covers at least this share of it (O^c)",
+    )
+    merge_overlap_threshold: float = Field(
+        0.7,
+        gt=0.0,
+        le=1.0,
+        description="τ_m: an unlinked cell merged into a continuing cell covering at least this "
+        "share of its grown footprint (O^h)",
+    )
+    latent_scans: int = Field(
+        2,
+        ge=0,
+        description="N: a track that ends or merges away is carried by the flow for up to N scans "
+        "and may be resumed; 0 or 1 ends it at once",
+    )
+    identity_intensity_weight: float = Field(
+        1.0,
+        ge=0.0,
+        description="γ in the identity score S = log A + γ·log ē (1: intensity mass, 0: area)",
+    )
+    identity_score_margin: float = Field(
+        0.33,
+        ge=0.0,
+        description="δ_S: scores closer than this are within noise and the identity follows the "
+        "candidate nearer the predicted position",
     )
     core_field_threshold: float = Field(
-        40.0, ge=0.0, description="Field threshold for the core-area output (e.g. dBZ for radar)"
-    )
-    max_tracking_gap_minutes: float = Field(
-        20.0,
-        gt=0.0,
-        description="Hard limit: scan gaps above this terminate all tracks and restart "
-        "(no matching attempted across the gap)",
-    )
-    max_speed_ms: float = Field(
-        40.0,
-        gt=0.0,
-        description="Hard physical cap (m/s); candidate pairs above this are rejected pre-matching",
-    )
-    max_speed_multiplier: float = Field(
-        3.0,
-        gt=0.0,
-        description="Hard acceleration cap: reject if candidate speed exceeds this times the "
-        "track's previous speed",
-    )
-    heading_change_penalty_weight: float = Field(
-        0.0,
-        ge=0.0,
-        description="Optional cost penalty per radian of heading change (0 = diagnostic only)",
-    )
-    projected_hull_buffer_km: float = Field(
-        1.0,
-        gt=0.0,
-        description="Dilation radius (km) applied to projected hulls before candidate generation, "
-        "to absorb segmentation and optical-flow uncertainty",
-    )
-    minimum_candidate_overlap: float = Field(
-        0.20,
-        ge=0.0,
-        le=1.0,
-        description="Hard gate: min fraction of the candidate cell covered by the projected hull "
-        "(Opc = intersection / candidate area)",
-    )
-    minimum_projected_overlap: float = Field(
-        0.20,
-        ge=0.0,
-        le=1.0,
-        description="Hard gate: min fraction of the projected hull covered by the candidate cell "
-        "(Ocp = intersection / projected hull area)",
-    )
-    length_scale: Literal["hull_equiv_diameter", "sum_radii", "fixed_km"] = Field(
-        "hull_equiv_diameter",
-        description="Characteristic length L that normalises centroid displacement in the "
-        "geometry-first cost (cost = m + d/L). Swappable for experimentation",
-    )
-    geometry_length_scale_km: float = Field(
-        5.0,
-        gt=0.0,
-        description="Fixed characteristic length (km) used only when length_scale='fixed_km'",
+        40.0, description="Field threshold for the diagnostic core-area output (not a decision)"
     )
     cell_uid: CellUidConfig = Field(default_factory=CellUidConfig)  # type: ignore[arg-type]
 

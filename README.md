@@ -1,6 +1,6 @@
 # Adapt
 
-**Real-time detection, projection, and tracking of convective storms in weather radar data, built to support adaptive radar scanning at the DOE ARM User Facility.**
+**Real-time detection, projection, and tracking of convective storms in weather radar data — built for operational adaptive scanning at the DOE ARM User Facility, and for large-scale generation of value-added products and AI-ready storm datasets.**
 
 ![Status](https://img.shields.io/badge/STATUS-ACTIVE%20DEVELOPMENT-orange?style=for-the-badge&logo=github)
 ![API](https://img.shields.io/badge/API-BREAKING%20CHANGES-red?style=for-the-badge&logo=dependabot)
@@ -59,6 +59,12 @@ fixed volume-scan schedule. The same pipeline runs unchanged on historical data,
 applications such as storm lifecycle studies, radar–lightning correlation analysis, and the construction
 of analysis-ready, multi-sensor datasets combining radar, satellite, and Lightning Mapping Array
 observations.
+
+## From operations to large-scale analysis
+
+The pipeline that selects targets in real time also reprocesses years of archived data, with identical,
+traceable results. Its tracked cells, lifecycle events and decision logs make ready-made value-added
+products and consistent datasets for AI-driven research.
 
 ## Current status
 

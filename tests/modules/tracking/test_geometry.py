@@ -1,7 +1,10 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Unit tests for geometry-first matching primitives (analytic values, no fixtures)."""
+"""Geometry of tracker v2: growth, grown overlaps, core centre, shape residual.
+
+Synthetic masks with analytically known answers; no fixtures.
+"""
 
 import math
 
@@ -9,120 +12,189 @@ import numpy as np
 import pytest
 
 from adapt.modules.tracking.matching.geometry import (
-    bidirectional_overlap,
-    buffer_pixels_from_km,
-    dilate_hull,
-    geometric_mismatch,
-    length_scale,
-    mask_centroid,
-    mass_weighted_centroid,
-    pair_cost,
+    cell_intensity,
+    core_centre,
+    footprint_pairs,
+    grow,
+    growth_radius_km,
+    mahalanobis,
+    second_moment,
 )
 
 pytestmark = pytest.mark.unit
 
 
-def test_bidirectional_overlap_asymmetric():
-    # hull = 4 px column, cell = 8 px, intersection = 2 px
-    hull = np.zeros((4, 4), dtype=bool)
-    hull[0:4, 0] = True  # 4 px
-    cell = np.zeros((4, 4), dtype=bool)
-    cell[0:2, 0:4] = True  # 8 px
-    # intersection = column 0 rows 0..1 = 2 px
-    opc, ocp = bidirectional_overlap(hull, cell)
-    assert opc == pytest.approx(2.0 / 8.0)  # intersection / candidate
-    assert ocp == pytest.approx(2.0 / 4.0)  # intersection / hull
+def _disk(shape, centre, radius):
+    rr, cc = np.mgrid[: shape[0], : shape[1]]
+    return (rr - centre[0]) ** 2 + (cc - centre[1]) ** 2 <= radius**2
 
 
-def test_bidirectional_overlap_disjoint_is_zero():
-    hull = np.zeros((4, 4), dtype=bool)
-    hull[0, 0] = True
-    cell = np.zeros((4, 4), dtype=bool)
-    cell[3, 3] = True
-    assert bidirectional_overlap(hull, cell) == (0.0, 0.0)
+# ── growth radius r = r_max (1 − √A / ℓ0)₊ ──────────────────────────────────
 
 
-def test_dilate_hull_single_pixel_by_one():
-    m = np.zeros((5, 5), dtype=bool)
-    m[2, 2] = True
-    out = dilate_hull(m, 1)
-    assert out[1:4, 1:4].all()  # 3x3 block around centre
-    assert int(out.sum()) == 9
+def test_growth_radius_is_r_max_for_a_vanishing_cell():
+    assert growth_radius_km(0.0, r_max_km=2.0, l0_km=12.0) == pytest.approx(2.0)
 
 
-def test_dilate_hull_zero_buffer_is_identity():
-    m = np.zeros((3, 3), dtype=bool)
-    m[1, 1] = True
-    assert np.array_equal(dilate_hull(m, 0), m)
+def test_growth_radius_falls_linearly_in_size():
+    # √A = 6 km is half of ℓ0 → half of r_max
+    assert growth_radius_km(36.0, r_max_km=2.0, l0_km=12.0) == pytest.approx(1.0)
 
 
-def test_buffer_pixels_from_km_rounds_up():
-    # 1 km buffer at 500 m/pixel = 2 px; at 800 m/pixel = ceil(1.25) = 2
-    assert buffer_pixels_from_km(1.0, 500.0) == 2
-    assert buffer_pixels_from_km(1.0, 800.0) == 2
-    assert buffer_pixels_from_km(2.0, 1000.0) == 2
+def test_growth_radius_is_zero_at_and_above_l0():
+    assert growth_radius_km(144.0, r_max_km=2.0, l0_km=12.0) == 0.0
+    assert growth_radius_km(400.0, r_max_km=2.0, l0_km=12.0) == 0.0
 
 
-def test_length_scale_equiv_diameter():
-    # hull 100 px, pixel_area 1e6 m² (1 km²) → area 1e8 m² → diameter 2*sqrt(1e8/pi)
-    L = length_scale("hull_equiv_diameter", 100.0, 50.0, 1e6, fixed_km=5.0)
-    assert pytest.approx(2.0 * math.sqrt(1e8 / math.pi)) == L
+# ── growth from the boundary (distance transform) ───────────────────────────
 
 
-def test_length_scale_sum_radii():
-    L = length_scale("sum_radii", 100.0, 25.0, 1e6, fixed_km=5.0)
-    expected = math.sqrt(1e8 / math.pi) + math.sqrt(25e6 / math.pi)
-    assert pytest.approx(expected) == L
+def test_grow_by_zero_is_identity():
+    mask = _disk((21, 21), (10, 10), 3)
+    assert np.array_equal(grow(mask, 0.0), mask)
 
 
-def test_length_scale_fixed_km_ignores_area():
-    L = length_scale("fixed_km", 100.0, 25.0, 1e6, fixed_km=5.0)
-    assert pytest.approx(5000.0) == L
+def test_grow_is_measured_from_the_boundary_not_the_centre():
+    # A 1-px-wide line grown by 2 px is 5 px wide along its whole length,
+    # exactly like the rim of a round cell: growth depends on distance to the shape.
+    line = np.zeros((11, 31), dtype=bool)
+    line[5, 5:26] = True
+    grown = grow(line, 2.0)
+    assert grown[:, 15].sum() == 5
+    assert grown[3:8, 5:26].all()
 
 
-def test_length_scale_unknown_raises():
-    with pytest.raises(ValueError, match="Unknown length_scale"):
-        length_scale("nope", 1.0, 1.0, 1.0, fixed_km=1.0)
+def test_grow_is_continuous_in_the_radius():
+    mask = np.zeros((21, 21), dtype=bool)
+    mask[10, 10] = True
+    assert grow(mask, 1.0).sum() == 5  # von Neumann neighbours at distance 1
+    assert grow(mask, 1.5).sum() == 9  # diagonals at √2 join
 
 
-def test_geometric_mismatch_perfect_and_none():
-    assert geometric_mismatch(1.0, 1.0) == pytest.approx(0.0)
-    assert geometric_mismatch(0.0, 0.0) == pytest.approx(1.0)
-    # sqrt spreads: Opc=Ocp=0.25 → g=0.25 → m=0.75
-    assert geometric_mismatch(0.25, 0.25) == pytest.approx(0.75)
+# ── pair search on grown shapes ─────────────────────────────────────────────
 
 
-def test_pair_cost_combines_overlap_and_normalised_displacement():
-    # m = 1 - sqrt(0.25)*sqrt(0.25) = 0.75; d/L = 1000/2000 = 0.5 → cost 1.25
-    assert pair_cost(0.25, 0.25, 1000.0, 2000.0) == pytest.approx(1.25)
+def test_identical_shapes_have_full_overlap_both_ways():
+    labels = np.zeros((30, 30), dtype=np.int32)
+    labels[_disk((30, 30), (15, 15), 4)] = 7
+    pairs = footprint_pairs(labels == 7, labels, radius_px=1.0)
+    (pair,) = pairs
+    assert pair.label == 7
+    assert pair.o_c == pytest.approx(1.0)
+    assert pair.o_h == pytest.approx(1.0)
+    assert pair.u == pytest.approx(0.0)
 
 
-def test_pair_cost_degenerate_length_falls_back_to_mismatch():
-    assert pair_cost(0.25, 0.25, 1000.0, 0.0) == pytest.approx(0.75)
+def test_overlap_fractions_are_normalised_by_each_grown_shape():
+    # Footprint: a 4x4 block. Cell: a 4x8 block containing it. Radius 0.
+    foot = np.zeros((20, 20), dtype=bool)
+    foot[5:9, 5:9] = True
+    labels = np.zeros((20, 20), dtype=np.int32)
+    labels[5:9, 5:13] = 3
+    (pair,) = footprint_pairs(foot, labels, radius_px=0.0)
+    assert pair.intersection_px == 16
+    assert pair.o_c == pytest.approx(16 / 32)  # share of the cell
+    assert pair.o_h == pytest.approx(16 / 16)  # share of the footprint
+    assert pair.u == pytest.approx(1 - math.sqrt(0.5))
 
 
-def test_mask_centroid_geometric():
-    m = np.zeros((3, 3), dtype=bool)
-    m[0, 0] = True
-    m[0, 2] = True
-    row, col = mask_centroid(m)
-    assert (row, col) == pytest.approx((0.0, 1.0))
+def test_growth_turns_a_near_miss_into_a_candidate():
+    # Two single pixels 3 px apart: disjoint when ungrown, overlapping when
+    # both are grown by 2 px (the grown disks meet in the middle).
+    foot = np.zeros((10, 20), dtype=bool)
+    foot[5, 5] = True
+    labels = np.zeros((10, 20), dtype=np.int32)
+    labels[5, 8] = 1
+    assert footprint_pairs(foot, labels, radius_px=0.0) == []
+    (pair,) = footprint_pairs(foot, labels, radius_px=2.0)
+    assert pair.label == 1 and pair.intersection_px > 0
 
 
-def test_mass_weighted_centroid_shifts_toward_high_field():
-    field = np.zeros((1, 3), dtype=float)
-    field[0, 0] = 1.0
-    field[0, 2] = 9.0
-    mask = np.ones((1, 3), dtype=bool)
-    # weights = field - min = [1,0,9]-0 → but min within mask is 0 (col1) → weights [1,0,9]
-    row, col = mass_weighted_centroid(field, mask)
-    # weighted col = (1*0 + 0*1 + 9*2)/10 = 1.8 → pulled toward col 2
-    assert col == pytest.approx(1.8)
+def test_cell_is_grown_whole_even_when_it_extends_beyond_the_footprint():
+    # A long cell touching a small footprint: |M⁺| must be the full grown cell.
+    foot = np.zeros((20, 60), dtype=bool)
+    foot[10, 5] = True
+    labels = np.zeros((20, 60), dtype=np.int32)
+    labels[10, 6:56] = 2
+    (pair,) = footprint_pairs(foot, labels, radius_px=1.0)
+    assert pair.cell_grown_px == grow(labels == 2, 1.0).sum()
+    assert pair.footprint_grown_px == 5
+
+
+def test_empty_footprint_has_no_pairs():
+    labels = np.ones((5, 5), dtype=np.int32)
+    assert footprint_pairs(np.zeros((5, 5), dtype=bool), labels, radius_px=2.0) == []
+
+
+# ── intensity excess, mass, core centre ─────────────────────────────────────
+
+
+def test_excess_is_positive_above_threshold_for_reflectivity():
+    field = np.array([[30.0, 40.0, 50.0]])
+    mask = np.ones_like(field, dtype=bool)
+    mass, mean_excess = cell_intensity(field, mask, threshold=30.0, polarity=1)
+    assert mass == pytest.approx(0 + 10 + 20)
+    assert mean_excess == pytest.approx(10.0)
+
+
+def test_excess_is_positive_below_threshold_for_brightness_temperature():
+    field = np.array([[235.0, 225.0, 215.0]])
+    mask = np.ones_like(field, dtype=bool)
+    mass, _ = cell_intensity(field, mask, threshold=235.0, polarity=-1)
+    assert mass == pytest.approx(0 + 10 + 20)
+
+
+def test_core_centre_is_pulled_to_the_stronger_core_by_the_square():
+    # Two pixels, excess 1 and 3: e-weighting gives 0.75, e²-weighting 0.9.
+    field = np.array([[31.0, 33.0]])
+    mask = np.ones_like(field, dtype=bool)
+    row, col = core_centre(field, mask, threshold=30.0, polarity=1)
     assert row == pytest.approx(0.0)
+    assert col == pytest.approx(9 / 10)
 
 
-def test_mass_weighted_centroid_uniform_field_falls_back_to_geometric():
-    field = np.full((1, 3), 5.0, dtype=float)
-    mask = np.ones((1, 3), dtype=bool)
-    row, col = mass_weighted_centroid(field, mask)
-    assert (row, col) == pytest.approx((0.0, 1.0))
+def test_core_centre_polarity_mirrors_for_brightness_temperature():
+    field = np.array([[229.0, 227.0]])  # excess 1 and 3 below 230 K
+    mask = np.ones_like(field, dtype=bool)
+    _, col = core_centre(field, mask, threshold=230.0, polarity=-1)
+    assert col == pytest.approx(9 / 10)
+
+
+def test_core_centre_of_a_cell_without_excess_is_its_geometric_centre():
+    field = np.full((1, 4), 20.0)
+    mask = np.ones_like(field, dtype=bool)
+    assert core_centre(field, mask, threshold=30.0, polarity=1) == pytest.approx((0.0, 1.5))
+
+
+def test_missing_field_values_carry_no_excess():
+    field = np.array([[np.nan, 40.0]])
+    mask = np.ones_like(field, dtype=bool)
+    mass, _ = cell_intensity(field, mask, threshold=30.0, polarity=1)
+    assert mass == pytest.approx(10.0)
+
+
+# ── second moment and shape-aware residual ──────────────────────────────────
+
+
+def test_round_cell_residual_is_four_times_displacement_over_diameter():
+    # For a disk of radius R, Σ = R²/4 I, so d = |δ| / (R/2) = 4 |δ| / D.
+    mask = _disk((201, 201), (100, 100), 40)
+    sigma = second_moment(mask)
+    d = mahalanobis(np.array([0.0, 10.0]), sigma)
+    assert d == pytest.approx(4 * 10 / 80, rel=0.02)
+
+
+def test_residual_along_a_line_costs_less_than_across_it():
+    line = np.zeros((41, 81), dtype=bool)
+    line[18:23, 5:76] = True  # 5 px thick, 71 px long, along columns
+    sigma = second_moment(line)
+    along = mahalanobis(np.array([0.0, 5.0]), sigma)
+    across = mahalanobis(np.array([5.0, 0.0]), sigma)
+    assert along < across / 5
+
+
+def test_single_pixel_moment_is_finite():
+    mask = np.zeros((3, 3), dtype=bool)
+    mask[1, 1] = True
+    sigma = second_moment(mask)
+    assert np.all(np.isfinite(np.linalg.inv(sigma)))

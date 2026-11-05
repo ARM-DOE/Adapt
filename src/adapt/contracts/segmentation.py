@@ -53,3 +53,18 @@ def assert_segmented(ds: xr.Dataset, labels_name: str) -> None:
 def check_segmented_ds(ds: xr.Dataset) -> None:
     """Bound contract for the standard segmented dataset (cell_labels variable name fixed)."""
     assert_segmented(ds, "cell_labels")
+
+
+def check_seed_carry(ages: tuple) -> None:
+    """Carry age per cell label: a tuple of ints >= 0, index i for label i + 1.
+
+    0 means the cell was seeded independently this scan; k means it has been
+    carried k consecutive scans from the previous frame's cores.
+    """
+    require(isinstance(ages, tuple), f"seed_carry must be a tuple, got {type(ages).__name__}")
+    for i, age in enumerate(ages):
+        require(
+            isinstance(age, int) and not isinstance(age, bool),
+            f"seed_carry[{i}] must be an int, got {type(age).__name__}",
+        )
+        require(age >= 0, f"seed_carry[{i}] must be >= 0, got {age}")

@@ -294,6 +294,12 @@ class TestCheckCellEvents:
         with pytest.raises(ContractViolation):
             check_cell_events(df)
 
+    @pytest.mark.parametrize("event_type", ["LATENT", "RESUMED"])
+    def test_latent_track_events_are_valid(self, event_type):
+        df = _valid_cell_events().copy()
+        df["event_type"] = event_type
+        check_cell_events(df)
+
     def test_fails_on_invalid_event_type(self):
         df = _valid_cell_events().copy()
         df["event_type"] = "UNKNOWN"

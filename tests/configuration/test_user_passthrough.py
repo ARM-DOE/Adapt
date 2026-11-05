@@ -25,8 +25,8 @@ def _resolve(user_dict):
 
 class TestPassthroughSections:
     def test_tracker_override_reaches_internal(self):
-        internal = _resolve({"radar": "KLOT", "tracker": {"minimum_candidate_overlap": 0.5}})
-        assert internal.tracker.minimum_candidate_overlap == 0.5
+        internal = _resolve({"radar": "KLOT", "tracker": {"max_link_cost": 1.5}})
+        assert internal.tracker.max_link_cost == 1.5
 
     def test_visualization_override_reaches_internal(self):
         internal = _resolve({"radar": "KLOT", "visualization": {"dpi": 123}})

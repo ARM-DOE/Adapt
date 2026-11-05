@@ -14,7 +14,7 @@ def test_threshold_fixture_config(detection_module_config):
     """The threshold test fixture yields a threshold segmenter with expert values."""
     seg = RadarCellSegmenter(detection_module_config)
     assert seg.method == "threshold"
-    assert seg.method_params["threshold"] == 30.0
+    assert seg.method_params["threshold"] == 35.0
     assert seg.filter_by_size is True
 
 

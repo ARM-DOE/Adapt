@@ -62,11 +62,11 @@ class TestUserConfigAliases:
     """Test UserConfig flat aliases map correctly."""
 
     def test_threshold_lives_in_per_method_block(self):
-        """threshold is now a per-method parameter, defaulting to 30 dBZ."""
+        """threshold is now a per-method parameter, defaulting to 35 dBZ."""
         user = UserConfig(base_dir="/tmp", radar="KHTX")
         config = resolve_config(ParamConfig(), user, None)
 
-        assert config.segmenter.threshold_params.threshold == 30.0
+        assert config.segmenter.threshold_params.threshold == 35.0
 
     def test_radar_id_alias(self):
         """radar_id flat alias maps to downloader.radar_id."""
@@ -213,8 +213,8 @@ class TestDefaultValues:
         user = UserConfig(base_dir="/tmp", radar="KHTX")
         config = resolve_config(ParamConfig(), user, None)
 
-        assert config.segmenter.threshold_params.threshold == 30.0
-        assert config.segmenter.closing_kernel == (1, 1)
+        assert config.segmenter.threshold_params.threshold == 35.0
+        assert config.segmenter.closing_radius == 2
         assert config.segmenter.min_cellsize_gridpoint == 5
         assert config.segmenter.filter_by_size is True
 

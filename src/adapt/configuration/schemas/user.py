@@ -49,9 +49,51 @@ class UserSegmenterConfig(_UserSection):
     method: str | None = None
     min_cellsize_gridpoint: int | None = None
     max_cellsize_gridpoint: int | None = None
-    closing_kernel: tuple[int, int] | None = None
+    closing_radius: int | None = None
     filter_by_size: bool | None = None
     h_maxima: float | None = None
+    seed_carry_frames: int | None = None
+    seed_carry_min_separation: int | None = None
+    carried_exempt_size_filter: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def fold_legacy_closing_kernel(cls, data):
+        """Accept the retired ``closing_kernel: [w, h]`` rectangle as a disk radius.
+
+        ``(1, 1)`` was a no-op and maps to 0; a w x h rectangle maps to
+        ``max(w, h) // 2`` so the smoothing scale is preserved.
+        """
+        if isinstance(data, dict) and "closing_kernel" in data:
+            data = dict(data)
+            kernel = data.pop("closing_kernel")
+            if kernel is not None and data.get("closing_radius") is None:
+                w, h = kernel
+                data["closing_radius"] = max(int(w), int(h)) // 2
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def fold_legacy_seed_carry(cls, data):
+        """Accept the retired ``seed_carry`` / ``seed_carry_max_frames`` pair.
+
+        One integer replaced them: 0 is off, N carries for N frames. A legacy
+        config maps as ``seed_carry: false -> 0`` and
+        ``seed_carry: true -> seed_carry_max_frames`` (default 2, its old
+        default), so existing runs keep their behaviour.
+        """
+        if not isinstance(data, dict):
+            return data
+        legacy_on = data.pop("seed_carry", None)
+        legacy_max = data.pop("seed_carry_max_frames", None)
+        if legacy_on is None and legacy_max is None:
+            return data
+        if data.get("seed_carry_frames") is None:
+            if legacy_on is False:
+                data["seed_carry_frames"] = 0
+            elif legacy_on is True or legacy_max is not None:
+                data["seed_carry_frames"] = 2 if legacy_max is None else int(legacy_max)
+        return data
 
     @field_validator("method", mode="before")
     @classmethod
@@ -66,6 +108,7 @@ class UserGlobalConfig(_UserSection):
     """User-facing global config."""
 
     z_level: float | None = None
+    max_scan_gap_minutes: float | None = None
     tracking_field: str | None = None
     coord_names: dict[str, str] | None = None
 
@@ -82,7 +125,6 @@ class UserProjectorConfig(_UserSection):
     """User-facing projector config."""
 
     method: str | None = None
-    max_time_interval_minutes: int | None = None
     max_projection_steps: int | None = None
     nan_fill_value: float | None = None
     flow_params: dict[str, Any] | None = None
@@ -121,6 +163,8 @@ class UserDownloaderConfig(_UserSection):
     max_fetch_retries: int | None = None
     start_time: str | None = None
     end_time: str | None = None
+    max_queue_size: int | None = None
+    queue_resume_fraction: float | None = None
 
 
 class UserAnalyzerConfig(_UserSection):

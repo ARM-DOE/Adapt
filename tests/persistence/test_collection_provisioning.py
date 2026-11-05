@@ -41,7 +41,12 @@ class TestCollectionProvisioning:
         store.close()
 
         cdir = store.root / "collections" / "KILX"
-        assert {p.name for p in cdir.iterdir()} == {"catalog.db", "products.db", "objects"}
+        assert {p.name for p in cdir.iterdir()} == {
+            "catalog.db",
+            "products.db",
+            "decisions.db",
+            "objects",
+        }
         assert (cdir / "objects").is_dir()
 
     def test_catalog_has_discovery_tables_only(self, store):
@@ -65,6 +70,22 @@ class TestCollectionProvisioning:
             "annotations",
         }
 
+    def test_decisions_has_the_decision_tables_only(self, store):
+        store.collection("KILX")
+        store.close()
+
+        assert _tables(store.root / "collections" / "KILX" / "decisions.db") == {
+            "tracking_scans",
+            "tracking_cells",
+            "tracking_pairs",
+            "tracking_lineage",
+            "tracking_identity",
+            "tracking_latent",
+            "segmentation_frames",
+            "segmentation_seeds",
+            "segmentation_components",
+        }
+
     def test_second_open_reuses_layout(self, store):
         first = store.collection("KILX")
         second = store.collection("KILX")
@@ -72,7 +93,12 @@ class TestCollectionProvisioning:
         assert second is first
         store.close()
         cdir = store.root / "collections" / "KILX"
-        assert {p.name for p in cdir.iterdir()} == {"catalog.db", "products.db", "objects"}
+        assert {p.name for p in cdir.iterdir()} == {
+            "catalog.db",
+            "products.db",
+            "decisions.db",
+            "objects",
+        }
 
     def test_collection_exposes_paths_and_catalog(self, store):
         coll = store.collection("KILX")
@@ -80,6 +106,7 @@ class TestCollectionProvisioning:
         assert coll.collection_id == "KILX"
         assert coll.objects_dir == store.root / "collections" / "KILX" / "objects"
         assert coll.products_path == store.root / "collections" / "KILX" / "products.db"
+        assert coll.decisions_path == store.root / "collections" / "KILX" / "decisions.db"
         assert coll.catalog is not None
 
 

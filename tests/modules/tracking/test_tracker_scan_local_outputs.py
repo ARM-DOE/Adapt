@@ -23,7 +23,10 @@ def config():
         import shutil
 
         param = ParamConfig()
+        # Split and merge are separate thresholds now; this fixture wants both
+        # loose, which is what the single value used to mean.
         param.tracker.split_overlap_threshold = 0.4
+        param.tracker.merge_overlap_threshold = 0.4
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
         return TrackingModule.build_config(internal)
@@ -192,7 +195,7 @@ def test_split_event(tracker):
     assert tracked2["cell_uid"].nunique() == 2
 
 
-def test_merge_event_emits_death(tracker):
+def test_merge_keeps_the_absorbed_track_latent(tracker):
     t1 = np.datetime64("2024-01-01T12:00:00")
     t2 = np.datetime64("2024-01-01T12:05:00")
 
@@ -246,9 +249,13 @@ def test_merge_event_emits_death(tracker):
     tracked2, events2 = tracker.track(ds2, stats2, scan_id="site006scan")
     assert len(tracked2) == 1
     assert len(events2[events2["event_type"] == "MERGE"]) == 1
-    deaths = events2[events2["event_type"] == "TERMINATION"]
-    assert len(deaths) >= 1
-    assert deaths["source_cell_uid"].notna().any()
+    # The absorbed track is not ended yet: it stays latent for possible resumption.
+    latent = events2[events2["event_type"] == "LATENT"]
+    assert len(latent) == 1
+    assert (
+        latent["source_cell_uid"].iloc[0]
+        == events2[events2["event_type"] == "MERGE"]["source_cell_uid"].iloc[0]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +270,7 @@ def _make_config(split_overlap=0.4):
     try:
         param = ParamConfig()
         param.tracker.split_overlap_threshold = split_overlap
+        param.tracker.merge_overlap_threshold = split_overlap
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
         return TrackingModule.build_config(internal)

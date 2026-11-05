@@ -47,7 +47,7 @@ class ProjectionModule(BaseModule):
         return ProjectionConfig(
             method=cfg.projector.method,
             nan_fill_value=cfg.projector.nan_fill_value,
-            max_time_interval_minutes=cfg.projector.max_time_interval_minutes,
+            max_time_interval_minutes=cfg.global_.max_scan_gap_minutes,
             max_projection_steps=cfg.projector.max_projection_steps,
             pyr_scale=cfg.projector.flow_params.pyr_scale,
             levels=cfg.projector.flow_params.levels,

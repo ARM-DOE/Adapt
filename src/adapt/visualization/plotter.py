@@ -19,6 +19,10 @@ import pandas as pd
 import xarray as xr
 
 from adapt.contracts import CELL_LABELS_VAR  # noqa: E402  (layer-legal: contracts is a leaf)
+from adapt.utils.basemap import (  # noqa: E402  (layer-legal: utils is a leaf)
+    TILE_CACHE_DIR,
+    tile_headers,
+)
 
 matplotlib.use("Agg")
 import contextlib
@@ -28,6 +32,7 @@ import matplotlib.pyplot as plt
 try:
     import contextily as ctx
 
+    ctx.set_cache_dir(str(TILE_CACHE_DIR))  # persist tiles across sessions
     CONTEXTILY_AVAILABLE = True
 except ImportError:
     CONTEXTILY_AVAILABLE = False
@@ -266,9 +271,10 @@ class RadarPlotter:
                 ax,
                 crs=crs_str,
                 source=ctx.providers.OpenStreetMap.Mapnik,
+                headers=tile_headers(),
                 alpha=self.basemap_alpha,
                 attribution=False,
-                zoom="auto",
+                zoom=8,  # fixed: "auto" can pick zoom 10 (16x the tiles, ~100 MB cached per site)
             )
         except Exception as e:
             logger.warning(f"Could not add basemap: {e}")

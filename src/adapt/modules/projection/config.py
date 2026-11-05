@@ -16,7 +16,7 @@ class ProjectionConfig(BaseModel):
 
     method: str
     nan_fill_value: float
-    max_time_interval_minutes: int
+    max_time_interval_minutes: float  # fed from global_.max_scan_gap_minutes
     max_projection_steps: int
     pyr_scale: float
     levels: int

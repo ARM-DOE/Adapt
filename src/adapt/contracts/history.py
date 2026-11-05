@@ -28,3 +28,16 @@ def check_scan_history(history: list) -> None:
         require(isinstance(ctx, dict), f"scan_history[{i}] must be a dict")
         require("segmented_ds" in ctx, f"scan_history[{i}] missing 'segmented_ds'")
         require("scan_time" in ctx, f"scan_history[{i}] missing 'scan_time'")
+
+
+def check_prior_scan(prior: dict | None) -> None:
+    """Validate the prior_scan context key.
+
+    ``None`` when no usable predecessor exists (first scan, or the time gap to
+    the previous scan is too large); otherwise the previous completed scan's
+    context dict, which must carry ``scan_time``.
+    """
+    if prior is None:
+        return
+    require(isinstance(prior, dict), "prior_scan must be a dict or None")
+    require("scan_time" in prior, "prior_scan missing 'scan_time'")

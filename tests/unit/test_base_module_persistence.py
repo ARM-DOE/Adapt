@@ -26,14 +26,21 @@ class TestBaseModulePersistence:
         assert _NoPersistenceModule.persistence == ()
 
     def test_pure_compute_modules_declare_no_persistence(self):
-        from adapt.execution.nodes.detection import DetectModule
         from adapt.execution.nodes.projection import ProjectionModule
 
-        assert DetectModule.persistence == ()
         assert ProjectionModule.persistence == ()
+
+    def test_decision_logging_modules_declare_only_decision_writes(self):
+        """Detection writes no product; its only persistence is the decision log."""
+        from adapt.contracts import DecisionTableWrite
+        from adapt.execution.nodes.detection import DetectModule
+
+        assert {type(s) for s in DetectModule.persistence} == {DecisionTableWrite}
+        assert DetectModule.persistence[0].key == "detection_decisions"
 
     def test_persisting_modules_declare_specs(self):
         from adapt.contracts import (
+            DecisionTableWrite,
             NetcdfArtifact,
             ProductTableWrite,
             TrackTablesWrite,
@@ -50,5 +57,9 @@ class TestBaseModulePersistence:
         assert stats.primary_key == ("run_id", "scan_id", "cell_label")
         assert adjacency.table == "cell_adjacency"
         assert adjacency.primary_key == ("run_id", "scan_id", "cell_label_a", "cell_label_b")
-        assert {type(s) for s in TrackingModule.persistence} == {NetcdfArtifact, TrackTablesWrite}
+        assert {type(s) for s in TrackingModule.persistence} == {
+            NetcdfArtifact,
+            TrackTablesWrite,
+            DecisionTableWrite,
+        }
         assert {type(s) for s in CellVolumeStatsModule.persistence} == {ProductTableWrite}

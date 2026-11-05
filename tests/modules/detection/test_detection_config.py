@@ -17,11 +17,14 @@ def _make() -> DetectionConfig:
     return DetectionConfig(
         method="threshold",
         method_params={"threshold": 30.0},
-        closing_kernel=(3, 3),
+        closing_radius=1,
         filter_by_size=True,
         min_cellsize_gridpoint=5,
         max_cellsize_gridpoint=None,
         h_maxima=3.0,
+        seed_carry_frames=0,
+        carried_exempt_size_filter=True,
+        seed_carry_min_separation=3,
         reflectivity_var="reflectivity",
         labels_var="cell_labels",
         z_level=2000.0,
@@ -33,7 +36,7 @@ class TestDetectionConfig:
         cfg = _make()
         assert cfg.method == "threshold"
         assert cfg.method_params == {"threshold": 30.0}
-        assert cfg.closing_kernel == (3, 3)
+        assert cfg.closing_radius == 1
         assert cfg.min_cellsize_gridpoint == 5
         assert cfg.max_cellsize_gridpoint is None
         assert cfg.h_maxima == 3.0

@@ -30,7 +30,7 @@ class ThresholdParams(AdaptBaseModel):
     """Fixed reflectivity-threshold method."""
 
     threshold: float = Field(
-        30.0, description="Reflectivity threshold in dBZ; cells have reflectivity above it"
+        35.0, description="Reflectivity threshold in dBZ; cells have reflectivity above it"
     )
 
 

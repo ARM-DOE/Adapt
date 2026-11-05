@@ -1,0 +1,56 @@
+# Development environment for Adapt.
+#
+#   mamba env create -f environment-dev.yml        # creates `adapt_dev`
+#   mamba activate adapt_dev
+#   pip install -e . --no-deps --no-build-isolation  # Adapt itself, editable
+#
+# Every dependency comes from conda-forge; Adapt is the only pip install and it
+# is editable so source edits take effect immediately. --no-deps keeps pip from
+# re-resolving anything conda already provided; --no-build-isolation reuses the
+# setuptools/setuptools_scm in the env instead of fetching a build sandbox.
+#
+# Verified 2026-09-21: 1437 tests pass (python 3.12, arm_pyart 2.3.0, opencv 5.0).
+# The 4 conv_strat_raut tests that fail under arm_pyart 2.2.0 pass here.
+name: adapt_dev
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  # build backend for the editable install (pyproject [build-system])
+  - setuptools>=77
+  - wheel
+  - setuptools_scm>=8
+  - git                       # setuptools_scm reads the version from git
+  # runtime (pyproject [project.dependencies])
+  - numpy
+  - xarray
+  - pandas
+  - scipy
+  - scikit-image
+  - matplotlib
+  - networkx
+  - h5py
+  - netcdf4
+  - pydantic>=2
+  - pyyaml
+  - arm_pyart
+  - s3fs>=2021.11             # pyart requires it; the solver otherwise picks 0.4.2
+  - py-opencv                 # conda-forge name for opencv-python
+  - boto3
+  - cmweather
+  - pyproj
+  # optional extras
+  - contextily                # [maps]
+  - ffmpeg                    # movie consumer; its tests skip without it
+  - pyarrow                   # parquet I/O for analysis scripts
+  # dev (pyproject [project.optional-dependencies].dev)
+  - pytest>=7
+  - pytest-cov
+  - import-linter>=2
+  - pre-commit>=4
+  # docs (pyproject [project.optional-dependencies].docs)
+  - sphinx>=7
+  - pydata-sphinx-theme>=0.15
+  - sphinx-autodoc-typehints
+  - myst-parser>=2

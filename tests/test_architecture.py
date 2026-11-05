@@ -305,6 +305,7 @@ _CONTEXT_SEED_KEYS = frozenset(
     {
         "nexrad_file",  # queued file path from the source
         "scan_history",  # rolling window of prior segmented scans
+        "prior_scan",  # previous completed scan context; processor seeds it (None when unusable)
         "grid_ds_3d",  # full 3D grid sliced in by the processor
         "run_id",  # repository run identifier
         "scan_id",  # sha256[:16] of raw bytes; processor seeds it every scan (uid-v2 birth input)

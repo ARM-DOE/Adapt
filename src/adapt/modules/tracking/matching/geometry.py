@@ -1,141 +1,155 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Pure geometry primitives for geometry-first matching.
+"""Pure geometry of tracker v2, in grid-index space.
 
-Bidirectional overlap fractions, hull dilation (buffering), field-agnostic
-centroids, characteristic-length strategies, and the dimensionless pair cost
-``cost = m + d/L``. No graph, no I/O, no assumption that the field is reflectivity.
+Size-dependent growth of footprints and cells (measured from the shape
+boundary), the two overlap fractions on the grown shapes and their combined
+mismatch ``u``, the intensity excess above the cell threshold, the
+e²-weighted core centre, and the shape-aware (Mahalanobis) residual. No graph,
+no I/O; the field is never assumed to be reflectivity.
 """
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import distance_transform_edt
 
 __all__ = [
-    "LENGTH_SCALES",
-    "bidirectional_overlap",
-    "buffer_pixels_from_km",
-    "dilate_hull",
-    "geometric_mismatch",
-    "length_scale",
-    "mask_centroid",
-    "mass_weighted_centroid",
-    "pair_cost",
+    "PairOverlap",
+    "cell_intensity",
+    "core_centre",
+    "footprint_pairs",
+    "grow",
+    "growth_radius_km",
+    "mahalanobis",
+    "second_moment",
 ]
 
-# 8-connected structuring element for isotropic dilation.
-_STRUCT = np.ones((3, 3), dtype=bool)
+# Variance of a uniform unit pixel: keeps a one-pixel shape's moment invertible.
+_PIXEL_VARIANCE = 1.0 / 12.0
 
 
-def buffer_pixels_from_km(buffer_km: float, pixel_size_m: float) -> int:
-    """Number of dilation iterations for a buffer distance, given metres-per-pixel."""
-    if pixel_size_m <= 0:
-        raise ValueError("pixel_size_m must be positive")
-    return int(math.ceil(buffer_km * 1000.0 / pixel_size_m))
+def growth_radius_km(area_km2: float, r_max_km: float, l0_km: float) -> float:
+    """``r = r_max (1 − √A / ℓ0)₊``: small cells grow by up to r_max, cells of size ℓ0 not."""
+    return r_max_km * max(0.0, 1.0 - math.sqrt(area_km2) / l0_km)
 
 
-def dilate_hull(hull_mask: np.ndarray, buffer_pixels: int) -> np.ndarray:
-    """Dilate a boolean hull mask by ``buffer_pixels`` (0 → unchanged)."""
-    if buffer_pixels <= 0:
-        return hull_mask
-    return binary_dilation(hull_mask, structure=_STRUCT, iterations=buffer_pixels)
+def grow(mask: np.ndarray, radius_px: float) -> np.ndarray:
+    """Every pixel within ``radius_px`` of the shape (Euclidean, from the boundary)."""
+    if radius_px <= 0.0 or not mask.any():
+        return mask
+    return distance_transform_edt(~mask) <= radius_px
 
 
-def bidirectional_overlap(hull: np.ndarray, cell: np.ndarray) -> tuple[float, float]:
-    """Return (Opc, Ocp).
+@dataclass(frozen=True)
+class PairOverlap:
+    """Overlap of a grown footprint H⁺ with one grown current cell M⁺ (same radius)."""
 
-    Opc = intersection / candidate area (how much of the cell the hull explains).
-    Ocp = intersection / hull area       (how much of the hull the cell covers).
+    label: int
+    intersection_px: int
+    footprint_grown_px: int
+    cell_grown_px: int
+
+    @property
+    def o_c(self) -> float:
+        """Share of the grown cell covered: |H⁺∩M⁺| / |M⁺|."""
+        return self.intersection_px / self.cell_grown_px
+
+    @property
+    def o_h(self) -> float:
+        """Share of the grown footprint covered: |H⁺∩M⁺| / |H⁺|."""
+        return self.intersection_px / self.footprint_grown_px
+
+    @property
+    def u(self) -> float:
+        """Overlap mismatch ``1 − √(O^c O^h)``: 0 when the shapes coincide, 1 when they touch."""
+        return 1.0 - math.sqrt(self.o_c * self.o_h)
+
+
+def _box(mask: np.ndarray, margin: int) -> tuple[slice, slice]:
+    rows, cols = np.nonzero(mask)
+    return (
+        slice(max(rows.min() - margin, 0), rows.max() + margin + 1),
+        slice(max(cols.min() - margin, 0), cols.max() + margin + 1),
+    )
+
+
+def footprint_pairs(
+    footprint: np.ndarray, labels: np.ndarray, radius_px: float
+) -> list[PairOverlap]:
+    """Every current cell whose grown shape meets the grown footprint.
+
+    Footprint and cell are grown by the same radius; the fractions are taken
+    on the grown shapes. Cells are grown whole, wherever they extend.
     """
-    intersection = float(np.count_nonzero(hull & cell))
-    if intersection == 0.0:
-        return 0.0, 0.0
-    candidate_area = float(np.count_nonzero(cell))
-    hull_area = float(np.count_nonzero(hull))
-    opc = intersection / candidate_area if candidate_area > 0 else 0.0
-    ocp = intersection / hull_area if hull_area > 0 else 0.0
-    return opc, ocp
+    if not footprint.any():
+        return []
+    margin = math.ceil(radius_px) + 1
+    search = _box(footprint, 2 * margin)
+    near = grow(footprint[search], 2.0 * radius_px) & (labels[search] > 0)
+    pairs: list[PairOverlap] = []
+    for label in np.unique(labels[search][near]):
+        cell = labels == label
+        box = _box(footprint | cell, margin)
+        h_grown = grow(footprint[box], radius_px)
+        m_grown = grow(cell[box], radius_px)
+        intersection = int(np.count_nonzero(h_grown & m_grown))
+        if intersection:
+            pairs.append(
+                PairOverlap(
+                    int(label),
+                    intersection,
+                    int(np.count_nonzero(h_grown)),
+                    int(np.count_nonzero(m_grown)),
+                )
+            )
+    return pairs
 
 
-def mask_centroid(mask: np.ndarray) -> tuple[float, float]:
-    """Geometric centroid ``(row, col)`` of a boolean mask (index space)."""
-    ys, xs = np.nonzero(mask)
-    return float(ys.mean()), float(xs.mean())
+def _excess(field: np.ndarray, mask: np.ndarray, threshold: float, polarity: int) -> np.ndarray:
+    values = np.nan_to_num(field[mask].astype(float), nan=threshold)
+    return np.clip(polarity * (values - threshold), 0.0, None)
 
 
-def mass_weighted_centroid(field: np.ndarray, mask: np.ndarray) -> tuple[float, float]:
-    """Field-weighted centroid ``(row, col)`` in index space.
+def cell_intensity(
+    field: np.ndarray, mask: np.ndarray, threshold: float, polarity: int
+) -> tuple[float, float]:
+    """Intensity mass ``M = Σ e`` and mean excess ``ē = M / A`` of one cell.
 
-    Weights are ``field - min(field within mask)`` clamped to ≥ 0, so the result is
-    well defined for any field (reflectivity, brightness temperature, vertical wind,
-    …). Falls back to the geometric centroid when the total weight is zero.
+    ``e = polarity · (f − threshold)₊``: positive above a reflectivity threshold
+    (polarity +1) and below a brightness-temperature one (polarity −1), zero at
+    the cell edge. Missing values carry no excess.
     """
-    ys, xs = np.nonzero(mask)
-    values = field[ys, xs].astype(float)
-    weights = values - values.min()
-    total = float(weights.sum())
-    if total <= 0.0:
-        return float(ys.mean()), float(xs.mean())
-    return float((weights * ys).sum() / total), float((weights * xs).sum() / total)
+    e = _excess(field, mask, threshold, polarity)
+    return float(e.sum()), float(e.mean())
 
 
-def _equiv_diameter(
-    hull_area_px: float, cell_area_px: float, pixel_area_m2: float, fixed_km: float
-) -> float:
-    area_m2 = hull_area_px * pixel_area_m2
-    return 2.0 * math.sqrt(area_m2 / math.pi) if area_m2 > 0 else 0.0
+def core_centre(
+    field: np.ndarray, mask: np.ndarray, threshold: float, polarity: int
+) -> tuple[float, float]:
+    """``(row, col)`` of the e²-weighted centre.
 
-
-def _sum_radii(
-    hull_area_px: float, cell_area_px: float, pixel_area_m2: float, fixed_km: float
-) -> float:
-    hull_r = math.sqrt(hull_area_px * pixel_area_m2 / math.pi) if hull_area_px > 0 else 0.0
-    cell_r = math.sqrt(cell_area_px * pixel_area_m2 / math.pi) if cell_area_px > 0 else 0.0
-    return hull_r + cell_r
-
-
-def _fixed_km(
-    hull_area_px: float, cell_area_px: float, pixel_area_m2: float, fixed_km: float
-) -> float:
-    return fixed_km * 1000.0
-
-
-# Registered length-scale strategies (name → callable), all with a uniform signature.
-LENGTH_SCALES = {
-    "hull_equiv_diameter": _equiv_diameter,
-    "sum_radii": _sum_radii,
-    "fixed_km": _fixed_km,
-}
-
-
-def length_scale(
-    name: str,
-    hull_area_px: float,
-    cell_area_px: float,
-    pixel_area_m2: float,
-    fixed_km: float,
-) -> float:
-    """Characteristic length L (metres) for the selected strategy."""
-    try:
-        fn = LENGTH_SCALES[name]
-    except KeyError:
-        raise ValueError(f"Unknown length_scale '{name}'; valid: {sorted(LENGTH_SCALES)}") from None
-    return fn(hull_area_px, cell_area_px, pixel_area_m2, fixed_km)
-
-
-def geometric_mismatch(opc: float, ocp: float) -> float:
-    """Overlap mismatch ``m = 1 - sqrt(Opc)*sqrt(Ocp)`` in [0, 1]."""
-    return 1.0 - math.sqrt(opc) * math.sqrt(ocp)
-
-
-def pair_cost(opc: float, ocp: float, displacement_m: float, length_m: float) -> float:
-    """Dimensionless geometry-first cost ``m + d/L``.
-
-    Falls back to the overlap term alone when L is degenerate (zero-area hull).
+    The square pulls the centre towards the intense cores without jumping to
+    one pixel. A cell with no excess anywhere has no core, so its centre is
+    its geometric centre.
     """
-    m = geometric_mismatch(opc, ocp)
-    if length_m <= 0.0:
-        return m
-    return m + displacement_m / length_m
+    rows, cols = np.nonzero(mask)
+    weight = _excess(field, mask, threshold, polarity) ** 2
+    total = float(weight.sum())
+    if total == 0.0:
+        return float(rows.mean()), float(cols.mean())
+    return float((weight * rows).sum() / total), float((weight * cols).sum() / total)
+
+
+def second_moment(mask: np.ndarray) -> np.ndarray:
+    """Second-moment (covariance) matrix of a shape's pixels, (row, col) order, px²."""
+    points = np.stack(np.nonzero(mask)).astype(float)
+    centred = points - points.mean(axis=1, keepdims=True)
+    return centred @ centred.T / points.shape[1] + _PIXEL_VARIANCE * np.eye(2)
+
+
+def mahalanobis(delta: np.ndarray, sigma: np.ndarray) -> float:
+    """``√(δᵀ Σ⁻¹ δ)``: a displacement in units of the shape's extent in its direction."""
+    return float(math.sqrt(delta @ np.linalg.solve(sigma, delta)))

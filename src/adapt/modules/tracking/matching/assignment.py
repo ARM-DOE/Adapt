@@ -1,72 +1,95 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Constraint propagation and ambiguity isolation.
+"""Joint assignment inside each group of competing cells.
 
-After validation the surviving pairs form a bipartite graph (previous objects ↔
-current cells). ``ConstraintPropagator`` deterministically resolves every pair that
-is unique on *both* sides (degree-1 ↔ degree-1), iterating until convergence — this
-handles the great majority of ordinary tracks with no optimisation. ``AssignmentGraph``
-then splits whatever remains into independent connected components, so Hungarian
-assignment runs on small, locally-ambiguous groups instead of one global matrix.
+Admissible links form a bipartite graph (previous cells ↔ current cells);
+each connected component is decided on its own, so a clear association in one
+part of the domain is never altered by an ambiguous one elsewhere. Inside a
+component the minimum-cost set of links is found with a no-link option at the
+cost ceiling, subject to the crossing test: while the chosen links contain a
+crossing pair, the one of the two whose exclusion leaves the cheaper
+assignment is excluded (the costlier on a tie) and the component is solved
+again.
 """
+
+from dataclasses import dataclass
+from itertools import combinations
 
 import networkx as nx
 
-__all__ = ["AssignmentGraph", "ConstraintPropagator"]
+from adapt.modules.tracking.matching.gates import Point, segments_cross
+from adapt.modules.tracking.matching.hungarian import HungarianMatcher
+
+__all__ = ["ComponentSolution", "Link", "components", "solve_component"]
 
 Edge = tuple[int, int]  # (prev_idx, curr_idx)
 
 
-class ConstraintPropagator:
-    """Iteratively peel deterministic (mutually-unique) matches to convergence."""
+@dataclass(frozen=True)
+class Link:
+    """An admissible link with its cost and its segment (metres)."""
 
-    @staticmethod
-    def resolve(edges: list[Edge]) -> tuple[list[Edge], list[Edge]]:
-        """Return (forced_matches, remaining_edges).
-
-        A pair (i, j) is forced when previous i has exactly one surviving candidate
-        and current j has exactly one surviving predecessor. Removing forced nodes
-        can make neighbours unique, so the peel repeats until nothing new resolves.
-        """
-        remaining: set[Edge] = set(edges)
-        forced: list[Edge] = []
-        while True:
-            prev_deg: dict[int, int] = {}
-            curr_deg: dict[int, int] = {}
-            for i, j in remaining:
-                prev_deg[i] = prev_deg.get(i, 0) + 1
-                curr_deg[j] = curr_deg.get(j, 0) + 1
-            new = [(i, j) for (i, j) in remaining if prev_deg[i] == 1 and curr_deg[j] == 1]
-            if not new:
-                break
-            forced.extend(new)
-            matched_prev = {i for i, _ in new}
-            matched_curr = {j for _, j in new}
-            remaining = {
-                (i, j) for (i, j) in remaining if i not in matched_prev and j not in matched_curr
-            }
-        return sorted(forced), sorted(remaining)
+    prev: int
+    curr: int
+    cost: float
+    start: Point
+    end: Point
 
 
-class AssignmentGraph:
-    """Bipartite graph over candidate edges; yields connected components."""
+@dataclass(frozen=True)
+class ComponentSolution:
+    """Chosen links, links excluded for crossing (→ the chosen-set link they crossed),
+    and each chosen link's margin: the extra total cost of the best assignment without it.
+    """
 
-    def __init__(self, edges: list[Edge]):
-        self.edges = list(edges)
+    chosen: list[Edge]
+    crossing_excluded: dict[Edge, Edge]
+    margins: dict[Edge, float]
 
-    def components(self) -> list[tuple[list[int], list[int]]]:
-        """Connected components as ``(prev_indices, curr_indices)`` sorted lists.
 
-        Only nodes that appear in an edge are included; isolated previous/current
-        objects (no surviving candidate) are handled by the caller as dissipated/born.
-        """
-        graph = nx.Graph()
-        for i, j in self.edges:
-            graph.add_edge(("p", i), ("c", j))
-        components: list[tuple[list[int], list[int]]] = []
-        for nodes in nx.connected_components(graph):
-            prevs = sorted(n[1] for n in nodes if n[0] == "p")
-            currs = sorted(n[1] for n in nodes if n[0] == "c")
-            components.append((prevs, currs))
-        return components
+def components(edges: list[Edge]) -> list[tuple[list[int], list[int]]]:
+    """Connected components as sorted ``(prev_indices, curr_indices)``."""
+    graph = nx.Graph()
+    graph.add_edges_from((("p", i), ("c", j)) for i, j in edges)
+    groups = []
+    for nodes in nx.connected_components(graph):
+        groups.append(
+            (sorted(n[1] for n in nodes if n[0] == "p"), sorted(n[1] for n in nodes if n[0] == "c"))
+        )
+    return sorted(groups)
+
+
+def solve_component(links: list[Link], no_link_cost: float) -> ComponentSolution:
+    """Minimum-cost non-crossing links of one component, with no-link at ``no_link_cost``."""
+    by_edge = {(lk.prev, lk.curr): lk for lk in links}
+    prevs = sorted({lk.prev for lk in links})
+    currs = sorted({lk.curr for lk in links})
+
+    def solve(excluded) -> tuple[list[Edge], float]:
+        costs = {e: lk.cost for e, lk in by_edge.items() if e not in excluded}
+        chosen = HungarianMatcher.match(prevs, currs, costs, no_link_cost)
+        total = sum(costs[e] for e in chosen) + no_link_cost * (len(prevs) - len(chosen))
+        return chosen, total
+
+    def first_crossing(chosen: list[Edge]) -> tuple[Edge, Edge] | None:
+        for a, b in combinations(chosen, 2):
+            la, lb = by_edge[a], by_edge[b]
+            if segments_cross(la.start, la.end, lb.start, lb.end):
+                return a, b
+        return None
+
+    excluded: dict[Edge, Edge] = {}
+    chosen, total = solve(excluded)
+    while (pair := first_crossing(chosen)) is not None:
+        a, b = sorted(pair, key=lambda e: (by_edge[e].cost, e))  # b is the costlier
+        total_without_a = solve({**excluded, a: b})[1]
+        total_without_b = solve({**excluded, b: a})[1]
+        if total_without_a < total_without_b:
+            excluded[a] = b
+        else:
+            excluded[b] = a
+        chosen, total = solve(excluded)
+
+    margins = {e: solve({**excluded, e: e})[1] - total for e in chosen}
+    return ComponentSolution(chosen, excluded, margins)

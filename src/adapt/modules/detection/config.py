@@ -22,11 +22,14 @@ class DetectionConfig(BaseModel):
 
     method: str
     method_params: dict[str, Any]
-    closing_kernel: tuple[int, int]
+    closing_radius: int
     filter_by_size: bool
     min_cellsize_gridpoint: int
     max_cellsize_gridpoint: int | None
     h_maxima: float
+    seed_carry_frames: int
+    seed_carry_min_separation: int
+    carried_exempt_size_filter: bool
     reflectivity_var: str
     labels_var: str
     z_level: float

@@ -1,789 +1,908 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Track segmented geophysical objects across consecutive scans (geometry-first).
+"""Track segmented cells across consecutive scans (tracker v2).
 
-The tracker is **field-agnostic**: the pixel field (reflectivity, brightness temperature,
-vertical wind, …) is used only as a centroid weight, never assumed to be reflectivity.
-Association is resolved as progressively stronger constraints, with optimisation last:
+Per scan pair, in order:
 
-1. Registration projected hulls (minute nearest the real gap)
-2. Dilate hulls by ``projected_hull_buffer_km`` → liberal candidate pairs (high recall)
-3. Hard gate: bidirectional overlap (Opc, Ocp) + kinematic speed/acceleration caps
-4. Deterministic constraint propagation for mutually-unique matches (no optimisation)
-5. Connected components → Hungarian assignment inside ambiguous groups only
-6. Split / merge on the leftover born / dissipated cells
-7. Initiation / termination
+1. Predict: each previous cell's footprint is the cell advected by the flow.
+2. Grow footprint and cell by r = r_max (1 − √A/ℓ0)₊; overlap fractions O^c, O^h
+   on the grown shapes; u = 1 − √(O^c O^h).
+3. Gates (hard): u ≤ u_max, speed ≤ v_max, speed change ≤ additive limit.
+4. Cost c = u + w_d d + h (shape-aware residual of the e²-weighted centre,
+   heading term); c ≤ c_max.
+5. Joint assignment per group of competing cells, no-link at c_max, no crossing.
+6. Lineage of what is left (fractions and crossing test; the speed gates bind
+   continuations and resumptions only): resumption of a latent track, split child, merge
+   source, initiation; unlinked tracks become latent for up to N scans.
+7. Identity at splits and merges follows the larger score S = log A + γ log ē.
 
-Each object gets a stable `cell_uid`; lineage is graph edges. State lives in
-``graph.TrackingGraph``; matching in ``matching/``; uid generation in ``identity``; event
-rows in ``events``. ``CellTracker`` here is orchestration only.
-
-Scan outputs:
-1. **tracked_cells**: per-observation rows for the current scan
-2. **cell_events**: explicit lineage/event rows (CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION)
-
-Inspired by TINT (Raut et al., 2021) but mask/geometry-driven rather than centroid-only.
-
-Author: Bhupendra Raut, ANL.
-
-References: Raut, B. A., Jackson, R., Picel, M., Collis, S. M., Bergemann, M., & Jakob, C.
-(2021). An adaptive tracking algorithm for convection in simulated and remote sensing data.
-Journal of Applied Meteorology and Climatology, 60(4), 513-526.
+Causal: a scan's decisions use only that scan and earlier ones, and are never
+revised. Every decision is logged (``decisions()``).
 """
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import cast
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-from adapt.contracts import stat_column
+from adapt.contracts import (
+    TrackingCell,
+    TrackingDecisions,
+    TrackingIdentity,
+    TrackingLatent,
+    TrackingLineage,
+)
+from adapt.modules.tracking.config import TrackingConfig
+from adapt.modules.tracking.decision_log import ScanLog
 from adapt.modules.tracking.events import (
+    EndPoint,
+    LinkDiagnostics,
     build_cell_events_dataframe,
-    event_continue,
-    event_initiation,
-    event_merge,
-    event_split,
-    event_termination,
+    event_row,
 )
-from adapt.modules.tracking.graph import TrackingGraph
-from adapt.modules.tracking.identity import (
-    _cell_uid_from_signature,
-    track_signature_v2,
+from adapt.modules.tracking.identity import _cell_uid_from_signature, track_signature_v2
+from adapt.modules.tracking.latent import (
+    ORIGIN_MERGED,
+    ORIGIN_TERMINATED,
+    LatentTrack,
+    carry_footprint,
 )
-from adapt.modules.tracking.matching.assignment import AssignmentGraph, ConstraintPropagator
-from adapt.modules.tracking.matching.candidate import CandidateGenerator
-from adapt.modules.tracking.matching.geometry import (
-    buffer_pixels_from_km,
-    length_scale,
-    mask_centroid,
-    mass_weighted_centroid,
-    pair_cost,
+from adapt.modules.tracking.lineage import (
+    IdentityCandidate,
+    best_partner,
+    choose_identity,
 )
-from adapt.modules.tracking.matching.hungarian import HungarianMatcher
-from adapt.modules.tracking.matching.validation import GeometricValidator
-from adapt.modules.tracking.models import (
-    MatchDiagnostics,
-    MatchMethod,
-    TrackingError,
-    TrackMotionState,
+from adapt.modules.tracking.matching.assignment import Link, components, solve_component
+from adapt.modules.tracking.matching.gates import drop_crossing_links, segments_cross
+from adapt.modules.tracking.matching.geometry import mahalanobis
+from adapt.modules.tracking.models import TrackingError
+from adapt.modules.tracking.observations import (
+    GATE_PASS,
+    Cell,
+    Footprint,
+    Grid,
+    Pair,
+    Track,
+    evaluate_pairs,
+    extract_cells,
+    latent_footprint,
+    live_footprint,
 )
-from adapt.modules.tracking.motion import (
-    MotionValidator,
-    heading_change_degrees,
-    heading_change_radians,
-)
-from adapt.modules.tracking.projection import select_registration_labels
 from adapt.utils.time import normalize_time_scalar
+
+__all__ = ["CellTracker", "_cell_uid_from_signature", "track_signature_v2"]
+
+logger = logging.getLogger(__name__)
 
 # Beyond this ratio between consecutive scan intervals the cadence is flagged
 # irregular (diagnostic only — no track reset).
 _CADENCE_IRREGULAR_RATIO = 2.0
 
-# Re-exported for the public import surface (tests + tooling import these from here).
-__all__ = [
-    "CellTracker",
-    "TrackingGraph",
-    "_cell_uid_from_signature",
-    "track_signature_v2",
-]
-
-logger = logging.getLogger(__name__)
+Segment = tuple[str, tuple[float, float], tuple[float, float]]  # (uid, start, end)
 
 
 @dataclass(frozen=True)
-class _EdgeCost:
-    """Pre-computed geometry for a surviving candidate edge (prev_idx ↔ curr_idx)."""
+class _Interval:
+    """Accepted motion of every track, live or latent, over one scan interval."""
 
-    opc: float
-    ocp: float
-    displacement: float  # metres, projected-hull centroid → candidate mass centroid
-    cost: float  # m + d/L (+ heading penalty)
+    t0_s: float
+    t1_s: float
+    segments: tuple[Segment, ...]
+
+
+@dataclass(frozen=True)
+class _LastScan:
+    """The previous scan: the one every live track was last observed in."""
+
+    scan_id: str
+    time: object
+    time_s: float
+
+
+@dataclass
+class _Outcome:
+    """What one scan pair decided, cell by cell (indices into prev tracks / labels)."""
+
+    continuing: dict[int, int]  # prev idx → curr label
+    method: dict[int, str]  # prev idx → ASSIGNED | IDENTITY_MERGE | IDENTITY_SPLIT
+    resumed: dict[int, Pair]  # curr label → latent pair
+    split: dict[int, int]  # curr label → parent prev idx
+    merged: dict[int, int]  # prev idx → survivor curr label
+
+
+def _epoch_s(time_val) -> float:
+    ts = pd.Timestamp(time_val)
+    return float((ts.tz_localize("UTC") if ts.tzinfo is None else ts).timestamp())
+
+
+def _distance(fp: Footprint, cell: Cell, grid: Grid) -> float:
+    """Shape-aware distance of a cell's centre from a footprint's predicted centre."""
+    if fp.sigma is None:  # a footprint outside the domain is infinitely far
+        return math.inf
+    return mahalanobis(grid.delta_px(fp.predicted, cell.centre), fp.sigma)
 
 
 class CellTracker:
-    """Track segmented geophysical objects with a geometry-first pipeline.
+    """Track cells across scans; one ``track`` call per scan, in time order."""
 
-    The tracker is field-agnostic (the field is used only as a centroid weight,
-    never assumed to be reflectivity) and resolves association as progressively
-    stronger constraints, using optimisation only as a last resort:
+    def __init__(self, config: TrackingConfig):
+        self.cfg = config
+        self._tracks: list[Track] = []
+        self._last: _LastScan | None = None
+        self._prev_dt_s: float | None = None
+        self._latent: list[LatentTrack] = []
+        self._intervals: list[_Interval] = []
+        self._decisions: TrackingDecisions | None = None
 
-    1. Registration projected hulls (minute nearest the real gap)
-    2. Dilate hulls by ``projected_hull_buffer_km`` and generate candidates liberally
-    3. Hard gate: bidirectional overlap (Opc, Ocp) + kinematic speed/acceleration caps
-    4. Deterministic constraint propagation (mutually-unique matches)
-    5. Connected components → Hungarian assignment inside ambiguous groups only
-    6. Split / merge on the leftover born/dissipated cells
-    7. Initiation / termination
-
-    Cost is ``m + d/L`` where ``m = 1 − √Opc·√Ocp``, ``d`` is the mass-weighted
-    centroid's residual from the projected-hull centroid, and ``L`` is a configurable
-    characteristic length. An optional heading-change penalty is added on top.
-    """
-
-    def __init__(self, config):
-        self.split_overlap = config.split_overlap
-        self.core_threshold = config.core_field_threshold
-        self.field_var = config.field_var  # generic field; not assumed to be reflectivity
-        self.labels_var = config.labels_var
-        self.uid_width = config.uid_width
-
-        self.buffer_km = config.projected_hull_buffer_km
-        self.length_scale_name = config.length_scale
-        self.geometry_length_scale_km = config.geometry_length_scale_km
-
-        self.max_tracking_gap_minutes: float = config.max_tracking_gap_minutes
-        self.max_tracking_gap_s: float = config.max_tracking_gap_minutes * 60.0
-
-        self.graph = TrackingGraph()
-        self.validator = GeometricValidator(
-            config.minimum_candidate_overlap, config.minimum_projected_overlap
-        )
-        self.motion = MotionValidator(config.max_speed_ms, config.max_speed_multiplier)
-        self.heading_penalty_weight = config.heading_change_penalty_weight
-        self._previous_scan: tuple | None = None  # (time, node_ids)
-        self._cell_identity: dict[int, tuple[str, str]] = {}
-        self._track_motion: dict[int, TrackMotionState] = {}  # track_index → kinematics
-        self._prev_dt_s: float | None = None  # last good scan interval (cadence check)
-
-        logger.info(
-            "CellTracker initialized: buffer=%.1fkm min_opc=%.2f min_ocp=%.2f"
-            " length_scale=%s max_gap=%.1fmin max_speed=%.1fm/s",
-            self.buffer_km,
-            config.minimum_candidate_overlap,
-            config.minimum_projected_overlap,
-            self.length_scale_name,
-            self.max_tracking_gap_minutes,
-            config.max_speed_ms,
-        )
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    # ── public API ─────────────────────────────────────────────────────────
 
     def track(
-        self,
-        ds_projected: xr.Dataset,
-        cell_stats_df: pd.DataFrame,
-        *,
-        scan_id: str,
+        self, ds_projected: xr.Dataset, cell_stats_df: pd.DataFrame, *, scan_id: str
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Process one scan.
-
-        ``scan_id`` (sha256 of the raw scan bytes) is the birth-identity
-        input for cell uids minted in this scan.
-
-        Returns scan-local outputs:
-        - tracked_cells_df: one row per cell observation in this scan
-        - cell_events_df: explicit lineage/events (continue/split/merge/initiation/termination)
-        """
+        """Process one scan; return its tracked cells and lineage events."""
         if not scan_id:
             raise ValueError("CellTracker.track: scan_id is required")
-        self._scan_id = str(scan_id)
-        current_time = normalize_time_scalar(ds_projected.time.values)
-        cells_current = self._extract_cells_from_analyzer(ds_projected, cell_stats_df)
+        time = normalize_time_scalar(ds_projected.time.values)
+        time_s = _epoch_s(time)
+        grid = Grid.of(ds_projected)
+        cells = extract_cells(ds_projected, cell_stats_df, self.cfg, grid)
 
-        events: list[dict] = []
-        if self._previous_scan is None:
-            node_ids = self._initialize_tracks(current_time, cells_current)
-            self._previous_scan = (current_time, node_ids)
-            for node_id in node_ids:
-                events.append(
-                    event_initiation(self.graph, self._cell_identity, current_time, node_id)
-                )
+        reset_code, dt_s = self._reset_code(ds_projected, time_s)
+        log = ScanLog(dt_s=dt_s, reset_code=reset_code)
+        log.counts.update(prev=len(self._tracks), latent=len(self._latent))
+        if reset_code is None:
+            uids, events, tracks = self._link(
+                self._last_scan(), ds_projected, cells, grid, time, time_s, scan_id, log
+            )
         else:
-            prev_time, prev_node_ids = self._previous_scan
-            dt_s = self._to_epoch_seconds(current_time) - self._to_epoch_seconds(prev_time)
-            if self._gap_forces_reset(dt_s, prev_time, current_time):
-                events = self._reset_tracks(prev_node_ids, current_time, cells_current)
-            else:
-                self._prev_dt_s = dt_s
-                events = self._track_frame_pair(
-                    prev_node_ids, current_time, ds_projected, cells_current, dt_s
-                )
-            current_node_ids = self.graph.get_nodes_at_time(current_time)
-            self._previous_scan = (current_time, current_node_ids)
+            uids, events, tracks = self._restart(cells, time, time_s, scan_id, log)
 
-        current_node_ids = self.graph.get_nodes_at_time(current_time)
-        tracked_cells_df = self._build_tracked_cells_current(current_time, current_node_ids)
-        cell_events_df = build_cell_events_dataframe(events)
-        return tracked_cells_df, cell_events_df
+        self._tracks = tracks
+        self._last = _LastScan(scan_id, time, time_s)
+        self._decisions = log.freeze()
+        return self._tracked_cells(time, cells, uids), build_cell_events_dataframe(events)
 
-    def get_cell_identity(self, track_index: int) -> tuple[str, str]:
-        if track_index not in self._cell_identity:
-            raise ValueError(f"Missing cell identity for track_index={track_index}")
-        return self._cell_identity[track_index]
+    def decisions(self) -> TrackingDecisions:
+        """The decision record of the most recent ``track`` call (analysis only)."""
+        if self._decisions is None:
+            raise ValueError("CellTracker.decisions: no scan has been tracked yet")
+        return self._decisions
 
-    # ------------------------------------------------------------------
-    # Scan-gap classification (physical time)
-    # ------------------------------------------------------------------
+    # ── scan classification and restart ────────────────────────────────────
 
-    def _gap_forces_reset(self, dt_s: float, prev_time, curr_time) -> bool:
-        """Classify the inter-scan interval; log a structured code.
-
-        Returns True when tracks must be terminated and restarted (non-monotonic
-        time or a gap above the hard limit) — never raises, never matches across
-        the gap. An irregular-but-monotonic cadence is a diagnostic warning only.
-        """
+    def _reset_code(self, ds: xr.Dataset, time_s: float) -> tuple[str | None, float | None]:
+        if self._last is None:
+            return "FIRST_SCAN", None
+        dt_s = time_s - self._last.time_s
         if dt_s <= 0:
-            logger.error(
-                "tracking_error code=%s prev=%s curr=%s dt_s=%.1f",
-                TrackingError.NON_MONOTONIC_TIME.value,
-                prev_time,
-                curr_time,
-                dt_s,
-            )
-            return True
-        if dt_s > self.max_tracking_gap_s:
-            logger.error(
-                "tracking_error code=%s dt_minutes=%.1f limit_minutes=%.1f",
-                TrackingError.TRACK_GAP_EXCEEDED.value,
-                dt_s / 60.0,
-                self.max_tracking_gap_minutes,
-            )
-            return True
-        if self._prev_dt_s is not None and (
-            dt_s > _CADENCE_IRREGULAR_RATIO * self._prev_dt_s
-            or dt_s * _CADENCE_IRREGULAR_RATIO < self._prev_dt_s
-        ):
-            logger.warning(
-                "tracking_error code=%s dt_s=%.1f prev_dt_s=%.1f",
-                TrackingError.IRREGULAR_SCAN_CADENCE.value,
-                dt_s,
-                self._prev_dt_s,
-            )
-        return False
+            code = TrackingError.NON_MONOTONIC_TIME.value
+        elif dt_s > self.cfg.max_tracking_gap_minutes * 60.0:
+            code = TrackingError.TRACK_GAP_EXCEEDED.value
+        elif "cell_projections" not in ds.data_vars:
+            code = "NO_PROJECTIONS"
+        else:
+            if self._prev_dt_s is not None and not (
+                1 / _CADENCE_IRREGULAR_RATIO <= dt_s / self._prev_dt_s <= _CADENCE_IRREGULAR_RATIO
+            ):
+                logger.warning(
+                    "tracking_error code=%s dt_s=%.1f prev_dt_s=%.1f",
+                    TrackingError.IRREGULAR_SCAN_CADENCE.value,
+                    dt_s,
+                    self._prev_dt_s,
+                )
+            self._prev_dt_s = dt_s
+            return None, dt_s
+        logger.error("tracking_error code=%s dt_s=%.1f — tracks restart", code, dt_s)
+        return code, dt_s
 
-    def _reset_tracks(
-        self, prev_node_ids: list[int], curr_time, cells_current: list[dict]
-    ) -> list[dict]:
-        """Terminate every active track, then start fresh tracks for the current cells."""
+    def _restart(self, cells, time, time_s, scan_id, log):
+        """End every live and latent track; every current cell starts a track."""
         events = [
-            event_termination(self.graph, self._cell_identity, curr_time, node_id, None)
-            for node_id in prev_node_ids
+            event_row(
+                time,
+                "TERMINATION",
+                EndPoint(t.uid, t.label),
+                None,
+                source_scan=(t.scan_id, t.scan_time),
+            )
+            for t in self._tracks
+        ] + [
+            event_row(
+                time,
+                "TERMINATION",
+                EndPoint(lt.uid, lt.label),
+                None,
+                source_scan=(lt.scan_id, lt.scan_time),
+            )
+            for lt in self._latent
         ]
-        self._initialize_tracks(curr_time, cells_current)
-        for node_id in self.graph.get_nodes_at_time(curr_time):
-            events.append(event_initiation(self.graph, self._cell_identity, curr_time, node_id))
-        return events
+        log.counts["termination"] += len(events)
+        self._latent, self._intervals = [], []
+        uids = {c.label: self._new_uid(scan_id, c.label) for c in cells}
+        for c in cells:
+            events.append(event_row(time, "INITIATION", None, EndPoint(uids[c.label], c.label)))
+            log.cells[c.label] = self._cell_record(c, uids[c.label], "INITIATION")
+        tracks = [self._new_track(c, uids[c.label], scan_id, time, time_s) for c in cells]
+        return uids, events, tracks
 
-    # ------------------------------------------------------------------
-    # Cell extraction
-    # ------------------------------------------------------------------
+    # ── one scan pair ──────────────────────────────────────────────────────
+
+    def _last_scan(self) -> _LastScan:
+        if self._last is None:
+            raise RuntimeError("CellTracker: a scan pair needs a previous scan")
+        return self._last
+
+    def _link(self, last: _LastScan, ds, cells, grid, time, time_s, scan_id, log):
+        cfg = self.cfg
+        labels = ds[cfg.labels_var].values
+        by_label = {c.label: c for c in cells}
+        proj = np.asarray(ds["cell_projections"].values[0])
+        live = [live_footprint(t, proj, grid, time_s - last.time_s, cfg) for t in self._tracks]
+        carried = self._carry_latent(ds, grid)
+        latent_fps = [latent_footprint(lt, time_s, grid, cfg) for lt in self._latent]
+
+        live_pairs = {
+            (i, p.cell.label): p
+            for i, fp in enumerate(live)
+            for p in evaluate_pairs(fp, by_label, labels, grid, cfg)
+        }
+        latent_pairs = {
+            (k, p.cell.label): p
+            for k, fp in enumerate(latent_fps)
+            for p in evaluate_pairs(fp, by_label, labels, grid, cfg)
+        }
+        for p in [*live_pairs.values(), *latent_pairs.values()]:
+            log.pair(p.fp.uid, p.cell.label, **self._pair_record(p))
+
+        out = _Outcome({}, {}, {}, {}, {})
+        self._assign(live_pairs, out, log)
+        current = tuple(
+            (live[i].uid, live[i].origin, by_label[j].centre) for i, j in out.continuing.items()
+        )
+        self._resume(latent_pairs, cells, out, current, last.time_s, time_s, log)
+        self._split_and_merge(live, live_pairs, cells, out, current, log)
+        self._identity(live, live_pairs, by_label, grid, out, log)
+        return self._emit(last, live, live_pairs, cells, out, carried, time, time_s, scan_id, log)
+
+    def _carry_latent(self, ds: xr.Dataset, grid: Grid) -> dict[str, Segment]:
+        """Move every latent footprint with this scan's flow; one scan older.
+
+        Returns each latent track's predicted step over this interval.
+        """
+        flow_x, flow_y = ds["heading_x"].values, ds["heading_y"].values
+        carried, steps = [], {}
+        for lt in self._latent:
+            mask, (d_row, d_col) = carry_footprint(lt.footprint, flow_x, flow_y)
+            predicted = (lt.predicted[0] + d_col * grid.sx, lt.predicted[1] + d_row * grid.sy)
+            carried.append(replace(lt, footprint=mask, predicted=predicted, age=lt.age + 1))
+            steps[lt.uid] = (lt.uid, lt.predicted, predicted)
+        self._latent = carried
+        return steps
+
+    def _assign(self, pairs: dict[tuple[int, int], Pair], out: _Outcome, log: ScanLog) -> None:
+        """Hungarian per component with no-link at c_max, then a scan-wide crossing check."""
+        admissible = {e: p for e, p in pairs.items() if p.gate == GATE_PASS}
+        chosen: dict[tuple[int, int], Pair] = {}
+        groups = components(sorted(admissible))
+        log.counts["components"] = len(groups)
+        for cid, (prevs, _) in enumerate(groups):
+            links = [
+                Link(i, j, p.cost, p.fp.origin, p.cell.centre)
+                for (i, j), p in sorted(admissible.items())
+                if i in prevs
+            ]
+            solution = solve_component(links, self.cfg.max_link_cost)
+            for i, j in (e for e in admissible if e[0] in prevs):
+                log.update_pair(pairs[(i, j)].fp.uid, j, component_id=cid, outcome="LOST")
+            for e, blocker in solution.crossing_excluded.items():
+                self._mark_crossing(pairs, e, blocker, log)
+            for e in solution.chosen:
+                chosen[e] = admissible[e]
+                log.update_pair(admissible[e].fp.uid, e[1], margin=solution.margins[e])
+        kept, dropped = drop_crossing_links(
+            {e: (p.fp.origin, p.cell.centre, p.cost) for e, p in chosen.items()}
+        )
+        for e, blocker in dropped.items():
+            self._mark_crossing(pairs, e, blocker, log)
+        for i, j in kept:
+            out.continuing[i] = j
+            out.method[i] = "ASSIGNED"
+            log.update_pair(pairs[(i, j)].fp.uid, j, outcome="CONTINUE")
 
     @staticmethod
-    def _to_epoch_seconds(time_val) -> float:
-        ts = pd.Timestamp(time_val)
-        if ts.tzinfo is None:
-            ts = ts.tz_localize("UTC")
-        return float(ts.timestamp())
+    def _mark_crossing(pairs, edge, blocker, log: ScanLog) -> None:
+        log.counts["crossing_excluded"] += 1
+        log.update_pair(
+            pairs[edge].fp.uid, edge[1], outcome="CROSSING", crossing_with_uid=pairs[blocker].fp.uid
+        )
 
-    def _extract_cells_from_analyzer(
-        self, ds: xr.Dataset, cell_stats_df: pd.DataFrame
-    ) -> list[dict]:
-        """Merge per-cell stats with masks; compute mass-weighted metric centroids.
+    def _resume(self, pairs, cells, out: _Outcome, current, prev_s, time_s, log: ScanLog) -> None:
+        """Offer latent tracks to orphans: same gates and cost over the elapsed time,
+        and no crossing in any intervening interval."""
+        orphans = {c.label for c in cells} - set(out.continuing.values())
+        admissible: dict[tuple[int, int], Pair] = {}
+        for (k, j), p in sorted(pairs.items()):
+            if j not in orphans:
+                continue
+            reason = None if p.gate == GATE_PASS else p.gate
+            if reason is None and self._resume_crosses(self._latent[k], p, current, prev_s, time_s):
+                reason = "CROSSING"
+                log.counts["crossing_excluded"] += 1
+                log.update_pair(p.fp.uid, j, outcome="CROSSING")
+            if reason is None:
+                admissible[(k, j)] = p
+            log.lineage.append(self._hypothesis("RESUME", p, cost=p.cost, reason=reason))
+        for prevs, _ in components(sorted(admissible)):
+            links = [
+                Link(k, j, p.cost, p.fp.origin, p.cell.centre)
+                for (k, j), p in sorted(admissible.items())
+                if k in prevs
+            ]
+            for k, j in solve_component(links, self.cfg.max_link_cost).chosen:
+                out.resumed[j] = admissible[(k, j)]
+                log.update_pair(admissible[(k, j)].fp.uid, j, outcome="RESUMED")
 
-        The tracker's own centroid is the **field-weighted** centroid of each mask
-        (metres), so matching and motion are field-agnostic. Reflectivity-named stats
-        are carried through only for identity and output columns.
-        """
-        labels = ds[self.labels_var].values
-        field = ds[self.field_var].values
+    def _resume_crosses(self, lt: LatentTrack, pair: Pair, current, prev_s, time_s) -> bool:
+        """Interpolate the resumed path to each intervening scan and test each sub-segment
+        against every other track's segment of that interval."""
+        start, end, t_start = lt.centre, pair.cell.centre, lt.time_s
 
-        # Stats for the CONFIGURED field, via the one authoritative minting
-        # convention. Guarded for the zero-cell case: the analyzer's empty
-        # structural stub carries no stat columns, and this runs every scan.
-        mean_col = stat_column(self.field_var, "mean")
-        max_col = stat_column(self.field_var, "max")
-        if not cell_stats_df.empty and (
-            mean_col not in cell_stats_df.columns or max_col not in cell_stats_df.columns
+        def at(t: float) -> tuple[float, float]:
+            f = (t - t_start) / (time_s - t_start)
+            return start[0] + f * (end[0] - start[0]), start[1] + f * (end[1] - start[1])
+
+        intervals = [iv for iv in self._intervals if iv.t0_s >= t_start]
+        intervals.append(_Interval(prev_s, time_s, current))
+        return any(
+            uid != lt.uid and segments_cross(at(iv.t0_s), at(iv.t1_s), a, b)
+            for iv in intervals
+            for uid, a, b in iv.segments
+        )
+
+    def _split_and_merge(self, live, pairs, cells, out: _Outcome, current, log: ScanLog) -> None:
+        """Split children among remaining orphans; merge sources among unlinked tracks."""
+        survivors = {j: i for i, j in out.continuing.items()}
+        for j in (
+            c.label for c in cells if c.label not in survivors and c.label not in out.resumed
         ):
-            raise ValueError(
-                f"Tracking: cell_stats is missing {mean_col!r}/{max_col!r} for "
-                f"the configured tracking field {self.field_var!r}. The analyzer "
-                "whitelist (analyzer.radar_variables) must include it."
-            )
-
-        cell_props_map: dict[int, dict] = {}
-        for _, row in cell_stats_df.iterrows():
-            lbl = int(row["cell_label"])
-            cell_props_map[lbl] = {
-                "area": float(row["cell_area_sqkm"]),
-                # role keys: "…reflectivity" = the tracked field, whatever it is
-                "mean_reflectivity": float(row[mean_col]),
-                "max_reflectivity": float(row[max_col]),
-                "time_volume_start": row["time_volume_start"],
-                "centroid_mass_lat": float(row["cell_centroid_mass_lat"]),
-                "centroid_mass_lon": float(row["cell_centroid_mass_lon"]),
+            tested = {
+                i: p for (i, jj), p in sorted(pairs.items()) if jj == j and i in out.continuing
             }
+            parent = self._lineage_partner(tested, "SPLIT", current, log)
+            if parent is not None:
+                out.split[j] = parent
+        for i in (i for i in range(len(live)) if i not in out.continuing):
+            tested = {j: p for (ii, j), p in sorted(pairs.items()) if ii == i and j in survivors}
+            target = self._lineage_partner(tested, "MERGE", current, log)
+            if target is not None:
+                out.merged[i] = target
+            log.lineage.append(self._latent_hypothesis(live[i]))
 
-        x_coords = np.asarray(ds.x.values, dtype=float)
-        y_coords = np.asarray(ds.y.values, dtype=float)
-        sx = float(x_coords[1] - x_coords[0])
-        sy = float(y_coords[1] - y_coords[0])
-        x0, y0 = float(x_coords[0]), float(y_coords[0])
-        pixel_area_km2 = abs(sx * sy) / 1e6
+    def _lineage_partner(self, tested: dict[int, Pair], kind: str, current, log: ScanLog):
+        """Best partner by fraction among those passing the crossing test and the
+        threshold; every partner tested is logged.
 
-        cells: list[dict] = []
-        for cell_id in np.unique(labels):
-            if cell_id == 0:
-                continue
-            if cell_id not in cell_props_map:
-                logger.warning("Cell %d in labels but not in analyzer stats; skipping", cell_id)
-                continue
-            mask = labels == cell_id
-            props = cell_props_map[cell_id]
-            core_area_km2 = float(np.sum(mask & (field > self.core_threshold)) * pixel_area_km2)
-            row_c, col_c = mass_weighted_centroid(field, mask)
-            cells.append(
-                {
-                    "cell_id": int(cell_id),
-                    "mask": mask,
-                    "area": props["area"],
-                    "area_px": float(np.count_nonzero(mask)),
-                    "centroid_x": x0 + col_c * sx,  # mass-weighted, metres
-                    "centroid_y": y0 + row_c * sy,
-                    "mean_reflectivity": props["mean_reflectivity"],
-                    "max_reflectivity": props["max_reflectivity"],
-                    "core_area": core_area_km2,
-                    "time_volume_start": props["time_volume_start"],
-                    "centroid_mass_lat": props["centroid_mass_lat"],
-                    "centroid_mass_lon": props["centroid_mass_lon"],
-                }
-            )
-        return cells
-
-    def _new_cell_identity(self, cell: dict) -> tuple[str, str]:
-        signature = track_signature_v2(self._scan_id, cell["cell_id"])
-        cell_uid = _cell_uid_from_signature(signature, width=self.uid_width)
-        return cell_uid, signature
-
-    # ------------------------------------------------------------------
-    # Track initialisation helpers
-    # ------------------------------------------------------------------
-
-    def _initialize_tracks(self, time, cells: list[dict]) -> list[int]:
-        node_ids = []
-        for cell in cells:
-            track_index = self.graph.get_new_track_index()
-            cell_uid, track_signature = self._new_cell_identity(cell)
-            self._cell_identity[track_index] = (cell_uid, track_signature)
-            node_ids.append(self._add_cell_node(time, cell, track_index, cell_uid, track_signature))
-        logger.debug("Initialized %d paths at time %s", len(cells), time)
-        return node_ids
-
-    def _add_cell_node(
-        self,
-        time,
-        cell: dict,
-        track_index: int,
-        cell_uid: str | None = None,
-        track_signature: str | None = None,
-    ) -> int:
-        if cell_uid is None or track_signature is None:
-            cell_uid, track_signature = self.get_cell_identity(track_index)
-        return self.graph.add_observation(
-            time=time,
-            cell_id=cell["cell_id"],
-            track_index=track_index,
-            area=cell["area"],
-            centroid_x=cell["centroid_x"],
-            centroid_y=cell["centroid_y"],
-            mean_reflectivity=cell["mean_reflectivity"],
-            max_reflectivity=cell["max_reflectivity"],
-            core_area=cell["core_area"],
-            cell_uid=cell_uid,
-            track_signature=track_signature,
-        )
-
-    # ------------------------------------------------------------------
-    # Frame-pair matching
-    # ------------------------------------------------------------------
-
-    def _update_motion(
-        self, prev_node: int, curr_cell: dict, track_index: int, dt_s: float
-    ) -> None:
-        """Record a continuing track's kinematics for acceleration/heading checks."""
-        prev_cx = float(self.graph.get_node_attr(prev_node, "centroid_x"))
-        prev_cy = float(self.graph.get_node_attr(prev_node, "centroid_y"))
-        vx = (float(curr_cell["centroid_x"]) - prev_cx) / dt_s
-        vy = (float(curr_cell["centroid_y"]) - prev_cy) / dt_s
-        self._track_motion[track_index] = TrackMotionState(
-            speed=math.hypot(vx, vy),
-            heading=math.atan2(vy, vx),
-            has_velocity=True,
-        )
-
-    def _record_continue(
-        self,
-        i: int,
-        c: int,
-        all_prev_ids: list[int],
-        curr_cells: list[dict],
-        curr_time,
-        dt_s: float,
-        edge: "_EdgeCost",
-        method: MatchMethod,
-        matched_prev: dict[int, int],
-        matched_curr: dict[int, int],
-    ) -> dict:
-        """Create the CONTINUE node/edge for prev row ``i`` ↔ curr col ``c``.
-
-        Shared by the constraint-propagation and Hungarian paths. Records diagnostics
-        from the pre-computed edge, updates the matched maps and the track's motion
-        state; returns the event row.
+        No speed gate: a fragment's centre moves from its parent's centre by up to
+        the parent's size, which is not motion (the speed limits apply to links of
+        one cell: continuations and resumptions).
         """
-        prev_node = all_prev_ids[i]
-        track_index = int(self.graph.get_node_attr(prev_node, "track_index") or 0)
-        # Diagnostics use the track's prior motion — compute before _update_motion.
-        diagnostics = self._match_diagnostics(prev_node, curr_cells[c], dt_s, edge, method)
-        curr_node = self._add_cell_node(curr_time, curr_cells[c], track_index)
-        self.graph.add_edge(prev_node, curr_node, edge_type="CONTINUE", cost=edge.cost)
-        matched_prev[i] = curr_node
-        matched_curr[c] = curr_node
-        self._update_motion(prev_node, curr_cells[c], track_index, dt_s)
-        return event_continue(
-            self.graph, self._cell_identity, curr_time, prev_node, curr_node, edge.cost, diagnostics
-        )
-
-    def _match_diagnostics(
-        self,
-        prev_node: int,
-        curr_cell: dict,
-        dt_s: float,
-        edge: "_EdgeCost",
-        method: MatchMethod,
-    ) -> MatchDiagnostics:
-        """Assemble the per-match explainability record for an accepted CONTINUE."""
-        prev_cx = float(self.graph.get_node_attr(prev_node, "centroid_x"))
-        prev_cy = float(self.graph.get_node_attr(prev_node, "centroid_y"))
-        prev_area = float(self.graph.get_node_attr(prev_node, "area"))
-        track_index = int(self.graph.get_node_attr(prev_node, "track_index") or 0)
-
-        heading_change_deg = None
-        prev_state = self._track_motion.get(track_index)
-        if prev_state is not None and prev_state.has_velocity:
-            cand_heading = math.atan2(
-                float(curr_cell["centroid_y"]) - prev_cy, float(curr_cell["centroid_x"]) - prev_cx
+        threshold = self.cfg.split_overlap if kind == "SPLIT" else self.cfg.merge_overlap
+        fractions = {}
+        for key, p in tested.items():
+            fraction = p.overlap.o_c if kind == "SPLIT" else p.overlap.o_h
+            reason = None
+            if any(
+                uid != p.fp.uid and segments_cross(p.fp.origin, p.cell.centre, a, b)
+                for uid, a, b in current
+            ):
+                reason = "CROSSING"
+            if reason is None and fraction < threshold:
+                reason = "BELOW_THRESHOLD"
+            if reason is None:
+                fractions[key] = fraction
+            log.lineage.append(
+                self._hypothesis(kind, p, fraction=fraction, threshold=threshold, reason=reason)
             )
-            heading_change_deg = heading_change_degrees(prev_state.heading, cand_heading)
-
-        curr_area = float(curr_cell["area"])
-        return MatchDiagnostics(
-            opc=edge.opc,
-            ocp=edge.ocp,
-            centroid_distance_m=edge.displacement,
-            speed_ms=edge.displacement / dt_s,
-            heading_change_deg=heading_change_deg,
-            area_ratio=(curr_area / prev_area if prev_area > 0 else None),
-            final_cost=edge.cost,
-            match_method=method,
-        )
-
-    def _build_edges(
-        self,
-        all_prev_ids: list[int],
-        curr_cells: list[dict],
-        proj_labels: np.ndarray,
-        ds: xr.Dataset,
-        dt_s: float,
-    ) -> dict[tuple[int, int], _EdgeCost]:
-        """Generate candidates from buffered hulls and keep only validated edges.
-
-        For every previous object the registration hull is dilated by the buffer,
-        every intersecting current cell becomes a candidate, and a pair survives
-        only if it clears the bidirectional-overlap gate and the kinematic gate.
-        Returns ``{(prev_idx, curr_idx): _EdgeCost}`` with the geometry-first cost.
-        """
-        x_coords = np.asarray(ds.x.values, dtype=float)
-        y_coords = np.asarray(ds.y.values, dtype=float)
-        sx = float(x_coords[1] - x_coords[0])
-        sy = float(y_coords[1] - y_coords[0])
-        x0, y0 = float(x_coords[0]), float(y_coords[0])
-        pixel_area_m2 = abs(sx * sy)
-        buffer_pixels = buffer_pixels_from_km(self.buffer_km, min(abs(sx), abs(sy)))
-
-        prev_hulls = [
-            proj_labels == self.graph.get_node_attr(node_id, "cell_id") for node_id in all_prev_ids
-        ]
-        curr_masks = [cell["mask"] for cell in curr_cells]
-        # Buffer only widens candidate recall; the overlap gate and cost are measured
-        # against the true (un-buffered) projected hull so the buffer never dilutes them.
-        _, pairs = CandidateGenerator(buffer_pixels).generate(prev_hulls, curr_masks)
-
-        hull_area_px = [float(np.count_nonzero(h)) for h in prev_hulls]
-        hull_centroid_m: list[tuple[float, float] | None] = []
-        for hull in prev_hulls:
-            if hull.any():
-                row_c, col_c = mask_centroid(hull)
-                hull_centroid_m.append((x0 + col_c * sx, y0 + row_c * sy))
-            else:
-                hull_centroid_m.append(None)
-
-        edges: dict[tuple[int, int], _EdgeCost] = {}
-        for i, j in pairs:
-            result = self.validator.validate(prev_hulls[i], curr_masks[j])
-            if not result.passed:
-                continue
-
-            prev_node = all_prev_ids[i]
-            prev_cx = float(self.graph.get_node_attr(prev_node, "centroid_x"))
-            prev_cy = float(self.graph.get_node_attr(prev_node, "centroid_y"))
-            curr_cx = float(curr_cells[j]["centroid_x"])
-            curr_cy = float(curr_cells[j]["centroid_y"])
-            track_index = int(self.graph.get_node_attr(prev_node, "track_index") or 0)
-            state = self._track_motion.get(track_index)
-            previous_speed = state.speed if state and state.has_velocity else None
-
-            decision = self.motion.check(prev_cx, prev_cy, curr_cx, curr_cy, dt_s, previous_speed)
-            if not decision.ok:  # B3 kinematic gate
-                logger.debug(
-                    "tracking_error code=%s track=%d speed=%.1fm/s",
-                    decision.code.value,
-                    track_index,
-                    decision.speed_ms,
-                )
-                continue
-
-            hull_c = hull_centroid_m[i]
-            displacement = math.hypot(curr_cx - hull_c[0], curr_cy - hull_c[1]) if hull_c else 0.0
-            length_m = length_scale(
-                self.length_scale_name,
-                hull_area_px[i],
-                curr_cells[j]["area_px"],
-                pixel_area_m2,
-                self.geometry_length_scale_km,
-            )
-            cost = pair_cost(result.opc, result.ocp, displacement, length_m)
-            if self.heading_penalty_weight > 0.0 and state is not None and state.has_velocity:
-                cand_heading = math.atan2(curr_cy - prev_cy, curr_cx - prev_cx)  # B5
-                cost += self.heading_penalty_weight * heading_change_radians(
-                    state.heading, cand_heading
-                )
-            edges[(i, j)] = _EdgeCost(result.opc, result.ocp, displacement, cost)
-        return edges
-
-    def _track_frame_pair(
-        self,
-        prev_node_ids: list[int],
-        curr_time,
-        ds_curr: xr.Dataset,
-        curr_cells: list[dict],
-        dt_s: float,
-    ) -> list[dict]:
-        # Without a registration frame we cannot match — reset (terminate + reinit).
-        projections_missing = (
-            "cell_projections" not in ds_curr.data_vars
-            or ds_curr["cell_projections"].values.shape[0] < 1
-        )
-        if projections_missing:
-            logger.warning("No cell_projections — resetting %d tracks", len(prev_node_ids))
-            return self._reset_tracks(prev_node_ids, curr_time, curr_cells)
-
-        # Registration hull at the minute nearest the real gap (falls back to
-        # cell_projections[0] when minute frames are absent).
-        proj_labels = select_registration_labels(ds_curr, dt_s)
-
-        matched_prev: dict[int, int] = {}  # prev_idx → new curr node_id
-        matched_curr: dict[int, int] = {}  # curr_idx → new curr node_id
-
-        # 1. Candidate generation + hard gate → validated, costed edges.
-        edge_costs = self._build_edges(prev_node_ids, curr_cells, proj_labels, ds_curr, dt_s)
-
-        # 2. Deterministic propagation first; Hungarian only for ambiguous components.
-        events = self._resolve_matches(
-            edge_costs, prev_node_ids, curr_cells, curr_time, dt_s, matched_prev, matched_curr
-        )
-
-        dissipated = [prev_node_ids[i] for i in range(len(prev_node_ids)) if i not in matched_prev]
-        born = [j for j in range(len(curr_cells)) if j not in matched_curr]
-
-        # 3. Split / merge on the leftovers (behaviour preserved).
-        split_born, split_events = self._detect_splits(
-            prev_node_ids, curr_cells, proj_labels, matched_prev, born, curr_time
-        )
-        merged, merge_events = self._detect_merges(
-            dissipated, curr_cells, proj_labels, matched_curr, curr_time
-        )
-        events += split_events + merge_events
-
-        # 4. Births and terminations for everything still unmatched.
-        events += self._emit_births(curr_cells, born, split_born, curr_time)
-        events += self._emit_terminations(dissipated, merged, curr_time)
-
-        logger.info(
-            "Frame pair: prev=%d → continue=%d merged=%d dissipated=%d | born=%d split=%d",
-            len(prev_node_ids),
-            len(matched_prev),
-            len(merged),
-            len(dissipated) - len(merged),
-            len(born) - len(split_born),
-            len(split_born),
-        )
-        return events
-
-    # ------------------------------------------------------------------
-    # Matching, split/merge, births/terminations
-    # ------------------------------------------------------------------
-
-    def _resolve_matches(
-        self,
-        edge_costs: dict[tuple[int, int], _EdgeCost],
-        prev_node_ids: list[int],
-        curr_cells: list[dict],
-        curr_time,
-        dt_s: float,
-        matched_prev: dict[int, int],
-        matched_curr: dict[int, int],
-    ) -> list[dict]:
-        """Constraint propagation (PROPAGATED), then Hungarian per ambiguous component."""
-
-        def record(i: int, c: int, method: MatchMethod) -> dict:
-            return self._record_continue(
-                i,
-                c,
-                prev_node_ids,
-                curr_cells,
-                curr_time,
-                dt_s,
-                edge_costs[(i, c)],
-                method,
-                matched_prev,
-                matched_curr,
-            )
-
-        forced, remaining = ConstraintPropagator.resolve(list(edge_costs.keys()))
-        events = [record(i, c, MatchMethod.PROPAGATED) for i, c in forced]
-
-        component_costs = {edge: edge_costs[edge].cost for edge in remaining}
-        for prevs, currs in AssignmentGraph(remaining).components():
-            for i, c in HungarianMatcher.match(prevs, currs, component_costs):
-                events.append(record(i, c, MatchMethod.HUNGARIAN))
-        return events
+        return best_partner(fractions, threshold)
 
     @staticmethod
-    def _hull_overlap_fraction(proj_labels: np.ndarray, cell_id: int, mask: np.ndarray) -> float:
-        """Fraction of a previous cell's projected hull covered by ``mask``."""
-        proj_mask = proj_labels == cell_id
-        denom = float(np.sum(proj_mask))
-        return float(np.sum(mask & proj_mask)) / denom if denom else 0.0
+    def _latent_hypothesis(fp: Footprint) -> TrackingLineage:
+        """An unlinked track kept latent (chosen unless it merged)."""
+        return TrackingLineage(
+            "prev", fp.uid, fp.label, "LATENT", None, None, None, None, None, True, False, None
+        )
 
-    def _new_track_node(self, cell: dict, curr_time) -> int:
-        """Allocate a new track index + identity and add the observation node."""
-        new_index = self.graph.get_new_track_index()
-        cell_uid, track_signature = self._new_cell_identity(cell)
-        self._cell_identity[new_index] = (cell_uid, track_signature)
-        return self._add_cell_node(curr_time, cell, new_index, cell_uid, track_signature)
+    @staticmethod
+    def _hypothesis(
+        kind, p: Pair, *, fraction=None, cost=None, threshold=None, reason=None
+    ) -> TrackingLineage:
+        """A lineage row. Uids that are final only at the end of the scan (the orphan's,
+        a merge survivor's) are filled in by ``_finish_lineage``."""
+        if kind == "MERGE":
+            side, uid, label, partner_uid, partner_label = (
+                "prev",
+                p.fp.uid,
+                p.fp.label,
+                None,
+                p.cell.label,
+            )
+        else:
+            side, uid, label, partner_uid, partner_label = (
+                "curr",
+                "",
+                p.cell.label,
+                p.fp.uid,
+                p.fp.label,
+            )
+        return TrackingLineage(
+            side,
+            uid,
+            label,
+            kind,
+            partner_uid,
+            partner_label,
+            fraction,
+            cost,
+            threshold,
+            reason in (None, "IDENTITY"),  # IDENTITY: made so by the identity rule
+            False,
+            reason,
+        )
 
-    def _detect_splits(
-        self,
-        prev_node_ids: list[int],
-        curr_cells: list[dict],
-        proj_labels: np.ndarray,
-        matched_prev: dict[int, int],
-        born: list[int],
-        curr_time,
-    ) -> tuple[set[int], list[dict]]:
-        """A born cell overlapping a continuing parent's projected hull is a SPLIT child."""
-        split_born: set[int] = set()
-        events: list[dict] = []
-        for b_idx in born:
-            b_mask = curr_cells[b_idx]["mask"]
-            best_parent, best_overlap = None, 0.0
-            for prev_idx, curr_node in matched_prev.items():
-                cell_id = self.graph.get_node_attr(prev_node_ids[prev_idx], "cell_id")
-                overlap = self._hull_overlap_fraction(proj_labels, cell_id, b_mask)
-                if overlap >= self.split_overlap and overlap > best_overlap:
-                    best_parent, best_overlap = curr_node, overlap
-            if best_parent is not None:
-                child_node = self._new_track_node(curr_cells[b_idx], curr_time)
-                self.graph.add_edge(best_parent, child_node, edge_type="SPLIT", cost=0.0)
-                split_born.add(b_idx)
-                events.append(
-                    event_split(self.graph, self._cell_identity, curr_time, best_parent, child_node)
-                )
-        return split_born, events
-
-    def _detect_merges(
-        self,
-        dissipated: list[int],
-        curr_cells: list[dict],
-        proj_labels: np.ndarray,
-        matched_curr: dict[int, int],
-        curr_time,
-    ) -> tuple[dict[int, int], list[dict]]:
-        """A dissipated cell whose projected hull overlaps a continuing cell is a MERGE."""
-        merged: dict[int, int] = {}
-        events: list[dict] = []
-        for d_node in dissipated:
-            cell_id = self.graph.get_node_attr(d_node, "cell_id")
-            best_target, best_overlap = None, 0.0
-            for c_idx, curr_node in matched_curr.items():
-                overlap = self._hull_overlap_fraction(
-                    proj_labels, cell_id, curr_cells[c_idx]["mask"]
-                )
-                if overlap >= self.split_overlap and overlap > best_overlap:
-                    best_target, best_overlap = curr_node, overlap
-            if best_target is not None:
-                self.graph.add_edge(d_node, best_target, edge_type="MERGE", cost=0.0)
-                merged[d_node] = best_target
-                events.append(
-                    event_merge(self.graph, self._cell_identity, curr_time, d_node, best_target)
-                )
-        return merged, events
-
-    def _emit_births(
-        self, curr_cells: list[dict], born: list[int], split_born: set[int], curr_time
-    ) -> list[dict]:
-        """Initiate fresh tracks for born cells that were not claimed as split children."""
-        events: list[dict] = []
-        for b_idx in born:
-            if b_idx in split_born:
+    def _identity(
+        self, live: list[Footprint], pairs, by_label, grid: Grid, out: _Outcome, log: ScanLog
+    ):
+        """The identity at a merge or split follows the larger score S; within δ_S the
+        candidate nearer the predicted position. Only candidates whose link would pass
+        the speed gates contend: a continuation always obeys the physical limits."""
+        margin = self.cfg.identity_score_margin
+        survivors = {j: i for i, j in out.continuing.items()}
+        for s in sorted(set(out.merged.values())):
+            p = survivors[s]
+            contenders = [
+                p,
+                *sorted(
+                    i
+                    for i, t in out.merged.items()
+                    if t == s and pairs[(i, s)].speed_gate.code is None
+                ),
+            ]
+            if len(contenders) == 1:
                 continue
-            node_id = self._new_track_node(curr_cells[b_idx], curr_time)
-            events.append(event_initiation(self.graph, self._cell_identity, curr_time, node_id))
-        return events
-
-    def _emit_terminations(
-        self, dissipated: list[int], merged: dict[int, int], curr_time
-    ) -> list[dict]:
-        """Terminate every unmatched previous node (target = merge sink when merged)."""
-        return [
-            event_termination(
-                self.graph, self._cell_identity, curr_time, d_node, merged.get(d_node)
+            winner = self._decide(
+                "MERGE",
+                live[p].uid,
+                "prev",
+                [
+                    (
+                        i,
+                        self._tracks[i].label,
+                        self._tracks[i].score,
+                        _distance(live[i], by_label[s], grid),
+                    )
+                    for i in contenders
+                ],
+                p,
+                margin,
+                log,
             )
-            for d_node in dissipated
-        ]
+            if winner != p:
+                log.update_pair(live[p].uid, s, outcome="LOST")
+                del out.continuing[p], out.merged[winner]
+                out.continuing[winner], out.method[winner] = s, "IDENTITY_MERGE"
+                out.merged[p] = s
+                log.lineage.append(
+                    self._hypothesis(
+                        "MERGE",
+                        pairs[(p, s)],
+                        fraction=pairs[(p, s)].overlap.o_h,
+                        threshold=self.cfg.merge_overlap,
+                        reason="IDENTITY",
+                    )
+                )
+                log.lineage.append(self._latent_hypothesis(live[p]))
+        children: dict[int, list[int]] = {}
+        for j, parent in out.split.items():
+            children.setdefault(parent, []).append(j)
+        for parent, kids in sorted(children.items()):
+            if parent not in out.continuing:
+                continue  # the parent itself merged away: its children stay split children
+            c = out.continuing[parent]
+            kids = [j for j in kids if pairs[(parent, j)].speed_gate.code is None]
+            if not kids:
+                continue
+            winner = self._decide(
+                "SPLIT",
+                live[parent].uid,
+                "curr",
+                [
+                    (j, j, by_label[j].score, _distance(live[parent], by_label[j], grid))
+                    for j in [c, *sorted(kids)]
+                ],
+                c,
+                margin,
+                log,
+            )
+            if winner != c:
+                log.update_pair(live[parent].uid, c, outcome="LOST")
+                del out.split[winner]
+                out.continuing[parent], out.method[parent] = winner, "IDENTITY_SPLIT"
+                out.split[c] = parent
+                log.lineage.append(
+                    self._hypothesis(
+                        "SPLIT",
+                        pairs[(parent, c)],
+                        fraction=pairs[(parent, c)].overlap.o_c,
+                        threshold=self.cfg.split_overlap,
+                        reason="IDENTITY",
+                    )
+                )
 
-    # ------------------------------------------------------------------
-    # Scan-local builders (no per-track analytics)
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _decide(kind, uid, side, contenders, assigned, margin, log: ScanLog):
+        winner, rule = choose_identity(
+            [IdentityCandidate(key, score, dist) for key, _, score, dist in contenders], margin
+        )
+        for key, label, score, dist in contenders:
+            log.identity.append(
+                TrackingIdentity(
+                    kind,
+                    uid,
+                    side,
+                    label,
+                    score,
+                    dist,
+                    key == winner,
+                    rule,
+                    key == winner and winner != assigned,
+                )
+            )
+        if winner != assigned:
+            log.counts["identity_transfer"] += 1
+        return winner
 
-    def _build_tracked_cells_current(self, time, node_ids: list[int]) -> pd.DataFrame:
-        rows: list[dict] = []
-        for node_id in node_ids:
-            node = self.graph.graph.nodes[node_id]
-            time_val = normalize_time_scalar(node["time"])
-            time_val = pd.Timestamp(time_val).to_datetime64()
-            cell_uid = str(node["cell_uid"])
+    # ── outputs of one scan pair ───────────────────────────────────────────
+
+    def _emit(
+        self,
+        last: _LastScan,
+        live,
+        pairs,
+        cells,
+        out: _Outcome,
+        carried,
+        time,
+        time_s,
+        scan_id,
+        log,
+    ):
+        cfg = self.cfg
+        by_label = {c.label: c for c in cells}
+        uids: dict[int, str] = {}
+        events: list[dict] = []
+        tracks: list[Track] = []
+        segments: list[Segment] = []
+        prev_scan = (last.scan_id, last.time)
+
+        for i, j in sorted(out.continuing.items(), key=lambda e: e[1]):
+            track, p = self._tracks[i], pairs[(i, j)]
+            uids[j] = track.uid
+            events.append(
+                event_row(
+                    time,
+                    "CONTINUE",
+                    EndPoint(track.uid, track.label),
+                    EndPoint(track.uid, j),
+                    source_scan=prev_scan,
+                    diagnostics=self._diagnostics(p, out.method[i]),
+                    is_dominant=True,
+                )
+            )
+            log.update_pair(track.uid, j, outcome="CONTINUE")
+            log.cells[j] = self._cell_record(by_label[j], track.uid, "CONTINUE")
+            tracks.append(self._moved(by_label[j], track.uid, p, scan_id, time, time_s))
+            segments.append((track.uid, track.centre, by_label[j].centre))
+
+        resumed_uids = set()
+        for j, p in sorted(out.resumed.items()):
+            lt = next(lt for lt in self._latent if lt.uid == p.fp.uid)
+            resumed_uids.add(lt.uid)
+            uids[j] = lt.uid
+            events.append(
+                event_row(
+                    time,
+                    "RESUMED",
+                    EndPoint(lt.uid, lt.label),
+                    EndPoint(lt.uid, j),
+                    source_scan=(lt.scan_id, lt.scan_time),
+                    diagnostics=self._diagnostics(p, "RESUMED"),
+                    is_dominant=True,
+                )
+            )
+            log.cells[j] = self._cell_record(by_label[j], lt.uid, "RESUMED")
+            log.latent.append(self._latent_record(lt, "RESUMED"))
+            tracks.append(self._moved(by_label[j], lt.uid, p, scan_id, time, time_s))
+            f = (last.time_s - lt.time_s) / (time_s - lt.time_s)
+            mid = (
+                lt.centre[0] + f * (by_label[j].centre[0] - lt.centre[0]),
+                lt.centre[1] + f * (by_label[j].centre[1] - lt.centre[1]),
+            )
+            segments.append((lt.uid, mid, by_label[j].centre))
+
+        for j in sorted(c.label for c in cells if c.label not in uids):
+            uids[j] = self._new_uid(scan_id, j)
+            if j in out.split:
+                parent = self._tracks[out.split[j]]
+                events.append(
+                    event_row(
+                        time,
+                        "SPLIT",
+                        EndPoint(parent.uid, parent.label),
+                        EndPoint(uids[j], j),
+                        source_scan=prev_scan,
+                    )
+                )
+                log.cells[j] = self._cell_record(by_label[j], uids[j], "SPLIT_CHILD")
+            else:
+                events.append(event_row(time, "INITIATION", None, EndPoint(uids[j], j)))
+                log.cells[j] = self._cell_record(by_label[j], uids[j], "INITIATION")
+            tracks.append(self._new_track(by_label[j], uids[j], scan_id, time, time_s))
+
+        new_latent: list[LatentTrack] = []
+        for i in (i for i in range(len(live)) if i not in out.continuing):
+            track, fp = self._tracks[i], live[i]
+            survivor = EndPoint(uids[out.merged[i]], out.merged[i]) if i in out.merged else None
+            into = survivor.uid if survivor else None
+            if survivor:
+                log.counts["merge"] += 1
+                events.append(
+                    event_row(
+                        time,
+                        "MERGE",
+                        EndPoint(track.uid, track.label),
+                        survivor,
+                        source_scan=prev_scan,
+                    )
+                )
+            if cfg.latent_scans <= 1:
+                log.counts["termination"] += 1
+                events.append(
+                    event_row(
+                        time,
+                        "TERMINATION",
+                        EndPoint(track.uid, track.label),
+                        survivor,
+                        source_scan=prev_scan,
+                    )
+                )
+                continue
+            lt = LatentTrack(
+                uid=track.uid,
+                label=track.label,
+                scan_id=track.scan_id,
+                scan_time=track.scan_time,
+                time_s=track.time_s,
+                centre=track.centre,
+                step=track.step,
+                speed=track.speed,
+                score=track.score,
+                footprint=fp.mask,
+                predicted=fp.predicted,
+                age=1,
+                origin=ORIGIN_MERGED if into else ORIGIN_TERMINATED,
+                merged_into_uid=into,
+            )
+            new_latent.append(lt)
+            log.counts["latent_created"] += 1
+            log.latent.append(self._latent_record(lt, "CREATED"))
+            events.append(
+                event_row(
+                    time, "LATENT", EndPoint(track.uid, track.label), None, source_scan=prev_scan
+                )
+            )
+
+        for lt in self._latent:
+            if lt.uid in resumed_uids:
+                continue
+            if lt.age >= cfg.latent_scans:
+                log.counts["termination"] += 1
+                log.latent.append(self._latent_record(lt, "EXPIRED"))
+                target = EndPoint(lt.merged_into_uid, None) if lt.merged_into_uid else None
+                events.append(
+                    event_row(
+                        time,
+                        "TERMINATION",
+                        EndPoint(lt.uid, lt.label),
+                        target,
+                        source_scan=(lt.scan_id, lt.scan_time),
+                    )
+                )
+            else:
+                log.latent.append(self._latent_record(lt, "CARRIED"))
+                new_latent.append(lt)
+            segments.append(carried[lt.uid])
+
+        segments += [(lt.uid, lt.centre, lt.predicted) for lt in new_latent if lt.age == 1]
+        self._record_interval(tuple(segments), last.time_s, time_s)
+        self._latent = new_latent
+        merged_uids = {self._tracks[i].uid: uids[j] for i, j in out.merged.items()}
+        split_parents = {j: self._tracks[i].uid for j, i in out.split.items()}
+        self._finish_lineage(log, uids, merged_uids, split_parents)
+        return uids, events, tracks
+
+    def _record_interval(self, segments: tuple[Segment, ...], prev_s: float, time_s: float) -> None:
+        """Keep the last N−1 intervals' motion for the crossing test of resumed paths."""
+        keep = max(self.cfg.latent_scans - 1, 0)
+        intervals = [*self._intervals, _Interval(prev_s, time_s, segments)]
+        self._intervals = intervals[-keep:] if keep else []
+
+    @staticmethod
+    def _finish_lineage(
+        log: ScanLog, uids: dict[int, str], merged: dict[str, str], split: dict[int, str]
+    ) -> None:
+        """Fill the final uids, add each orphan's INITIATION hypothesis, mark what was chosen.
+
+        ``merged``: merge source uid → survivor uid; ``split``: child label → parent uid.
+        """
+        fates = {label: rec.fate for label, rec in log.cells.items()}
+        rows = []
+        for r in log.lineage:
+            if r.side == "curr":
+                chosen = {
+                    "RESUME": fates[r.cell_label] == "RESUMED"
+                    and uids[r.cell_label] == r.partner_uid,
+                    "SPLIT": split.get(r.cell_label) == r.partner_uid,
+                }[r.hypothesis]
+                rows.append(replace(r, cell_uid=uids[r.cell_label], chosen=chosen))
+            elif r.hypothesis == "MERGE":
+                into = uids[cast(int, r.partner_label)]
+                rows.append(replace(r, partner_uid=into, chosen=merged.get(r.cell_uid) == into))
+            else:
+                continuing = r.cell_uid in {rec.cell_uid for rec in log.cells.values()}
+                rows.append(replace(r, chosen=r.cell_uid not in merged and not continuing))
+        for j in sorted(j for j, f in fates.items() if f != "CONTINUE"):
             rows.append(
-                {
-                    "time": time_val,
-                    "cell_label": int(node["cell_id"]),
-                    "cell_uid": cell_uid,
-                    "area": float(node["area"]),
-                    "centroid_x": float(node["centroid_x"]),
-                    "centroid_y": float(node["centroid_y"]),
-                    "mean_reflectivity": float(node["mean_reflectivity"]),
-                    "max_reflectivity": float(node["max_reflectivity"]),
-                    "core_area": float(node["core_area"]),
-                }
+                TrackingLineage(
+                    "curr",
+                    uids[j],
+                    j,
+                    "INITIATION",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    True,
+                    fates[j] == "INITIATION",
+                    None,
+                )
             )
+        log.lineage[:] = rows
+
+    # ── records ────────────────────────────────────────────────────────────
+
+    def _new_uid(self, scan_id: str, label: int) -> str:
+        return _cell_uid_from_signature(track_signature_v2(scan_id, label), self.cfg.uid_width)
+
+    @staticmethod
+    def _new_track(cell: Cell, uid: str, scan_id: str, time, time_s: float) -> Track:
+        return Track(
+            uid, cell.label, scan_id, time, time_s, cell.score, cell.centre, cell.geom, None, None
+        )
+
+    @staticmethod
+    def _moved(cell: Cell, uid: str, p: Pair, scan_id, time, time_s) -> Track:
+        """The track after its link: last step per interval and speed over the link."""
+        disp = p.displacement
+        step = (disp[0] / p.fp.steps, disp[1] / p.fp.steps)
+        return Track(
+            uid,
+            cell.label,
+            scan_id,
+            time,
+            time_s,
+            cell.score,
+            cell.centre,
+            cell.geom,
+            step,
+            p.speed,
+        )
+
+    @staticmethod
+    def _diagnostics(p: Pair, method: str) -> LinkDiagnostics:
+        return LinkDiagnostics(
+            o_c=p.overlap.o_c,
+            o_h=p.overlap.o_h,
+            residual_m=p.residual_m,
+            speed_ms=p.speed,
+            heading_change_deg=p.turn_deg,
+            area_ratio=np.count_nonzero(p.cell.mask) / max(1, int(np.count_nonzero(p.fp.mask))),
+            cost=p.cost,
+            method=method,
+        )
+
+    @staticmethod
+    def _pair_record(p: Pair) -> dict:
+        o = p.overlap
+        return {
+            "prev_cell_label": p.fp.label,
+            "source": p.fp.source,
+            "steps": p.fp.steps,
+            "growth_radius_km": p.fp.radius_km,
+            "footprint_area_px": int(np.count_nonzero(p.fp.mask)),
+            "footprint_grown_px": o.footprint_grown_px,
+            "cell_grown_px": o.cell_grown_px,
+            "intersection_px": o.intersection_px,
+            "o_c": o.o_c,
+            "o_h": o.o_h,
+            "u": o.u,
+            "predicted_x": p.fp.predicted[0],
+            "predicted_y": p.fp.predicted[1],
+            "curr_centre_x": p.cell.centre[0],
+            "curr_centre_y": p.cell.centre[1],
+            "d": p.d,
+            "speed_ms": p.speed,
+            "prev_speed_ms": p.fp.speed,
+            "speed_limit_ms": p.speed_gate.limit_ms,
+            "heading_change_deg": p.turn_deg,
+            "h": p.h,
+            "cost": p.cost,
+            "gate": p.gate,
+            "outcome": "REJECTED" if p.gate != GATE_PASS else "LOST",
+        }
+
+    @staticmethod
+    def _cell_record(c: Cell, uid: str, fate: str) -> TrackingCell:
+        return TrackingCell(
+            c.label,
+            uid,
+            c.area_km2,
+            c.mass,
+            c.mean_excess,
+            c.centre[0],
+            c.centre[1],
+            c.score,
+            c.core_area_km2,
+            fate,
+        )
+
+    @staticmethod
+    def _latent_record(lt: LatentTrack, status: str) -> TrackingLatent:
+        return TrackingLatent(
+            lt.uid,
+            lt.label,
+            lt.scan_id,
+            lt.age,
+            lt.origin,
+            lt.merged_into_uid,
+            status,
+            int(np.count_nonzero(lt.footprint)),
+            lt.predicted[0],
+            lt.predicted[1],
+        )
+
+    @staticmethod
+    def _tracked_cells(time, cells: list[Cell], uids: dict[int, str]) -> pd.DataFrame:
+        rows = [
+            {
+                "time": pd.Timestamp(time).to_datetime64(),
+                "cell_label": c.label,
+                "cell_uid": uids[c.label],
+                "area": c.area_km2,
+                "centroid_x": c.centre[0],
+                "centroid_y": c.centre[1],
+                "mean_reflectivity": c.mean_field,
+                "max_reflectivity": c.max_field,
+                "core_area": c.core_area_km2,
+            }
+            for c in cells
+        ]
         df = pd.DataFrame(rows)
         if not df.empty:
-            df["time"] = pd.to_datetime(df["time"])
             df = df.sort_values(["cell_uid", "cell_label"]).reset_index(drop=True)
         return df

@@ -28,7 +28,7 @@ def test_close_cells_with_closing(close_cells_ds, make_detection_config):
 
     config = make_detection_config(
         threshold=30,
-        segmenter=UserSegmenterConfig(filter_by_size=False, closing_kernel=(2, 2)),
+        segmenter=UserSegmenterConfig(filter_by_size=False, closing_radius=1),
     )
     seg = RadarCellSegmenter(config)
 

@@ -3,11 +3,13 @@
 
 from adapt.contracts import (
     CELL_LABELS_VAR,
+    DecisionTableWrite,
     NetcdfArtifact,
     TrackTablesWrite,
     check_cell_events,
     check_projected_ds,
     check_tracked_cells,
+    check_tracking_decisions,
 )
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
@@ -38,7 +40,8 @@ class TrackingModule(BaseModule):
     tracked_cells : pd.DataFrame
         Per-cell observations for the current scan with cell_uid/cell_label.
     cell_events : pd.DataFrame
-        Explicit event rows for CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION.
+        Explicit event rows for CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION,
+        LATENT (a track kept for resumption) and RESUMED.
     analysis_ds : xr.Dataset
         ``projected_ds`` plus the cell_uid LUTs (``cell_uid`` for this scan's
         labels, ``registration_cell_uid`` for the previous scan's) — the dataset
@@ -50,12 +53,15 @@ class TrackingModule(BaseModule):
     required_history = 2
     pipeline_phase = 0
     inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time", "scan_id"]
-    outputs = ["tracked_cells", "cell_events", "analysis_ds"]
+    # tracking_decisions: every candidate considered this scan and why each
+    # cell continued or ended — analysis-only, written to decisions.db.
+    outputs = ["tracked_cells", "cell_events", "analysis_ds", "tracking_decisions"]
     input_contracts = {"projected_ds": check_projected_ds}
     output_contracts = {
         "tracked_cells": check_tracked_cells,
         "cell_events": check_cell_events,
         "analysis_ds": check_projected_ds,
+        "tracking_decisions": check_tracking_decisions,
     }
     config_class = TrackingConfig
     # DEBT: TrackTablesWrite encodes tracking science that lives in
@@ -74,25 +80,33 @@ class TrackingModule(BaseModule):
             stats_key="cell_stats",
             adjacency_key="cell_adjacency",
         ),
+        DecisionTableWrite(key="tracking_decisions"),
     )
 
     @classmethod
     def build_config(cls, cfg) -> TrackingConfig:
+        t = cfg.tracker
         return TrackingConfig(
-            split_overlap=cfg.tracker.split_overlap_threshold,
-            core_field_threshold=cfg.tracker.core_field_threshold,
-            uid_width=cfg.tracker.cell_uid.width,
+            uid_width=t.cell_uid.width,
             field_var=cfg.global_.tracking_field,
             labels_var=CELL_LABELS_VAR,
-            max_tracking_gap_minutes=cfg.tracker.max_tracking_gap_minutes,
-            max_speed_ms=cfg.tracker.max_speed_ms,
-            max_speed_multiplier=cfg.tracker.max_speed_multiplier,
-            heading_change_penalty_weight=cfg.tracker.heading_change_penalty_weight,
-            projected_hull_buffer_km=cfg.tracker.projected_hull_buffer_km,
-            minimum_candidate_overlap=cfg.tracker.minimum_candidate_overlap,
-            minimum_projected_overlap=cfg.tracker.minimum_projected_overlap,
-            length_scale=cfg.tracker.length_scale,
-            geometry_length_scale_km=cfg.tracker.geometry_length_scale_km,
+            max_tracking_gap_minutes=cfg.global_.max_scan_gap_minutes,
+            cell_threshold=t.cell_threshold,
+            polarity=t.polarity,
+            growth_max_km=t.growth_max_km,
+            growth_size_km=t.growth_size_km,
+            max_overlap_mismatch=t.max_overlap_mismatch,
+            max_link_cost=t.max_link_cost,
+            residual_weight=t.residual_weight,
+            heading_weight=t.heading_weight,
+            max_speed_ms=t.max_speed_ms,
+            max_acceleration_ms2=t.max_acceleration_ms2,
+            split_overlap=t.split_overlap_threshold,
+            merge_overlap=t.merge_overlap_threshold,
+            latent_scans=t.latent_scans,
+            identity_intensity_weight=t.identity_intensity_weight,
+            identity_score_margin=t.identity_score_margin,
+            core_field_threshold=t.core_field_threshold,
         )
 
     def __init__(self) -> None:
@@ -124,6 +138,7 @@ class TrackingModule(BaseModule):
             "tracked_cells": tracked_cells,
             "cell_events": cell_events,
             "analysis_ds": analysis_ds,
+            "tracking_decisions": self._tracker.decisions(),
         }
 
 

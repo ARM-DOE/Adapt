@@ -92,10 +92,12 @@ def test_orchestrator_builds_working_observability_from_config(pipeline_config):
 
 
 def test_orchestrator_queue_wiring(pipeline_config):
-    """Orchestrator creates queues with correct size limits."""
+    """The queue bound comes from config.downloader.max_queue_size unless overridden."""
     orch = PipelineOrchestrator(pipeline_config)
+    assert orch.downloader_queue.maxsize == pipeline_config.downloader.max_queue_size == 100
 
-    assert orch.downloader_queue.maxsize == 20
+    orch = PipelineOrchestrator(pipeline_config, max_queue_size=7)
+    assert orch.downloader_queue.maxsize == 7
 
 
 def test_orchestrator_stop_is_idempotent(pipeline_config):

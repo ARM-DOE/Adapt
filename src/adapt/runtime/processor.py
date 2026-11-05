@@ -50,6 +50,11 @@ __all__ = ["RadarProcessor"]
 
 logger = logging.getLogger(__name__)
 
+# Context keys the processor injects per group; they must never enter a scan's
+# result (and hence the rolling history), or each entry would retain its
+# predecessor and every scan's grids would stay alive for the whole run.
+_INJECTED_CONTEXT_KEYS = frozenset({"scan_history", "prior_scan"})
+
 
 class RadarProcessor(threading.Thread):
     """Worker thread that processes NEXRAD files through two execution graphs.
@@ -165,7 +170,9 @@ class RadarProcessor(threading.Thread):
         # Rolling scan history (replaces per-phase segmented_history)
         self._scan_history: list[dict] = []
         self._max_history = config.processor.max_history
-        self._max_time_gap_minutes = config.projector.max_time_interval_minutes
+        # One bound for every stage that pairs frames (see global_.max_scan_gap_minutes):
+        # beyond it no seed is carried, no projection runs and tracking resets.
+        self._max_time_gap_minutes = config.global_.max_scan_gap_minutes
         self._last_skipped = False
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -336,6 +343,13 @@ class RadarProcessor(threading.Thread):
             # ── Rolling window: run all executor groups in history-size order
             # required_history=N means N scans total (N-1 prior + current).
             # Skip if fewer than N-1 prior scans are available.
+            # The previous completed scan is a usable predecessor only when the
+            # time gap to it is within the multi-scan bound (False on the first
+            # scan). Single-scan modules that want it (detection's seed carry)
+            # read ``prior_scan``; multi-scan groups gate on the same check.
+            time_gap_valid, time_gap_minutes = self._validate_time_gap(base_ctx["scan_time"])
+            prior_scan = self._scan_history[-1] if time_gap_valid else None
+
             result: dict = {}
             for req_hist, executor in sorted(self._executors.items()):
                 prior_needed = req_hist - 1
@@ -348,19 +362,15 @@ class RadarProcessor(threading.Thread):
                     )
                     continue
 
-                if req_hist > 1:
-                    # Validate time gap before running multi-scan modules
-                    current_scan_time = base_ctx["scan_time"]
-                    time_gap_valid, time_gap_minutes = self._validate_time_gap(current_scan_time)
-                    if not time_gap_valid:
-                        logger.warning(
-                            "Time gap %.1f min > %.1f min, skipping multi-scan modules.",
-                            time_gap_minutes,
-                            self._max_time_gap_minutes,
-                        )
-                        continue
+                if req_hist > 1 and not time_gap_valid:
+                    logger.warning(
+                        "Time gap %.1f min > %.1f min, skipping multi-scan modules.",
+                        time_gap_minutes,
+                        self._max_time_gap_minutes,
+                    )
+                    continue
 
-                ctx = {**base_ctx, **result}
+                ctx = {**base_ctx, **result, "prior_scan": prior_scan}
                 if req_hist > 1:
                     # Build scan_history: (N-1) prior entries + current partial context
                     prior = self._scan_history[-prior_needed:] if prior_needed else []
@@ -368,7 +378,12 @@ class RadarProcessor(threading.Thread):
                     # authoritative — a module result must never override it.
                     ctx["scan_history"] = list(prior) + [{**result, **base_ctx}]
                 group_result = executor.run(ctx)
-                result.update(group_result)
+                # The executor returns the whole context. Injected keys must not
+                # enter ``result``: it becomes the next history entry, and an
+                # entry holding its predecessor would retain every scan's grids.
+                result.update(
+                    {k: v for k, v in group_result.items() if k not in _INJECTED_CONTEXT_KEYS}
+                )
 
             scan_time = base_ctx["scan_time"]
             elapsed_s = time.perf_counter() - t0

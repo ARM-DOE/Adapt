@@ -49,6 +49,8 @@ class InternalDownloaderConfig(AdaptBaseModel):
     start_time: str | None
     end_time: str | None
     min_file_size: int
+    max_queue_size: int = 100
+    queue_resume_fraction: float = 0.10
 
 
 class InternalRegridderConfig(AdaptBaseModel):
@@ -73,9 +75,12 @@ class InternalSegmenterConfig(AdaptBaseModel):
     ]
     min_cellsize_gridpoint: int
     max_cellsize_gridpoint: int | None
-    closing_kernel: tuple[int, int]
+    closing_radius: int
     filter_by_size: bool
     h_maxima: float
+    seed_carry_frames: int
+    seed_carry_min_separation: int
+    carried_exempt_size_filter: bool = False
     threshold_params: ThresholdParams
     conv_strat_raut_params: ConvStratRautParams
     conv_strat_yuter_params: ConvStratYuterParams
@@ -118,6 +123,7 @@ class InternalGlobalConfig(AdaptBaseModel):
     """Runtime global settings."""
 
     z_level: float
+    max_scan_gap_minutes: float = Field(default=10.0, gt=0.0)
     tracking_field: str
     coord_names: InternalCoordNamesConfig
 
@@ -138,7 +144,6 @@ class InternalProjectorConfig(AdaptBaseModel):
     """Runtime projection configuration."""
 
     method: str
-    max_time_interval_minutes: int
     max_projection_steps: int = Field(ge=1, le=10)  # Capped at 10
     nan_fill_value: float
     flow_params: InternalFlowParamsConfig
@@ -156,8 +161,35 @@ class InternalAnalyzerConfig(AdaptBaseModel):
     adjacency_min_touching_boundary_pixels: int = Field(ge=1)
 
 
+# Tracker v1 keys → the v2 parameter that replaced them. A config written for
+# the previous tracker must fail loudly, not run with silently ignored values.
+_REMOVED_TRACKER_KEYS = {
+    "minimum_candidate_overlap": "max_overlap_mismatch",
+    "minimum_projected_overlap": "max_overlap_mismatch",
+    "projected_hull_buffer_km": "growth_max_km / growth_size_km",
+    "length_scale": "residual_weight",
+    "geometry_length_scale_km": "residual_weight",
+    "max_speed_multiplier": "max_acceleration_ms2",
+    "acceleration_floor_ms": "max_acceleration_ms2",
+    "heading_change_penalty_weight": "heading_weight",
+}
+
+
 class InternalTrackerConfig(AdaptBaseModel):
     """Runtime tracking configuration."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_keys(cls, data):
+        if isinstance(data, dict):
+            removed = sorted(k for k in data if k in _REMOVED_TRACKER_KEYS)
+            if removed:
+                hints = ", ".join(f"{k} → {_REMOVED_TRACKER_KEYS[k]}" for k in removed)
+                raise ValueError(
+                    f"tracker: {hints} — these keys belong to the previous tracker; "
+                    "replace them with the new parameters (see `adapt config`)"
+                )
+        return data
 
     class InternalCellUidConfig(AdaptBaseModel):
         """Runtime cell UID configuration."""
@@ -165,17 +197,22 @@ class InternalTrackerConfig(AdaptBaseModel):
         width: int = Field(ge=1)
         alphabet: Literal["base36_upper"]
 
-    split_overlap_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    core_field_threshold: float = Field(default=40.0, ge=0.0)
-    max_tracking_gap_minutes: float = Field(default=20.0, gt=0.0)
-    max_speed_ms: float = Field(default=40.0, gt=0.0)
-    max_speed_multiplier: float = Field(default=3.0, gt=0.0)
-    heading_change_penalty_weight: float = Field(default=0.0, ge=0.0)
-    projected_hull_buffer_km: float = Field(default=1.0, gt=0.0)
-    minimum_candidate_overlap: float = Field(default=0.20, ge=0.0, le=1.0)
-    minimum_projected_overlap: float = Field(default=0.20, ge=0.0, le=1.0)
-    length_scale: Literal["hull_equiv_diameter", "sum_radii", "fixed_km"] = "hull_equiv_diameter"
-    geometry_length_scale_km: float = Field(default=5.0, gt=0.0)
+    cell_threshold: float
+    polarity: Literal[1, -1]
+    growth_max_km: float = Field(ge=0.0)
+    growth_size_km: float = Field(gt=0.0)
+    max_overlap_mismatch: float = Field(gt=0.0, le=1.0)
+    max_link_cost: float = Field(gt=0.0)
+    residual_weight: float = Field(ge=0.0)
+    heading_weight: float = Field(ge=0.0)
+    max_speed_ms: float = Field(gt=0.0)
+    max_acceleration_ms2: float = Field(ge=0.0)
+    split_overlap_threshold: float = Field(gt=0.0, le=1.0)
+    merge_overlap_threshold: float = Field(gt=0.0, le=1.0)
+    latent_scans: int = Field(ge=0)
+    identity_intensity_weight: float = Field(ge=0.0)
+    identity_score_margin: float = Field(ge=0.0)
+    core_field_threshold: float
     cell_uid: InternalCellUidConfig
 
 

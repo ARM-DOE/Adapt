@@ -29,6 +29,7 @@ def test_all_spec_types_exported():
         "ProductTableWrite",
         "NetcdfArtifact",
         "TrackTablesWrite",
+        "DecisionTableWrite",
         "PersistenceSpec",
         "PersistenceMeta",
     ):

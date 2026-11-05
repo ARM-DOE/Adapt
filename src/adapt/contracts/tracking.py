@@ -36,7 +36,16 @@ _REQUIRED_EVENTS_COLS = [
     "event_group_id",
 ]
 
-_VALID_EVENT_TYPES = {"CONTINUE", "SPLIT", "MERGE", "INITIATION", "TERMINATION"}
+# LATENT: a track that vanished is kept for possible resumption; RESUMED: it was.
+_VALID_EVENT_TYPES = {
+    "CONTINUE",
+    "SPLIT",
+    "MERGE",
+    "INITIATION",
+    "TERMINATION",
+    "LATENT",
+    "RESUMED",
+}
 
 
 def assert_tracked_cells(df: pd.DataFrame) -> None:

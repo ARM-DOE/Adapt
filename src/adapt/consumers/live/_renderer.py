@@ -23,12 +23,14 @@ from matplotlib import colormaps
 from matplotlib.figure import Figure
 
 from adapt.consumers.live._utils import _centroid_track_to_km, _visible_uids_in_scan, cells_for_scan
+from adapt.utils.basemap import TILE_CACHE_DIR, tile_headers
 
 logger = logging.getLogger(__name__)
 
 try:
     import contextily as ctx
 
+    ctx.set_cache_dir(str(TILE_CACHE_DIR))  # persist tiles across sessions
     HAS_CTX = True
 except ImportError:
     ctx = None
@@ -437,7 +439,7 @@ def _basemap_extent_key(x_km, y_km) -> tuple[float, float, float, float]:
 
 
 def add_basemap(ax, ds, x_km, y_km) -> None:
-    """Add an OpenStreetMap basemap to *ax* using the dataset's radar location.
+    """Add a OpenStreetMap basemap to *ax* using the dataset's radar location.
 
     Tiles are fetched at most once per extent and cached on the axes, then
     re-drawn from that cache on later frames: every ``render_scan`` clears the
@@ -481,6 +483,7 @@ def add_basemap(ax, ds, x_km, y_km) -> None:
             ax,
             crs=crs_str,
             source=ctx.providers.OpenStreetMap.Mapnik,
+            headers=tile_headers(),
             alpha=0.6,
             attribution=False,
             zoom=8,

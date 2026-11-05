@@ -187,6 +187,99 @@ class TestScience:
         assert events_df.loc[0, "target_scan_id"] == "s2"
 
 
+def _event(event_type, source, target=None, source_scan=None, target_label=None):
+    return {
+        "event_type": event_type,
+        "source_cell_uid": source,
+        "target_cell_uid": target,
+        "source_cell_label": 1,
+        "target_cell_label": target_label,
+        "source_scan_id": source_scan,
+        "source_scan_time": None if source_scan is None else SCAN_TIME,
+        "cost": None,
+        "is_dominant": False,
+        "event_group_id": f"{event_type}:{source}",
+    }
+
+
+class TestLatentTracks:
+    """A track that vanishes is kept latent; its end or resumption is decided scans
+    later and refers back to the scan it was last observed in."""
+
+    def _vanish(self, collection, ledger):
+        _write(collection, ledger, "s1")
+        _write(
+            collection,
+            ledger,
+            "s2",
+            offset_s=300,
+            stats=_stats([2]),
+            tracked=_tracked([(2, "u2")]),
+            events=pd.DataFrame([_event("LATENT", "u1", source_scan="s1")]),
+        )
+
+    def test_a_latent_track_is_not_terminated(self, collection, ledger):
+        self._vanish(collection, ledger)
+        with TrackStore(collection.products_path, ledger=ledger) as ts:
+            s1 = ts.get_cells_by_scan(RUN, "s1")
+            tracks = ts.get_cell_tracks(RUN).set_index("cell_uid")
+        assert s1.loc[0, "is_terminated_after_here"] == 0
+        assert tracks.loc["u1", "termination_type"] == "ACTIVE_AT_END"
+
+    def test_expiry_terminates_at_the_last_observed_scan(self, collection, ledger):
+        self._vanish(collection, ledger)
+        _write(
+            collection,
+            ledger,
+            "s3",
+            offset_s=600,
+            stats=_stats([2]),
+            tracked=_tracked([(2, "u2")]),
+            events=pd.DataFrame([_event("TERMINATION", "u1", source_scan="s1")]),
+        )
+        with TrackStore(collection.products_path, ledger=ledger) as ts:
+            s1 = ts.get_cells_by_scan(RUN, "s1")
+            events = ts.get_cell_events(RUN, "u1").set_index("event_type")
+            tracks = ts.get_cell_tracks(RUN).set_index("cell_uid")
+        assert s1.loc[0, "is_terminated_after_here"] == 1
+        assert events.loc["TERMINATION", "source_scan_id"] == "s1"
+        assert tracks.loc["u1", "termination_type"] == "TERMINATION"
+
+    def test_an_expired_merge_source_ends_merged_into_its_survivor(self, collection, ledger):
+        self._vanish(collection, ledger)
+        _write(
+            collection,
+            ledger,
+            "s3",
+            offset_s=600,
+            stats=_stats([2]),
+            tracked=_tracked([(2, "u2")]),
+            events=pd.DataFrame([_event("TERMINATION", "u1", "u2", source_scan="s1")]),
+        )
+        with TrackStore(collection.products_path, ledger=ledger) as ts:
+            tracks = ts.get_cell_tracks(RUN).set_index("cell_uid")
+        assert tracks.loc["u1", "termination_type"] == "MERGED"
+        assert tracks.loc["u1", "terminated_into_cell_uid"] == "u2"
+
+    def test_a_resumed_track_continues_its_age(self, collection, ledger):
+        self._vanish(collection, ledger)
+        _write(
+            collection,
+            ledger,
+            "s3",
+            offset_s=600,
+            stats=_stats([1, 2]),
+            tracked=_tracked([(1, "u1"), (2, "u2")]),
+            events=pd.DataFrame([_event("RESUMED", "u1", "u1", source_scan="s1", target_label=1)]),
+        )
+        with TrackStore(collection.products_path, ledger=ledger) as ts:
+            history = ts.get_track_history(RUN, "u1")
+            events = ts.get_cell_events(RUN, "u1").set_index("event_type")
+        assert history["age_seconds"].tolist() == [0.0, 600.0]
+        assert events.loc["RESUMED", "source_scan_id"] == "s1"
+        assert events.loc["RESUMED", "target_scan_id"] == "s3"
+
+
 class TestStrictTrackedColumns:
     def test_missing_max_reflectivity_column_raises(self, collection, ledger):
         # A tracked_cells frame without max_reflectivity must raise loudly,

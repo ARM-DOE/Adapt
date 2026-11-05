@@ -1,8 +1,8 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Phase-B tracking-quality behaviours: hard gap limits, physical motion
-constraints, deterministic overlap-first matching, and persisted diagnostics.
+"""Tracking-quality behaviours: hard gap limits, physical motion gates, joint
+assignment, the heading term, and persisted diagnostics.
 
 Synthetic inputs with analytically known outcomes; no stored fixtures.
 """
@@ -21,7 +21,6 @@ from adapt.configuration.schemas.resolve import resolve_config
 from adapt.configuration.schemas.user import UserConfig
 from adapt.execution.nodes.tracking import TrackingModule
 from adapt.modules.tracking.module import CellTracker
-from adapt.modules.tracking.projection import select_registration_labels
 
 pytestmark = pytest.mark.unit
 
@@ -31,8 +30,14 @@ def _make_config(**overrides):
     try:
         param = ParamConfig()
         param.tracker.split_overlap_threshold = 0.4
+        param.tracker.merge_overlap_threshold = 0.4
         for key, val in overrides.items():
-            setattr(param.tracker, key, val)
+            # The scan-gap bound is global now — one value shared by the seed
+            # carry, projection and tracking — so it no longer lives on tracker.
+            if key == "max_tracking_gap_minutes":
+                param.global_.max_scan_gap_minutes = val
+            else:
+                setattr(param.tracker, key, val)
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
         return TrackingModule.build_config(internal)
@@ -184,43 +189,61 @@ def test_velocity_exceeded_rejects_match():
     _, events1 = tracker.track(ds1, stats1, scan_id="site008scan")
 
     assert (events1["event_type"] == "CONTINUE").sum() == 0
-    assert uid0 in set(events1[events1["event_type"] == "TERMINATION"]["source_cell_uid"])
+    # Not continued: the track is kept latent for possible resumption.
+    assert uid0 in set(events1[events1["event_type"] == "LATENT"]["source_cell_uid"])
     assert (events1["event_type"] == "INITIATION").sum() == 1
 
 
-def test_acceleration_exceeded_rejects_match():
-    """A candidate far faster than the track's own prior speed is rejected."""
-    # scan0→1: x2→x3 (3.33 m/s sets prior). scan1→2: x3→x6 (10 m/s) > 2×3.33.
-    cfg = _make_config(
-        max_speed_ms=40.0,
-        max_speed_multiplier=2.0,
-        max_tracking_gap_minutes=60.0,
+def _one_cell_scan_wide(time, x_pix, proj_labels=None):
+    """Like ``_one_cell_scan`` on a 16-column grid, for multi-step motion."""
+    labels = np.zeros((8, 16), dtype=np.int32)
+    labels[2:4, x_pix : x_pix + 2] = 1
+    stats = _cell_stats(
+        time,
+        [
+            {
+                "id": 1,
+                "area": 4.0,
+                "cx": (x_pix + 0.5) * 1000.0,
+                "cy": 2500.0,
+                "mean_refl": 40.0,
+                "max_refl": 45.0,
+            }
+        ],
     )
-    tracker = CellTracker(cfg)
+    return _synthetic_ds(time, labels, proj_labels=proj_labels), stats
 
-    t0 = np.datetime64("2024-01-01T12:00:00")
-    t1 = np.datetime64("2024-01-01T12:05:00")
-    t2 = np.datetime64("2024-01-01T12:10:00")
 
-    ds0, stats0 = _one_cell_scan(t0, 2)
-    tracker.track(ds0, stats0, scan_id="site009scan")
-    ds1, stats1 = _one_cell_scan(t1, 3)
-    _, events1 = tracker.track(ds1, stats1, scan_id="site010scan")
+def test_speed_jump_beyond_the_additive_limit_rejects_match():
+    """After a 3.3 m/s step the next may reach 3.3 + a·Δt + 2√2σ/Δt ≈ 24.8 m/s
+    (Δt = 300 s); an 8 km jump (26.7 m/s) is rejected although under v_max."""
+    tracker = CellTracker(_make_config())
+    t0, t1, t2 = (np.datetime64(f"2024-01-01T12:{m:02d}:00") for m in (0, 5, 10))
+    tracker.track(*_one_cell_scan_wide(t0, 2), scan_id="site009scan")
+    _, events1 = tracker.track(*_one_cell_scan_wide(t1, 3), scan_id="site010scan")
     assert (events1["event_type"] == "CONTINUE").sum() == 1, "slow step must continue"
+    _, events2 = tracker.track(*_one_cell_scan_wide(t2, 11), scan_id="site011scan")
+    assert (events2["event_type"] == "CONTINUE").sum() == 0
+    assert [p.gate for p in tracker.decisions().pairs] == ["SPEED_CHANGE"]
 
-    ds2, stats2 = _one_cell_scan(t2, 6)
-    _, events2 = tracker.track(ds2, stats2, scan_id="site011scan")
-    assert (events2["event_type"] == "CONTINUE").sum() == 0, "accelerating step must be rejected"
+
+def test_a_slow_cell_may_start_moving():
+    """The limit is additive: from 3.3 m/s a 20 m/s step (6×) is admitted."""
+    tracker = CellTracker(_make_config())
+    t0, t1, t2 = (np.datetime64(f"2024-01-01T12:{m:02d}:00") for m in (0, 5, 10))
+    tracker.track(*_one_cell_scan_wide(t0, 2), scan_id="site032scan")
+    tracker.track(*_one_cell_scan_wide(t1, 3), scan_id="site033scan")
+    _, events2 = tracker.track(*_one_cell_scan_wide(t2, 9), scan_id="site034scan")
+    assert (events2["event_type"] == "CONTINUE").sum() == 1
 
 
 # ---------------------------------------------------------------------------
-# B4 — deterministic constraint propagation (no optimisation)
+# Joint assignment
 # ---------------------------------------------------------------------------
 
 
-def test_unique_candidate_resolved_by_constraint_propagation():
-    """A mutually-unique candidate is matched deterministically (PROPAGATED),
-    never entering Hungarian assignment."""
+def test_unique_candidate_is_assigned_and_keeps_its_uid():
+    """A cell facing a single footprint is linked when the cost is under the ceiling."""
     cfg = _make_config()
     tracker = CellTracker(cfg)
 
@@ -236,14 +259,14 @@ def test_unique_candidate_resolved_by_constraint_propagation():
 
     cont = events1[events1["event_type"] == "CONTINUE"]
     assert len(cont) == 1
-    assert cont.iloc[0]["match_method"] == "PROPAGATED", "unique match must not use Hungarian"
+    assert cont.iloc[0]["match_method"] == "ASSIGNED"
     assert str(tracked1.iloc[0]["cell_uid"]) == uid0, "continued cell keeps its uid"
 
 
-def test_ambiguous_group_uses_hungarian():
-    """Two projected hulls that each overlap both current cells form an ambiguous
-    2×2 component resolved by Hungarian (match_method == HUNGARIAN). The hulls are
-    kept disjoint by placing them on different rows (one label per pixel)."""
+def test_ambiguous_group_is_resolved_jointly():
+    """Two projected hulls that each overlap both current cells form one 2×2
+    group, resolved jointly: both tracks continue, to different cells. The hulls
+    are kept disjoint by placing them on different rows (one label per pixel)."""
     cfg = _make_config(max_tracking_gap_minutes=60.0)
     tracker = CellTracker(cfg)
 
@@ -272,8 +295,9 @@ def test_ambiguous_group_uses_hungarian():
     )
 
     cont = events1[events1["event_type"] == "CONTINUE"]
-    assert len(cont) >= 1
-    assert (cont["match_method"] == "HUNGARIAN").any(), "the ambiguous 2×2 must use Hungarian"
+    assert len(cont) == 2
+    assert cont["target_cell_label"].nunique() == 2
+    assert {p.component_id for p in tracker.decisions().pairs} == {0}
 
 
 # ---------------------------------------------------------------------------
@@ -298,13 +322,12 @@ def test_continue_event_carries_diagnostics():
     cont = events1[events1["event_type"] == "CONTINUE"]
     assert len(cont) == 1
     row = cont.iloc[0]
-    assert row["match_method"] in {"PROPAGATED", "HUNGARIAN"}
+    assert row["match_method"] == "ASSIGNED"
     assert 0.0 <= float(row["candidate_opc"]) <= 1.0
     assert 0.0 <= float(row["candidate_ocp"]) <= 1.0
-    # cell moved 1000 m in 300 s ≈ 3.33 m/s (residual from the exact projection)
-    assert float(row["candidate_speed_ms"]) == pytest.approx(
-        float(row["candidate_centroid_distance_m"]) / 300.0, abs=1e-6
-    )
+    # The projection predicts the cell exactly (zero residual); it moved 1000 m in 300 s.
+    assert float(row["candidate_centroid_distance_m"]) == pytest.approx(0.0, abs=1e-6)
+    assert float(row["candidate_speed_ms"]) == pytest.approx(1000.0 / 300.0)
     assert pd.notna(row["candidate_final_cost"])
 
 
@@ -324,48 +347,34 @@ def test_initiation_event_has_null_diagnostics():
 # ---------------------------------------------------------------------------
 
 
-def test_heading_penalty_breaks_ambiguous_match_toward_consistent_track():
-    """With an established +x velocity, a heading penalty steers an ambiguous
-    match to the heading-consistent candidate instead of the reversed one."""
-    cfg = _make_config(
-        heading_change_penalty_weight=0.5,
-        max_tracking_gap_minutes=60.0,
-    )
-    tracker = CellTracker(cfg)
+def test_heading_term_breaks_an_ambiguous_match_toward_the_consistent_track():
+    """With an established +x step, two candidates equally far either side of
+    the prediction are told apart only by the heading term (w_h = 1)."""
+    tracker = CellTracker(_make_config())
+    t0, t1, t2 = (np.datetime64(f"2024-01-01T12:{m:02d}:00") for m in (0, 5, 10))
+    tracker.track(*_one_cell_scan_wide(t0, 2), scan_id="site019scan")
+    tracker.track(*_one_cell_scan_wide(t1, 5), scan_id="site020scan")  # +3 km: heading +x
 
-    t0 = np.datetime64("2024-01-01T12:00:00")
-    t1 = np.datetime64("2024-01-01T12:05:00")
-    t2 = np.datetime64("2024-01-01T12:10:00")
-
-    # scan0→1 establish a +x velocity (heading 0) for track label 1.
-    ds0, stats0 = _one_cell_scan(t0, 2)
-    tracker.track(ds0, stats0, scan_id="site019scan")
-    ds1, stats1 = _one_cell_scan(t1, 4)  # perfect projection → CONTINUE, vx>0
-    tracker.track(ds1, stats1, scan_id="site020scan")
-
-    # scan2: the registration hull (label 1) fills the whole row band, so it
-    # overlaps P and Q identically (equal IoU). P and Q are equidistant from the
-    # prev centroid (x=4) — 2000 m each. Q is made *cheaper* on base cost (its
-    # reflectivity matches the track, P's differs) so that WITHOUT the heading
-    # penalty Q wins. Only the +x/−x heading asymmetry can flip it back to P.
-    labels2 = np.zeros((8, 8), dtype=np.int32)
-    labels2[2:4, 6:8] = 1  # P ahead  (centroid x = 6500, +2000, +x consistent)
-    labels2[2:4, 2:4] = 2  # Q behind (centroid x = 2500, −2000, −x reversed)
-    proj2 = np.zeros((8, 8), dtype=np.int32)
-    proj2[2:4, 0:8] = 1  # symmetric hull spanning the full row band
+    labels2 = np.zeros((8, 16), dtype=np.int32)
+    labels2[2:4, 8:10] = 1  # P: +3 km, straight on
+    labels2[2:4, 2:4] = 2  # Q: −3 km, reversed
+    proj2 = np.zeros((8, 16), dtype=np.int32)
+    proj2[2:4, 0:12] = 1  # footprint centred on the previous cell, covering both
     stats2 = _cell_stats(
         t2,
         [
-            {"id": 1, "area": 4.0, "cx": 6500.0, "cy": 2500.0, "mean_refl": 42.0, "max_refl": 45.0},
+            {"id": 1, "area": 4.0, "cx": 8500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0},
             {"id": 2, "area": 4.0, "cx": 2500.0, "cy": 2500.0, "mean_refl": 40.0, "max_refl": 45.0},
         ],
     )
-    ds2 = _synthetic_ds(t2, labels2, proj_labels=proj2)
-    _, events2 = tracker.track(ds2, stats2, scan_id="site021scan")
-
+    _, events2 = tracker.track(
+        _synthetic_ds(t2, labels2, proj_labels=proj2), stats2, scan_id="site021scan"
+    )
     cont = events2[events2["event_type"] == "CONTINUE"]
-    assert len(cont) == 1, "the track should continue to exactly one cell"
-    assert int(cont.iloc[0]["target_cell_label"]) == 1, "heading penalty must steer to the +x cell"
+    assert len(cont) == 1
+    assert int(cont.iloc[0]["target_cell_label"]) == 1
+    h = {p.curr_cell_label: p.h for p in tracker.decisions().pairs}
+    assert h == pytest.approx({1: 0.0, 2: 1.0})
 
 
 # ---------------------------------------------------------------------------
@@ -373,26 +382,35 @@ def test_heading_penalty_breaks_ambiguous_match_toward_consistent_track():
 # ---------------------------------------------------------------------------
 
 
-def test_registration_selects_nearest_minute():
-    """The minute frame closest to the real gap is chosen for the hull."""
-    f1 = np.full((4, 4), 11, dtype=np.int32)
-    f2 = np.full((4, 4), 22, dtype=np.int32)
-    f3 = np.full((4, 4), 33, dtype=np.int32)
-    ds = xr.Dataset(
-        {
-            "registration_minutes": (["minute", "y", "x"], np.stack([f1, f2, f3])),
-            "cell_projections": (["frame_offset", "y", "x"], np.zeros((1, 4, 4), dtype=np.int32)),
-        },
-        coords={"minute": [1, 2, 3]},
-    )
-    out = select_registration_labels(ds, dt_s=130.0)  # 2.17 min → nearest minute 2
-    assert int(out[0, 0]) == 22
+def test_matching_uses_the_hull_registered_to_the_current_scan():
+    """The registration hull is the previous labels advected by the full flow
+    step (``cell_projections[0]``, fraction 1.0 of the gap) — never an
+    under-advected minute frame.
 
+    The minute frames carry a datetime64 ``minute`` coord and an
+    ``interpolation_fraction`` coord exactly as the projection module writes
+    them; the frame nearest t_prev sits 3 px short of the cell.
+    """
+    cfg = _make_config(max_tracking_gap_minutes=60.0)
+    tracker = CellTracker(cfg)
+    t0, t1 = np.datetime64("2024-01-01T12:00:00"), np.datetime64("2024-01-01T12:04:30")
 
-def test_registration_falls_back_to_cell_projections():
-    """Without minute frames the whole-step cell_projections[0] is used."""
-    ds = xr.Dataset(
-        {"cell_projections": (["frame_offset", "y", "x"], np.full((1, 4, 4), 7, dtype=np.int32))}
+    ds0, stats0 = _one_cell_scan(t0, 2)
+    tracker.track(ds0, stats0, scan_id="site030scan")
+
+    ds1, stats1 = _one_cell_scan(t1, 6)  # cell_projections[0]: the cell exactly at x=6
+    frames = []
+    for x in (3, 4, 5, 5):
+        frame = np.zeros((8, 8), dtype=np.int32)
+        frame[2:4, x : x + 2] = 1
+        frames.append(frame)
+    minutes = np.arange(np.datetime64("2024-01-01T12:01:00"), t1, np.timedelta64(1, "m")).astype(
+        "datetime64[ns]"
     )
-    out = select_registration_labels(ds, dt_s=300.0)
-    assert int(out[0, 0]) == 7
+    fractions = ((minutes - t0) / (t1 - t0)).astype(np.float32)
+    ds1["registration_minutes"] = (("minute", "y", "x"), np.stack(frames))
+    ds1 = ds1.assign_coords(minute=minutes, interpolation_fraction=("minute", fractions))
+
+    _, events1 = tracker.track(ds1, stats1, scan_id="site031scan")
+    assert (events1["event_type"] == "CONTINUE").sum() == 1
+    assert (events1["event_type"] == "TERMINATION").sum() == 0

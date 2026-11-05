@@ -25,9 +25,25 @@ from adapt.contracts.cell_volume_stats import (
     check_cell_volume_stats,
 )
 from adapt.contracts.columns import CELL_LABELS_VAR, stat_column
+from adapt.contracts.decisions import (
+    SegmentationComponent,
+    SegmentationDecisions,
+    SegmentationFrame,
+    SegmentationSeed,
+    TrackingCell,
+    TrackingDecisions,
+    TrackingIdentity,
+    TrackingLatent,
+    TrackingLineage,
+    TrackingPair,
+    TrackingScan,
+    check_segmentation_decisions,
+    check_tracking_decisions,
+)
 from adapt.contracts.grid import assert_gridded, check_grid_ds_2d
-from adapt.contracts.history import check_scan_history
+from adapt.contracts.history import check_prior_scan, check_scan_history
 from adapt.contracts.persistence import (
+    DecisionTableWrite,
     NetcdfArtifact,
     PersistenceMeta,
     PersistenceSpec,
@@ -37,7 +53,7 @@ from adapt.contracts.persistence import (
 )
 from adapt.contracts.pipeline import ContractViolation, require
 from adapt.contracts.projection import assert_projected, check_projected_ds
-from adapt.contracts.segmentation import assert_segmented, check_segmented_ds
+from adapt.contracts.segmentation import assert_segmented, check_seed_carry, check_segmented_ds
 from adapt.contracts.time import assert_time_normalized, check_time_normalized
 from adapt.contracts.tracking import (
     assert_cell_events,
@@ -63,9 +79,22 @@ __all__ = [
     "ProductTableWrite",
     "NetcdfArtifact",
     "TrackTablesWrite",
+    "DecisionTableWrite",
     "PersistenceSpec",
     "PersistenceMeta",
     "ScanRecord",
+    # decision records — analysis-only, written to decisions.db
+    "TrackingScan",
+    "TrackingCell",
+    "TrackingPair",
+    "TrackingLineage",
+    "TrackingIdentity",
+    "TrackingLatent",
+    "TrackingDecisions",
+    "SegmentationFrame",
+    "SegmentationSeed",
+    "SegmentationComponent",
+    "SegmentationDecisions",
     "assert_gridded",
     "assert_segmented",
     "assert_projected",
@@ -80,7 +109,9 @@ __all__ = [
     # bound checks — register these in input_contracts / output_contracts
     "check_grid_ds_2d",
     "check_scan_history",
+    "check_prior_scan",
     "check_segmented_ds",
+    "check_seed_carry",
     "check_projected_ds",
     "check_cell_stats",
     "check_cell_adjacency",
@@ -90,4 +121,6 @@ __all__ = [
     "check_time_normalized",
     "check_xlma_stat_minutes",
     "check_xlma_stat_scan",
+    "check_tracking_decisions",
+    "check_segmentation_decisions",
 ]

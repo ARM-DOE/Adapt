@@ -125,7 +125,7 @@ class PipelineOrchestrator:
     def __init__(
         self,
         config: "InternalConfig",
-        max_queue_size: int = 20,
+        max_queue_size: int | None = None,
         close_repository_on_stop: bool = True,
     ):
         """Initialize orchestrator with fully resolved runtime configuration.
@@ -137,13 +137,20 @@ class PipelineOrchestrator:
             Already contains all directory paths, run ID, and validated settings.
 
         max_queue_size : int, optional
-            Maximum size of inter-thread communication queues (default: 100).
+            Override for ``config.downloader.max_queue_size``. Left unset the
+            configured value is used.
         """
         self.config = config
-        self.max_queue_size = max_queue_size
+        self.max_queue_size = (
+            max_queue_size if max_queue_size is not None else config.downloader.max_queue_size
+        )
 
-        # Queue for downloader -> processor communication
-        self.downloader_queue: queue.Queue[object] = queue.Queue(maxsize=max_queue_size)
+        # Queue for downloader -> processor communication. Bounded as a hard
+        # backstop only: the downloader pauses itself at this level and resumes
+        # at queue_resume_fraction of it (see AwsNexradDownloader._wait_for_queue_room),
+        # so in normal operation a put() never blocks and the processor is
+        # never starved.
+        self.downloader_queue: queue.Queue[object] = queue.Queue(maxsize=self.max_queue_size)
 
         # Fail fast: the pipeline never runs against an uninitialized root.
         self.store = Store.open(config.base_dir)
@@ -534,6 +541,15 @@ class PipelineOrchestrator:
 
         processed, expected = self.downloader.get_historical_progress()
         logger.info("Downloader complete: %d/%d files queued", processed, expected)
+        if hasattr(self.downloader, "queue_backpressure_stats"):
+            bp = self.downloader.queue_backpressure_stats()
+            logger.info(
+                "Downloader backpressure: paused %d time(s), %.0f s total (high %d / low %d)",
+                bp["pauses"],
+                bp["paused_seconds"],
+                bp["queue_high"],
+                bp["queue_low"],
+            )
 
         # Stop the downloader (ends ingestion) so the queue can only shrink.
         self.downloader.stop()
@@ -563,7 +579,6 @@ class PipelineOrchestrator:
         stay marked "downloaded" (not "analyzed") and resume on the next run.
         """
         wait_count = 0
-        start_time = time.time()
         last_size = q.qsize()
 
         while q.qsize() > 0:
@@ -581,13 +596,19 @@ class PipelineOrchestrator:
             logger.info("Waiting for %s queue: %d remaining", name, current_size)
             time.sleep(1)
 
-            # Check timeout both by iteration count and elapsed time
-            if wait_count > timeout // 5 or (time.time() - start_time) > timeout:
+            # Abort only on a genuine stall: no item consumed for `timeout`
+            # seconds. There is deliberately NO cap on total elapsed time — a
+            # healthy processor working through a full queue of 20 slow scans
+            # can legitimately take longer than any fixed budget, and the old
+            # absolute cap silently dropped the tail of a run (22 of 34 scans
+            # processed on KHTX 2021-05-04, no error, run marked completed).
+            if wait_count > timeout:
                 logger.warning(
-                    "%s queue drain timeout (%d/%d seconds)",
+                    "%s queue stalled: no progress for %d s with %d file(s) remaining — "
+                    "abandoning them (they resume on the next run)",
                     name,
-                    int(time.time() - start_time),
-                    timeout,
+                    wait_count,
+                    current_size,
                 )
                 break
 

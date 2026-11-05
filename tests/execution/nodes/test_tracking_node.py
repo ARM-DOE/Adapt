@@ -48,6 +48,13 @@ class _FakeTracker:
     def track(self, ds_projected, cell_stats_df, *, scan_id):
         return self._results.pop(0)
 
+    @staticmethod
+    def decisions():
+        from adapt.contracts import TrackingDecisions, TrackingScan
+
+        scan = TrackingScan(None, "FIRST_SCAN", *([0] * 17))
+        return TrackingDecisions(scan, (), (), (), (), ())
+
 
 def _run_module(module, tracked_per_scan):
     module._tracker = _FakeTracker([(t, pd.DataFrame()) for t in tracked_per_scan])

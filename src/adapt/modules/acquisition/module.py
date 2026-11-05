@@ -11,6 +11,7 @@ source URI) to avoid re-downloading.
 import contextlib
 import io
 import logging
+import queue
 import tempfile
 import threading
 import time
@@ -128,6 +129,13 @@ class AwsNexradDownloader(threading.Thread):
         self.latest_minutes = config.downloader.latest_minutes
         self.start_time = config.downloader.start_time
         self.end_time = config.downloader.end_time
+        # Backpressure with hysteresis: pause downloading when the queue reaches
+        # `high`, resume once it has drained to `low`. The processor is never
+        # paused — only this thread waits.
+        self._queue_high = config.downloader.max_queue_size
+        self._queue_low = max(1, int(self._queue_high * config.downloader.queue_resume_fraction))
+        self._queue_pauses = 0
+        self._queue_paused_seconds = 0.0
 
         self.result_queue = result_queue
         self._acquire = acquire
@@ -378,6 +386,60 @@ class AwsNexradDownloader(threading.Thread):
     # Scan fetching and processing
     # ========================================================================
 
+    # ========================================================================
+    # Queue backpressure
+    # ========================================================================
+
+    def queue_backpressure_stats(self) -> dict:
+        """How often, and for how long, the downloader waited on the processor."""
+        return {
+            "queue_high": self._queue_high,
+            "queue_low": self._queue_low,
+            "pauses": self._queue_pauses,
+            "paused_seconds": round(self._queue_paused_seconds, 1),
+        }
+
+    def _wait_for_queue_room(self, poll_seconds: float = 0.5) -> None:
+        """Block this thread while the queue is at its high-water mark.
+
+        Returns as soon as the queue has drained to the low-water mark, or a stop
+        is requested. Only the downloader waits; the processor keeps consuming.
+        The two levels are deliberately apart so a full queue does not turn into
+        one download per consumed scan.
+        """
+        if self.result_queue is None or self.result_queue.qsize() < self._queue_high:
+            return
+        self._queue_pauses += 1
+        t0 = time.monotonic()
+        logger.info(
+            "Queue at %d/%d — pausing downloads until it drains to %d",
+            self.result_queue.qsize(),
+            self._queue_high,
+            self._queue_low,
+        )
+        while not self.stopped() and self.result_queue.qsize() > self._queue_low:
+            self._sleep(poll_seconds)
+        waited = time.monotonic() - t0
+        self._queue_paused_seconds += waited
+        if not self.stopped():
+            logger.info(
+                "Queue at %d — resuming downloads after %.0f s", self.result_queue.qsize(), waited
+            )
+
+    def _put_until_stopped(self, message: dict, timeout: float = 1.0) -> bool:
+        """Put with a bounded wait so a stop request is never ignored.
+
+        The hysteresis pause normally guarantees room, so this only ever waits
+        if something else filled the queue. Returns False if stopped first.
+        """
+        while not self.stopped():
+            try:
+                self.result_queue.put(message, timeout=timeout)
+                return True
+            except queue.Full:
+                continue
+        return False
+
     def _parse_time_range(self) -> tuple:
         """Parse ISO timestamps to datetime objects."""
         start = datetime.fromisoformat(self.start_time.replace("Z", "+00:00"))
@@ -487,6 +549,12 @@ class AwsNexradDownloader(threading.Thread):
             if already_queued:
                 continue
 
+            # Hold here (not after the download) so the queue depth is exactly
+            # how far downloads run ahead of processing.
+            self._wait_for_queue_room()
+            if self.stopped():
+                break
+
             if self._acquire.is_acquired(source_uri):
                 message = self._acquire.acquire_existing(source_uri, scan_time=scan.scan_time)
             else:
@@ -502,8 +570,8 @@ class AwsNexradDownloader(threading.Thread):
                     local.unlink(missing_ok=True)
                 acquired.append(source_uri)
 
-            if self.result_queue is not None:
-                self.result_queue.put(message)
+            if self.result_queue is not None and not self._put_until_stopped(message):
+                break
             with self._known_files_lock:
                 self._known_files.add(source_uri)
             queued += 1

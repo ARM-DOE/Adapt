@@ -43,7 +43,11 @@ def _reject_legacy_root(root_path: Path) -> None:
 
 
 class Collection:
-    """One collection's on-disk domain: catalog.db + products.db + objects/."""
+    """One collection's on-disk domain: catalog.db + products.db + decisions.db + objects/.
+
+    ``decisions.db`` is the analysis-only decision log (segmentation and
+    tracking decisions); the pipeline never reads it.
+    """
 
     def __init__(self, collection_id: str, path: Path, catalog: Catalog) -> None:
         self.collection_id = collection_id
@@ -51,6 +55,7 @@ class Collection:
         self.catalog = catalog
         self.objects_dir = path / "objects"
         self.products_path = path / "products.db"
+        self.decisions_path = path / "decisions.db"
 
     def close(self) -> None:
         self.catalog.close()
@@ -85,6 +90,8 @@ class Store:
         (collection_dir / "objects").mkdir(exist_ok=True)
         products = SqliteStore(collection_dir / "products.db", "collection_products.sql")
         products.close()
+        decisions = SqliteStore(collection_dir / "decisions.db", "collection_decisions.sql")
+        decisions.close()
         self.validate_collection(collection_id)
 
         coll = Collection(collection_id, collection_dir, Catalog(collection_dir))

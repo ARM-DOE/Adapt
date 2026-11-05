@@ -1,3 +1,6 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
 """Tile-server identity and cache location shared by every basemap consumer.
 
 Tile providers require a stable User-Agent naming the application and a

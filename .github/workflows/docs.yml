@@ -21,12 +21,6 @@ jobs:
     if: github.repository == 'ARM-DOE/Adapt'
 
     steps:
-      - name: Check runner Node.js version
-        run: node --version
-      # Diagnostic only — confirms which patched Node 20.x binary
-      # (e.g. relevant to CVE fixes in 22.23.4 / 24.22.1 / 26.12.1 lines)
-      # is bundled in the current runner image. GitHub-authored actions
-      # below run on this same runtime; it cannot be pinned from here.
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
